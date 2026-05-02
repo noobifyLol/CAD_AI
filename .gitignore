@@ -3,3 +3,4 @@ vcpkg/
 .vscode/
 .env
 env
+docs/
