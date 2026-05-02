@@ -1,8 +1,8 @@
 import Groq from "groq-sdk";
 
-const groq        = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const TEXT_MODEL  = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
-const VISION_MODEL= process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+const groq         = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const TEXT_MODEL   = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
+const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 
 function stripJson(text) {
   if (!text) return "{}";
@@ -15,7 +15,7 @@ async function chat(messages, model = TEXT_MODEL) {
   return res?.choices?.[0]?.message?.content ?? "";
 }
 
-// ─── FeatureScript helpers ─────────────────────────────────────────────────────
+// ─── FeatureScript value helpers ──────────────────────────────────────────────
 
 function n(x)  { return parseFloat(Number(x).toFixed(6)).toString(); }
 function fs(x) { return `${n(x)} * inch`; }
@@ -49,7 +49,7 @@ function chamferBlock(ref, w) {
         });`;
 }
 
-// ─── Templates ────────────────────────────────────────────────────────────────
+// ─── Shape templates ──────────────────────────────────────────────────────────
 
 function templateBox(d) {
   const hw = d.widthInches / 2, hh = d.heightInches / 2;
@@ -100,7 +100,6 @@ function templatePolygon(d) {
   return body;
 }
 
-// One sketch with rectangle + two circles = single solid with holes (no boolean needed)
 function templateLinkage(d) {
   const L  = d.shaftLengthInches || d.widthInches * 3;
   const W  = d.widthInches || 1;
@@ -126,7 +125,7 @@ function templateLinkage(d) {
 }
 
 function templatePlateHoles(d) {
-  const hw = d.widthInches / 2, hh = d.heightInches / 2;
+  const hw  = d.widthInches / 2, hh = d.heightInches / 2;
   const num = Math.max(2, Math.round(d.numHoles || 4));
   const sp  = d.holeSpacingInches || d.widthInches / (num + 1);
   const r   = d.holeRadiusInches || 0.2;
@@ -254,25 +253,23 @@ function templateBoxWithHole(d) {
         });`;
 }
 
-// ─── Assemble full file ───────────────────────────────────────────────────────
-
 function buildFeatureScript(d) {
   const holeSafe = ["LINKAGE","PLATE_HOLES","FLANGE","HEX_NUT","WASHER","BUSHING"];
   let body;
   if (d.holeRadiusInches > 0 && !holeSafe.includes(d.shape)) body = templateBoxWithHole(d);
   else switch (d.shape) {
-    case "CYLINDER":      body = templateCylinder(d);   break;
-    case "PLATE":         body = templateBox(d);        break;
-    case "POLYGON":       body = templatePolygon(d);    break;
-    case "LINKAGE":       body = templateLinkage(d);    break;
-    case "PLATE_HOLES":   body = templatePlateHoles(d); break;
+    case "CYLINDER":    body = templateCylinder(d);   break;
+    case "PLATE":       body = templateBox(d);        break;
+    case "POLYGON":     body = templatePolygon(d);    break;
+    case "LINKAGE":     body = templateLinkage(d);    break;
+    case "PLATE_HOLES": body = templatePlateHoles(d); break;
     case "L_BRACKET":
-    case "T_BRACKET":     body = templateLBracket(d);   break;
-    case "FLANGE":        body = templateFlange(d);     break;
-    case "HEX_NUT":       body = templateHexNut(d);     break;
-    case "WASHER":        body = templateWasher(d);     break;
-    case "BUSHING":       body = templateBushing(d);    break;
-    default:              body = templateBox(d);        break;
+    case "T_BRACKET":   body = templateLBracket(d);   break;
+    case "FLANGE":      body = templateFlange(d);     break;
+    case "HEX_NUT":     body = templateHexNut(d);     break;
+    case "WASHER":      body = templateWasher(d);     break;
+    case "BUSHING":     body = templateBushing(d);    break;
+    default:            body = templateBox(d);        break;
   }
 
   const name  = (d.featureName  || "aiShape").replace(/[^a-zA-Z0-9_]/g, "");
@@ -290,14 +287,14 @@ ${body}
 `;
 }
 
-// ─── Dim extractor (Stage 1) ──────────────────────────────────────────────────
+// ─── Dimension extractor ──────────────────────────────────────────────────────
 
-const DIM_SYSTEM = `You are a CAD dimension extractor. Output ONLY valid JSON. No markdown. No explanation.
+const DIM_SYSTEM = `You are a mechanical CAD dimension extractor. Output ONLY a valid JSON object. No markdown, no explanation, no extra text.
 
-OUTPUT SCHEMA:
+Schema:
 {
-  "featureName": "camelCase",
-  "featureLabel": "Human Name",
+  "featureName": "camelCase identifier",
+  "featureLabel": "Human readable name",
   "shape": "BOX|CYLINDER|PLATE|POLYGON|LINKAGE|PLATE_HOLES|L_BRACKET|T_BRACKET|FLANGE|HEX_NUT|WASHER|BUSHING",
   "widthInches": 2,
   "heightInches": 2,
@@ -313,21 +310,32 @@ OUTPUT SCHEMA:
   "numHoles": 4
 }
 
-SHAPE GUIDE:
-box/cube/block            → BOX
-cylinder/rod/shaft/tube   → CYLINDER
-flat plate/sheet/panel    → PLATE
-triangle(3)/hex(6)/N-gon  → POLYGON + sides
-connecting rod/linkage/crank arm/tie rod/rocker → LINKAGE
-mounting plate with holes → PLATE_HOLES
-L-bracket/shelf bracket   → L_BRACKET
-pipe flange/weld flange   → FLANGE
-hex nut                   → HEX_NUT
-washer/spacer disk        → WASHER
-bushing/sleeve/hollow tube→ BUSHING
+Shape classification — read carefully before choosing:
 
-LINKAGE: widthInches=bar width, shaftLengthInches=total length, depthInches=thickness, holeRadiusInches=pin hole r
-All dims in INCHES. "mm" ÷ 25.4. "diameter X" → radiusInches=X/2. Missing → sensible default.`;
+BOX          — cube, block, rectangular solid, billet, slab with no holes
+CYLINDER     — cylinder, rod, shaft, tube (solid), dowel, pin, post, standoff, barrel, drum, peg, boss
+PLATE        — flat plate, sheet, panel, card, tile, no holes (use PLATE_HOLES if it has holes)
+POLYGON      — triangle, pentagon, hexagon, octagon, N-sided prism; use sides field
+LINKAGE      — connecting rod, linkage arm, link bar, rocker arm, crank arm, pitman arm, tie rod,
+               coupler, push rod, clevis rod, train link, drive rod, motion link, lever arm;
+               any elongated bar with a pin hole at each end
+PLATE_HOLES  — mounting plate, bracket face, gusset, pattern plate; flat rectangle with multiple holes
+L_BRACKET    — L-bracket, angle bracket, shelf bracket, corner bracket, right-angle bracket
+T_BRACKET    — T-bracket, T-plate (uses same template as L_BRACKET)
+FLANGE       — pipe flange, weld flange, bolt flange, circular plate with bolt circle
+HEX_NUT      — hex nut, jam nut, lock nut, nut
+WASHER       — washer, spacer disk, shim, flat ring
+BUSHING      — bushing, sleeve, hollow tube, liner, journal bearing, boss with through-hole
+
+Dimension rules:
+- All output must be in INCHES. Convert mm by dividing by 25.4.
+- "diameter X" means radiusInches = X / 2
+- "across flats X" (hex) means widthInches = X; the template converts to circumradius automatically
+- "OD X ID Y" means radiusInches = X/2, holeRadiusInches = Y/2
+- LINKAGE: shaftLengthInches = total length, widthInches = bar width, depthInches = thickness
+- PLATE_HOLES: numHoles counts holes; holeSpacingInches is center-to-center spacing
+- Any dimension not stated: use a sensible mechanical default (don't output 0 for important dims)
+- featureName must be a valid camelCase JS identifier with no spaces or special chars`;
 
 async function extractDims(prompt) {
   const raw = await chat([
@@ -357,111 +365,89 @@ async function extractDims(prompt) {
     return { featureName:"simpleCube", featureLabel:"Simple Cube", shape:"BOX",
              widthInches:2, heightInches:2, depthInches:2, radiusInches:1,
              holeRadiusInches:0, filletRadiusInches:0, chamferInches:0,
-             sides:6, wallThicknessInches:0.25, shaftLengthInches:4, holeSpacingInches:1.5, numHoles:4 };
+             sides:6, wallThicknessInches:0.25, shaftLengthInches:4,
+             holeSpacingInches:1.5, numHoles:4 };
   }
 }
 
-// ─── Public: Generate ─────────────────────────────────────────────────────────
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function generateFeatureScript(prompt) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[AI] Generating for: "${prompt}"`);
+  console.log(`[AI] Generating: "${prompt}"`);
   const dims = await extractDims(prompt);
-  console.log(`[AI] Shape=${dims.shape} w=${dims.widthInches} h=${dims.heightInches} d=${dims.depthInches} L=${dims.shaftLengthInches}`);
+  console.log(`[AI] shape=${dims.shape} w=${dims.widthInches} h=${dims.heightInches} d=${dims.depthInches} L=${dims.shaftLengthInches}`);
   const code = buildFeatureScript(dims);
-  console.log(`[AI] ✓ ${code.length} chars`);
+  console.log(`[AI] done — ${code.length} chars`);
   return { code, featureName: dims.featureName, featureLabel: dims.featureLabel };
 }
 
-// ─── Public: Debug ────────────────────────────────────────────────────────────
-// Takes broken FeatureScript + error text → returns fixed code + plain-English explanation
-
 export async function debugFeatureScript(code, errors) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[AI] Debugging FeatureScript (${code.length} chars)...`);
+  console.log(`[AI] Debugging FeatureScript (${code.length} chars)`);
 
   const raw = await chat([
     {
       role: "system",
-      content: `You are an Onshape FeatureScript debugger.
-The user will give you broken FeatureScript code and the error messages.
-You must:
-1. Identify every error.
-2. Fix the code.
-3. Return ONLY a JSON object with two fields:
-   { "explanation": "plain English summary of what was wrong and what you fixed",
-     "fixed": "the complete corrected FeatureScript, no markdown, no backticks" }
+      content: `You are an Onshape FeatureScript debugger. The user gives you broken FeatureScript and error messages.
 
-COMMON FIXES:
-- "* inch * inch" → "* inch"  (double unit)
+Return ONLY a JSON object:
+{ "explanation": "plain English — what was wrong and what you changed",
+  "fixed": "the complete corrected FeatureScript with no markdown and no backticks" }
+
+Common fixes to apply:
+- NUMBER * inch * inch → NUMBER * inch
 - qOriginPlane(context, Plane.XY) → plane(WORLD_ORIGIN, Z_DIRECTION)
-- evPlane(...).normal in sketch → just use Z_DIRECTION or skPlane.normal
+- evPlane(...).normal used as sketch plane → assign evPlane to variable first, use variable.normal
 - skPolygon → skRegularPolygon
-- isLength/isBoolean in feature body → move into precondition or delete
-- Missing skSolve() → add after last sketch entity
-- Two export const → keep only the last one
-- Return statement in body → delete it
-- Bare number "endDepth": 2 → "endDepth": 2 * inch`
+- isLength / isBoolean in feature body → move into precondition or remove
+- Missing skSolve() → add after last sketch entity, before opExtrude
+- Multiple export const blocks → keep only the last
+- return statement in body → delete
+- Raw number for geometry dimension → add * inch`
     },
-    {
-      role: "user",
-      content: `FEATURESCRIPT:\n${code}\n\nERRORS:\n${errors}`
-    }
+    { role: "user", content: `FEATURESCRIPT:\n${code}\n\nERRORS:\n${errors}` }
   ]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));
-    // Strip any accidental fences from the fixed code
     const fixed = (parsed.fixed || code).replace(/^```[\w]*\n?/gm, "").replace(/^```$/gm, "").trim();
     return { fixed, explanation: parsed.explanation || "Fixed." };
   } catch {
-    // If JSON parse fails, return the raw text as both fields
     const cleaned = raw.replace(/^```[\w]*\n?/gm, "").replace(/^```$/gm, "").trim();
-    return { fixed: cleaned || code, explanation: "Could not fully parse the fix — here is the raw output." };
+    return { fixed: cleaned || code, explanation: "Could not parse the fix response — raw output returned." };
   }
 }
 
-// ─── Public: Analyze Image ────────────────────────────────────────────────────
-// Takes a base64 image → describes the part → generates FeatureScript for it
-
 export async function analyzeImage(imageBase64, mimeType, extraPrompt) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[AI] Analyzing image (${mimeType})...`);
+  console.log(`[AI] Analyzing image (${mimeType})`);
 
-  // Step 1: Vision model describes the part
   const descRaw = await chat([
     {
       role: "user",
       content: [
-        {
-          type: "image_url",
-          image_url: { url: `data:${mimeType};base64,${imageBase64}` }
-        },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
         {
           type: "text",
-          text: `You are a CAD engineer. Look at this image of a mechanical part or CAD model.
-${extraPrompt ? `Additional context from user: "${extraPrompt}"` : ""}
+          text: `You are a mechanical CAD engineer. Examine this image of a part or CAD model.
+${extraPrompt ? `User note: "${extraPrompt}"` : ""}
 
-Describe the part in detail for a CAD system:
-- What is the shape? (box, cylinder, L-bracket, linkage arm, flange, etc.)
-- What are the approximate dimensions? (in inches if you can estimate)
-- Are there holes? Fillets? Chamfers?
-- What mechanical purpose does this part serve?
+Describe the part for a CAD dimension extractor:
+- Overall shape category (box, cylinder, L-bracket, linkage arm, flange, etc.)
+- Key dimensions in inches where estimable
+- Presence of holes, fillets, chamfers and their approximate sizes
+- Mechanical function of the part
 
-Be specific and concise. Output plain text only.`
+Be specific. Plain text only, no lists, no headers.`
         }
       ]
     }
   ], VISION_MODEL);
 
-  console.log(`[AI] Image description: ${descRaw.slice(0, 120)}...`);
+  console.log(`[AI] Image description: ${descRaw.slice(0, 100)}...`);
 
-  // Step 2: Use description + extra prompt to generate FeatureScript
-  const combinedPrompt = extraPrompt
-    ? `${extraPrompt}. Based on this image: ${descRaw}`
-    : descRaw;
-
+  const combinedPrompt = extraPrompt ? `${extraPrompt}. Based on image: ${descRaw}` : descRaw;
   const { code, featureName, featureLabel } = await generateFeatureScript(combinedPrompt);
-
   return { description: descRaw, code, featureName, featureLabel };
 }
