@@ -179,7 +179,11 @@
     margin-top: 12px;
     display: none;
   }
-
+  .debug-output{
+    display : flex;
+    white-space: wrap;
+    flex-wrap : wrap;
+  }
   /* Two-column layout for desktop */
   @media (min-width: 768px) {
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -275,8 +279,8 @@
           <div id="gen-status" class="status"></div>
           <div id="gen-output" class="output-box empty">Your FeatureScript will appear here…</div>
           <div class="btn-row">
-            <button class="btn btn-success" id="copy-btn" onclick="copyCode('gen-output')" disabled>⧉ Copy to Clipboard</button>
-            <button class="btn btn-outline" onclick="sendToDebug()">→ Debug this</button>
+            <button class="btn btn-success" id="copy-btn" onclick="copyCode('gen-output')" disabled> Copy to Clipboard</button>
+            <button class="btn btn-outline" onclick="sendToDebug()"> Debug this</button>
           </div>
         </div>
       </div>
@@ -293,7 +297,7 @@
           <p class="label" style="margin-top:12px">Onshape error messages (optional but helps)</p>
           <textarea id="debug-errors" rows="3" placeholder="e.g. Function skPolygon not found&#10;Precondition of newSketch failed"></textarea>
           <div class="btn-row">
-            <button class="btn btn-primary" onclick="debugCode()">🔧 Fix It</button>
+            <button class="btn btn-primary" onclick="debugCode()"> Fix It</button>
           </div>
         </div>
       </div>
@@ -305,7 +309,7 @@
           <div id="debug-status" class="status"></div>
           <div id="debug-output" class="output-box empty">Fixed code will appear here…</div>
           <div class="btn-row">
-            <button class="btn btn-success" id="debug-copy-btn" onclick="copyCode('debug-output')" disabled>⧉ Copy Fixed Code</button>
+            <button class="btn btn-success" id="debug-copy-btn" onclick="copyCode('debug-output')" disabled> Copy Fixed Code</button>
           </div>
         </div>
       </div>
@@ -323,13 +327,13 @@
                ondragleave="this.classList.remove('drag-over')"
                ondrop="handleDrop(event)">
             <input type="file" id="img-input" accept="image/*" onchange="handleFile(this.files[0])">
-            <div id="drop-text">📷 Click or drag an image here<br><small>Photo of a real part, a CAD screenshot, or a sketch</small></div>
+            <div id="drop-text"> Click or drag an image here<br><small>Photo of a real part, a CAD screenshot, or a sketch</small></div>
             <img id="img-preview" class="image-preview" alt="Preview">
           </div>
           <p class="label" style="margin-top:14px">Extra instructions (optional)</p>
           <input type="text" id="analyze-prompt" placeholder="e.g. Make it 3 inches long, add fillets">
           <div class="btn-row">
-            <button class="btn btn-primary" id="analyze-btn" onclick="analyzeImg()">🖼 Analyze &amp; Generate</button>
+            <button class="btn btn-primary" id="analyze-btn" onclick="analyzeImg()"> Analyze &amp; Generate</button>
           </div>
         </div>
       </div>
@@ -341,7 +345,7 @@
           <div id="analyze-status" class="status"></div>
           <div id="analyze-output" class="output-box empty">FeatureScript will appear here…</div>
           <div class="btn-row">
-            <button class="btn btn-success" id="analyze-copy-btn" onclick="copyCode('analyze-output')" disabled>⧉ Copy to Clipboard</button>
+            <button class="btn btn-success" id="analyze-copy-btn" onclick="copyCode('analyze-output')" disabled>Copy to Clipboard</button>
           </div>
         </div>
       </div>
@@ -362,12 +366,12 @@
 
         <p style="margin-top:14px"><strong style="color:var(--text)">Step 3 — Insert the Feature</strong><br>
         Switch to your Part Studio. The feature now appears in the feature toolbar.
-        Click it → select a plane (Top, Front, Right, or a face) → click ✓.
+        Click it  select a plane (Top, Front, Right, or a face)  click .
         Your geometry appears instantly.</p>
 
         <p style="margin-top:14px"><strong style="color:var(--text)">Got an error?</strong><br>
         Copy the FeatureScript and the error text from Onshape.
-        Paste both into the <strong>Debug</strong> tab → click Fix It → copy the fixed code.</p>
+        Paste both into the <strong>Debug</strong> tab → click Fix It copy the fixed code.</p>
 
         <p style="margin-top:14px"><strong style="color:var(--text)">Have a picture of a part?</strong><br>
         Upload it in the <strong>Analyze Image</strong> tab. The AI will describe the part
