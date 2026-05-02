@@ -1,7 +1,7 @@
 {
-  "name": "cad-ai-bridge",
-  "version": "0.1.0",
-  "description": "Onshape to Groq middleware bridge",
+  "name": "cad-ai-generator",
+  "version": "1.0.0",
+  "description": "AI FeatureScript generator — no Onshape API required",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -9,7 +9,6 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
-    "axios": "^1.8.4",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "groq-sdk": "^0.15.0"

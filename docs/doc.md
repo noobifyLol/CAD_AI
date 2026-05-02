@@ -1073,3 +1073,6 @@ export async function generateFeatureScript(prompt) {
 finally getting the AI to generate correct featureScript
 The AI can finally generate basic 3d shapes however for more complex prompt it fails 
 now since onshape connection is finished now it is all a prompt engineering and ML project from now on
+Still modified design, this approach was calling API's key so I would just have to using render backend cappabliites to do this 
+**Current plan**
+ok so here is my desing plan right now, the feature leads to render link and then in that link id where the user puts the prompt probably in like onshape or something idk and then the server post out a json string with the featurescript that they want

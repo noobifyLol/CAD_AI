@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI CAD Generator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:     #0f1117;
+    --card:   #1a1d27;
+    --border: #2a2d3a;
+    --accent: #6c63ff;
+    --accent2:#00d4aa;
+    --text:   #e8eaf0;
+    --muted:  #8b90a0;
+    --red:    #ff4d6d;
+    --green:  #00d4aa;
+    --code-bg:#0d1117;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  header h1 { font-size: 1.2rem; font-weight: 700; }
+  header span { color: var(--accent); }
+  .badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+  .tab {
+    padding: 10px 20px;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--card);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { background: var(--card); color: var(--accent); border-color: var(--accent); border-bottom: 2px solid var(--bg); }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+
+  /* Inputs */
+  textarea, input[type="text"] {
+    width: 100%;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 12px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  textarea:focus, input[type="text"]:focus { border-color: var(--accent); }
+  textarea.code { font-family: "Fira Code", "Cascadia Code", monospace; font-size: 0.85rem; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #5a52e0; }
+  .btn-success { background: var(--green); color: #000; }
+  .btn-success:hover { opacity: 0.85; }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .btn-outline:hover { border-color: var(--accent); color: var(--text); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+
+  /* Output */
+  .output-box {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: "Fira Code", "Cascadia Code", monospace;
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    max-height: 480px;
+    overflow-y: auto;
+    color: #a8d8a0;
+    min-height: 60px;
+  }
+  .output-box.empty { color: var(--muted); font-family: inherit; font-style: italic; }
+
+  /* Status */
+  .status {
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .status.show { display: block; }
+  .status.loading { background: #1e2a3a; border: 1px solid #2a4060; color: #7ab3e0; }
+  .status.error   { background: #2a1520; border: 1px solid #5a2030; color: var(--red); }
+  .status.ok      { background: #0f2a20; border: 1px solid #1a5040; color: var(--green); }
+
+  /* Image drop */
+  .image-drop {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--muted);
+  }
+  .image-drop:hover, .image-drop.drag-over { border-color: var(--accent); color: var(--text); }
+  .image-drop input { display: none; }
+  .image-preview {
+    max-width: 100%;
+    max-height: 280px;
+    border-radius: 8px;
+    margin-top: 12px;
+    display: none;
+  }
+
+  /* Two-column layout for desktop */
+  @media (min-width: 768px) {
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  .label { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+  .hint  { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .example-btn {
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .example-btn:hover { border-color: var(--accent); color: var(--text); }
+
+  .explanation-box {
+    background: #1a2030;
+    border: 1px solid #2a3550;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    color: #a0c0e0;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .explanation-box.show { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <span>⬡</span>
+  <h1>AI <span>CAD</span> Generator</h1>
+  <div class="badge">Powered by Groq</div>
+</header>
+
+<div class="container">
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('generate')">✦ Generate</div>
+    <div class="tab" onclick="switchTab('debug')">🔧 Debug</div>
+    <div class="tab" onclick="switchTab('analyze')">🖼 Analyze Image</div>
+    <div class="tab" onclick="switchTab('guide')">📖 How to Use</div>
+  </div>
+
+  <!-- ── GENERATE TAB ── -->
+  <div id="tab-generate" class="panel active">
+    <div class="two-col">
+      <div>
+        <div class="card">
+          <div class="card-title">Describe your part</div>
+          <p class="label">What do you want to build?</p>
+          <textarea id="gen-prompt" rows="4" placeholder="e.g. Create a linkage arm 6 inches long, 1 inch wide with 0.2 inch pin holes at each end"></textarea>
+          <div class="hint">Try natural language — dimensions, shape, holes, fillets all supported.</div>
+          <div class="examples">
+            <button class="example-btn" onclick="setPrompt('A 2x3x0.5 inch mounting plate with 4 holes')">Mounting plate</button>
+            <button class="example-btn" onclick="setPrompt('Hexagonal nut, 0.75 inch across flats, 0.25 inch thick')">Hex nut</button>
+            <button class="example-btn" onclick="setPrompt('Linkage arm 8 inches long 1 inch wide 0.25 thick with 0.2 inch pin holes')">Linkage arm</button>
+            <button class="example-btn" onclick="setPrompt('4 inch pipe flange with 4 bolt holes, 0.25 inch thick')">Pipe flange</button>
+            <button class="example-btn" onclick="setPrompt('L-bracket 3 inches wide, 3 inches tall, 4 inches long, 0.25 wall')">L-bracket</button>
+            <button class="example-btn" onclick="setPrompt('Cylinder 1.5 inch diameter, 3 inches tall')">Cylinder</button>
+            <button class="example-btn" onclick="setPrompt('Triangular prism 1 inch circumradius, 2 inches tall')">Triangle prism</button>
+            <button class="example-btn" onclick="setPrompt('Bushing 0.75 inch OD, 0.5 inch ID, 1 inch long')">Bushing</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="gen-btn" onclick="generate()">
+              <span>Generate FeatureScript</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-title">Generated FeatureScript</div>
+          <div id="gen-status" class="status"></div>
+          <div id="gen-output" class="output-box empty">Your FeatureScript will appear here…</div>
+          <div class="btn-row">
+            <button class="btn btn-success" id="copy-btn" onclick="copyCode('gen-output')" disabled>⧉ Copy to Clipboard</button>
+            <button class="btn btn-outline" onclick="sendToDebug()">→ Debug this</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── DEBUG TAB ── -->
+  <div id="tab-debug" class="panel">
+    <div class="two-col">
+      <div>
+        <div class="card">
+          <div class="card-title">Paste your broken FeatureScript</div>
+          <textarea id="debug-code" class="code" rows="12" placeholder="Paste FeatureScript here…"></textarea>
+          <p class="label" style="margin-top:12px">Onshape error messages (optional but helps)</p>
+          <textarea id="debug-errors" rows="3" placeholder="e.g. Function skPolygon not found&#10;Precondition of newSketch failed"></textarea>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="debugCode()">🔧 Fix It</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">What was wrong</div>
+          <div id="debug-explanation" class="explanation-box"></div>
+          <div class="card-title">Fixed FeatureScript</div>
+          <div id="debug-status" class="status"></div>
+          <div id="debug-output" class="output-box empty">Fixed code will appear here…</div>
+          <div class="btn-row">
+            <button class="btn btn-success" id="debug-copy-btn" onclick="copyCode('debug-output')" disabled>⧉ Copy Fixed Code</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ANALYZE TAB ── -->
+  <div id="tab-analyze" class="panel">
+    <div class="two-col">
+      <div>
+        <div class="card">
+          <div class="card-title">Upload a part image</div>
+          <div class="image-drop" id="drop-zone" onclick="document.getElementById('img-input').click()"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleDrop(event)">
+            <input type="file" id="img-input" accept="image/*" onchange="handleFile(this.files[0])">
+            <div id="drop-text">📷 Click or drag an image here<br><small>Photo of a real part, a CAD screenshot, or a sketch</small></div>
+            <img id="img-preview" class="image-preview" alt="Preview">
+          </div>
+          <p class="label" style="margin-top:14px">Extra instructions (optional)</p>
+          <input type="text" id="analyze-prompt" placeholder="e.g. Make it 3 inches long, add fillets">
+          <div class="btn-row">
+            <button class="btn btn-primary" id="analyze-btn" onclick="analyzeImg()">🖼 Analyze &amp; Generate</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">AI Description</div>
+          <div id="analyze-desc" class="explanation-box" style="display:block;min-height:60px;color:var(--muted);font-style:italic">Upload an image to see the AI's description of the part…</div>
+          <div class="card-title" style="margin-top:12px">Generated FeatureScript</div>
+          <div id="analyze-status" class="status"></div>
+          <div id="analyze-output" class="output-box empty">FeatureScript will appear here…</div>
+          <div class="btn-row">
+            <button class="btn btn-success" id="analyze-copy-btn" onclick="copyCode('analyze-output')" disabled>⧉ Copy to Clipboard</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GUIDE TAB ── -->
+  <div id="tab-guide" class="panel">
+    <div class="card">
+      <div class="card-title">How to use this tool</div>
+      <div style="line-height:1.9; font-size:0.92rem; color:var(--muted)">
+        <p><strong style="color:var(--text)">Step 1 — Generate FeatureScript</strong><br>
+        Type a description of your part in the Generate tab. Click Generate. Copy the code.</p>
+
+        <p style="margin-top:14px"><strong style="color:var(--text)">Step 2 — Paste into Onshape Feature Studio</strong><br>
+        In Onshape, open your document → create or open a Feature Studio tab.
+        Select all (Ctrl+A) and paste your code.</p>
+
+        <p style="margin-top:14px"><strong style="color:var(--text)">Step 3 — Insert the Feature</strong><br>
+        Switch to your Part Studio. The feature now appears in the feature toolbar.
+        Click it → select a plane (Top, Front, Right, or a face) → click ✓.
+        Your geometry appears instantly.</p>
+
+        <p style="margin-top:14px"><strong style="color:var(--text)">Got an error?</strong><br>
+        Copy the FeatureScript and the error text from Onshape.
+        Paste both into the <strong>Debug</strong> tab → click Fix It → copy the fixed code.</p>
+
+        <p style="margin-top:14px"><strong style="color:var(--text)">Have a picture of a part?</strong><br>
+        Upload it in the <strong>Analyze Image</strong> tab. The AI will describe the part
+        and generate FeatureScript for it automatically.</p>
+
+        <p style="margin-top:20px; padding-top:14px; border-top:1px solid var(--border)">
+        <strong style="color:var(--accent)">Supported shapes</strong><br>
+        Box / Cube · Cylinder / Rod · Plate · Polygon (triangle, hex, N-gon) ·
+        Linkage arm · Plate with holes · L-bracket · Pipe flange ·
+        Hex nut · Washer · Bushing / Sleeve
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// ── Tab switching ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  const tabs = ['generate','debug','analyze','guide'];
+  document.querySelectorAll('.tab')[tabs.indexOf(name)].classList.add('active');
+  document.getElementById(`tab-${name}`).classList.add('active');
+}
+
+// ── Helpers ──
+function setStatus(id, msg, type) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = `status show ${type}`;
+}
+function clearStatus(id) { document.getElementById(id).className = 'status'; }
+
+function setOutput(id, code, copyBtnId) {
+  const el = document.getElementById(id);
+  el.textContent = code;
+  el.classList.remove('empty');
+  if (copyBtnId) document.getElementById(copyBtnId).disabled = false;
+}
+
+async function copyCode(outputId) {
+  const text = document.getElementById(outputId).textContent;
+  await navigator.clipboard.writeText(text);
+  const btn = event.target.closest('.btn');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '✓ Copied!';
+  btn.style.background = 'var(--green)';
+  btn.style.color = '#000';
+  setTimeout(()=>{ btn.innerHTML=orig; btn.style.background=''; btn.style.color=''; }, 1800);
+}
+
+function setPrompt(text) { document.getElementById('gen-prompt').value = text; }
+
+function sendToDebug() {
+  const code = document.getElementById('gen-output').textContent;
+  if (code && code !== 'Your FeatureScript will appear here…') {
+    document.getElementById('debug-code').value = code;
+    switchTab('debug');
+  }
+}
+
+// ── Generate ──
+async function generate() {
+  const prompt = document.getElementById('gen-prompt').value.trim();
+  if (!prompt) return;
+  const btn = document.getElementById('gen-btn');
+  btn.innerHTML = '<div class="spinner"></div><span>Generating…</span>';
+  btn.disabled = true;
+  setStatus('gen-status', 'Calling Groq AI…', 'loading');
+
+  try {
+    const r = await fetch('/generate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ prompt })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Generation failed');
+    setOutput('gen-output', data.code, 'copy-btn');
+    setStatus('gen-status', `✓ Generated "${data.featureLabel}"`, 'ok');
+  } catch(e) {
+    setStatus('gen-status', `Error: ${e.message}`, 'error');
+  } finally {
+    btn.innerHTML = '<span>Generate FeatureScript</span>';
+    btn.disabled = false;
+  }
+}
+
+// ── Debug ──
+async function debugCode() {
+  const code   = document.getElementById('debug-code').value.trim();
+  const errors = document.getElementById('debug-errors').value.trim();
+  if (!code) return;
+
+  setStatus('debug-status', 'Analyzing and fixing…', 'loading');
+  document.getElementById('debug-explanation').classList.remove('show');
+
+  try {
+    const r = await fetch('/debug', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ code, errors })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Debug failed');
+
+    const expEl = document.getElementById('debug-explanation');
+    expEl.textContent = data.explanation;
+    expEl.classList.add('show');
+
+    setOutput('debug-output', data.fixed, 'debug-copy-btn');
+    setStatus('debug-status', '✓ Fixed!', 'ok');
+  } catch(e) {
+    setStatus('debug-status', `Error: ${e.message}`, 'error');
+  }
+}
+
+// ── Image Analysis ──
+let currentImageBase64 = null, currentMime = null;
+
+function handleFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  currentMime = file.type;
+  const reader = new FileReader();
+  reader.onload = e => {
+    currentImageBase64 = e.target.result.split(',')[1];
+    document.getElementById('drop-text').style.display = 'none';
+    const img = document.getElementById('img-preview');
+    img.src = e.target.result;
+    img.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+}
+
+async function analyzeImg() {
+  if (!currentImageBase64) {
+    setStatus('analyze-status', 'Please upload an image first.', 'error');
+    return;
+  }
+  const prompt = document.getElementById('analyze-prompt').value.trim();
+  setStatus('analyze-status', 'Analyzing image…', 'loading');
+  document.getElementById('analyze-desc').textContent = 'Analyzing…';
+
+  try {
+    const r = await fetch('/analyze', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ imageBase64: currentImageBase64, mimeType: currentMime, prompt })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Analysis failed');
+
+    document.getElementById('analyze-desc').textContent = data.description;
+    document.getElementById('analyze-desc').style.fontStyle = 'normal';
+    document.getElementById('analyze-desc').style.color = 'var(--text)';
+    setOutput('analyze-output', data.code, 'analyze-copy-btn');
+    setStatus('analyze-status', `✓ Generated "${data.featureLabel}"`, 'ok');
+  } catch(e) {
+    setStatus('analyze-status', `Error: ${e.message}`, 'error');
+    document.getElementById('analyze-desc').textContent = 'Analysis failed.';
+  }
+}
+
+// Enter key to generate
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('gen-prompt').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.ctrlKey) generate();
+  });
+});
+</script>
+</body>
+</html>
