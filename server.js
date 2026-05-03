@@ -1,11 +1,11 @@
 import "dotenv/config";
 import express from "express";
-import { generateFeatureScript, debugFeatureScript, analyzeImage } from "./ai.js";
+import { generateFeatureScript, debugFeatureScript, analyzeImage, analyzeImages } from "./ai.js";
 
 const app  = express();
 const PORT = Number(process.env.PORT || 3000);
 
-app.use(express.json({ limit: "10mb" })); // large enough for base64 images
+app.use(express.json({ limit: "20mb" })); // large enough for multiple base64 images
 app.use(express.static("public"));
 
 // ── Generate FeatureScript from a text prompt ─────────────────────────────────
@@ -14,8 +14,8 @@ app.post("/generate", async (req, res) => {
   if (!prompt) return res.status(400).json({ error: "No prompt provided." });
 
   try {
-    const { code, featureName, featureLabel } = await generateFeatureScript(prompt);
-    res.json({ code, featureName, featureLabel });
+    const { code, featureName, featureLabel, thinking } = await generateFeatureScript(prompt);
+    res.json({ code, featureName, featureLabel, thinking });
   } catch (err) {
     console.error("[/generate]", err.message);
     res.status(500).json({ error: err.message });
@@ -23,7 +23,6 @@ app.post("/generate", async (req, res) => {
 });
 
 // ── Debug / fix broken FeatureScript ─────────────────────────────────────────
-// Body: { code: string, errors: string }
 app.post("/debug", async (req, res) => {
   const { code, errors } = req.body;
   if (!code) return res.status(400).json({ error: "No FeatureScript provided." });
@@ -37,17 +36,39 @@ app.post("/debug", async (req, res) => {
   }
 });
 
-// ── Analyze an image and generate FeatureScript from it ──────────────────────
-// Body: { imageBase64: string, mimeType: string, prompt: string }
+// ── Analyze a single image (legacy) ──────────────────────────────────────────
 app.post("/analyze", async (req, res) => {
   const { imageBase64, mimeType, prompt } = req.body;
   if (!imageBase64) return res.status(400).json({ error: "No image provided." });
 
   try {
-    const { description, code, featureName, featureLabel } = await analyzeImage(imageBase64, mimeType || "image/jpeg", prompt || "");
-    res.json({ description, code, featureName, featureLabel });
+    const { description, code, featureName, featureLabel, thinking } =
+      await analyzeImage(imageBase64, mimeType || "image/jpeg", prompt || "");
+    res.json({ description, code, featureName, featureLabel, thinking });
   } catch (err) {
     console.error("[/analyze]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Analyze multiple images together ─────────────────────────────────────────
+// Body: {
+//   images: Array<{ imageBase64: string, mimeType: string, context: string }>,
+//   globalPrompt: string
+// }
+app.post("/analyze-multi", async (req, res) => {
+  const { images, globalPrompt } = req.body;
+  if (!Array.isArray(images) || images.length === 0)
+    return res.status(400).json({ error: "No images provided." });
+  if (images.some(img => !img.imageBase64))
+    return res.status(400).json({ error: "One or more images are missing base64 data." });
+
+  try {
+    const { description, code, featureName, featureLabel, thinking } =
+      await analyzeImages(images, globalPrompt || "");
+    res.json({ description, code, featureName, featureLabel, thinking });
+  } catch (err) {
+    console.error("[/analyze-multi]", err.message);
     res.status(500).json({ error: err.message });
   }
 });

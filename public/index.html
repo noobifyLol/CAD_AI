@@ -8,16 +8,20 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:      #0f1117;
-    --surface: #161922;
-    --border:  #252836;
-    --accent:  #5b5fc7;
+    --bg:      #0d1011;
+    --surface: #8394c5;
+    --surface2: #121624;
+    --border:  #2140ca;
+    --accent:  #2b86ee;
     --green:   #1aad8d;
     --red:     #d94f6b;
     --text:    #dde1ec;
-    --muted:   #7a7f94;
+    --muted:   #9ba0b6;
     --code-bg: #0b0e14;
     --radius:  10px;
+    --think:   #0e1a2e;
+    --think-border: #1a3a6b;
+    --think-text: #7ab3e8;
   }
 
   body {
@@ -53,7 +57,7 @@
   .powered-by {
     margin-left: auto;
     font-size: 0.72rem;
-    color: var(--muted);
+    color: var(--text);
     letter-spacing: 0.3px;
   }
 
@@ -85,7 +89,7 @@
   @media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } }
 
   .card {
-    background: var(--surface);
+    background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 20px;
@@ -140,6 +144,14 @@
     color: var(--muted);
   }
   .btn-ghost:hover { border-color: var(--accent); color: var(--text); }
+  .btn-danger {
+    background: transparent;
+    border: 1px solid #4a1828;
+    color: var(--red);
+    padding: 5px 10px;
+    font-size: 0.78rem;
+  }
+  .btn-danger:hover { background: #200e14; }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
@@ -170,6 +182,47 @@
   .status.loading { background: #111d2e; border: 1px solid #1a3558; color: #6fa8d8; }
   .status.error   { background: #200e14; border: 1px solid #4a1828; color: var(--red); }
   .status.ok      { background: #081e18; border: 1px solid #0f3828; color: var(--green); }
+
+  /* ── AI Thinking box ── */
+  .thinking-wrap {
+    margin-bottom: 14px;
+    border-radius: 8px;
+    border: 1px solid var(--think-border);
+    overflow: hidden;
+  }
+  .thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 13px;
+    background: var(--think);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--think-text);
+    user-select: none;
+    transition: background 0.15s;
+  }
+  .thinking-header:hover { background: #111f38; }
+  .thinking-header .toggle-icon { margin-left: auto; font-size: 0.7rem; transition: transform 0.2s; }
+  .thinking-header.open .toggle-icon { transform: rotate(90deg); }
+  .thinking-body {
+    background: var(--think);
+    padding: 0 13px;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.2s;
+    font-size: 0.84rem;
+    line-height: 1.65;
+    color: var(--think-text);
+    border-top: 1px solid transparent;
+  }
+  .thinking-body.open {
+    max-height: 300px;
+    padding: 10px 13px 12px;
+    border-top-color: var(--think-border);
+    overflow-y: auto;
+  }
 
   .recents {
     display: flex;
@@ -203,19 +256,83 @@
   }
   .explanation-box.show { display: block; }
 
+  /* ── Multi-image slots ── */
+  .image-slots-container {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .image-slot {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    background: rgba(255,255,255,0.02);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  .image-slot.slot-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .image-slot.slot-removing {
+    opacity: 0;
+    transform: translateY(-6px);
+    pointer-events: none;
+  }
+
+  .slot-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .slot-header .card-label { margin-bottom: 0; }
+  .slot-remove-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid #4a1828;
+    border-radius: 6px;
+    color: var(--red);
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .slot-remove-btn:hover { background: #200e14; }
+
+  .slot-context {
+    margin-top: 8px;
+    font-size: 0.84rem;
+  }
+
   .image-drop {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    padding: 36px 20px;
+    padding: 28px 20px;
     text-align: center;
     cursor: pointer;
     color: var(--muted);
     font-size: 0.9rem;
     transition: border-color 0.15s, color 0.15s;
+    position: relative;
   }
   .image-drop:hover, .image-drop.drag-over { border-color: var(--accent); color: var(--text); }
   .image-drop input { display: none; }
-  .image-preview { max-width: 100%; max-height: 260px; border-radius: 8px; margin-top: 12px; display: none; }
+  .image-preview { max-width: 100%; max-height: 180px; border-radius: 8px; margin-top: 10px; display: none; }
+
+  .add-img-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    padding: 8px 4px;
+    border-top: 1px solid var(--border);
+  }
+  .add-img-row span {
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
 
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner {
@@ -240,7 +357,7 @@
 <header>
   <div class="logo-mark">fs</div>
   <h1>CAD <span>AI</span> Generator</h1>
-  <span class="powered-by">Groq — Llama 3.3</span>
+  <span class="powered-by">Groq — Llama 3.3 + Llama 4 Vision</span>
 </header>
 
 <div class="container">
@@ -248,26 +365,27 @@
   <div class="tabs">
     <div class="tab active"  onclick="switchTab('generate')">Generate</div>
     <div class="tab"         onclick="switchTab('debug')">Debug</div>
-    <div class="tab"         onclick="switchTab('analyze')">Image</div>
+    <div class="tab"         onclick="switchTab('analyze')">Images</div>
     <div class="tab"         onclick="switchTab('guide')">Guide</div>
   </div>
 
-  <!-- Generate -->
+  <!-- ── Generate ── -->
   <div id="tab-generate" class="panel active">
     <div class="two-col">
       <div>
         <div class="card">
           <div class="card-label">Describe your part</div>
           <textarea id="gen-prompt" rows="5"
-            placeholder="Describe the part in plain language — shape, dimensions, holes, fillets. For example: a linkage arm 8 inches long, 1 inch wide, 0.25 thick with 0.2 inch pin holes at each end"></textarea>
-          <div class="hint">Ctrl + Enter to generate. Dimensions in inches by default; mm is also understood.</div>
+            placeholder="Describe the part — shape, dimensions, holes, fillets. Example: a spur gear with 8:1 ratio, 2mm module, 0.5 inch bore"></textarea>
+          <div class="hint">Ctrl + Enter to generate. Inches by default; mm is understood.</div>
           <div class="recents" id="recents">
+            <button class="recent-chip" onclick="setPrompt('Spur gear 8:1 ratio, 2mm module, 0.5 inch bore')">8:1 Spur Gear</button>
+            <button class="recent-chip" onclick="setPrompt('Spur gear 20 teeth, 3mm module, 0.375 inch bore')">20-tooth Gear</button>
             <button class="recent-chip" onclick="setPrompt('Mounting plate 4x3 inches, 0.25 thick, four 0.2 inch holes in the corners')">Mounting plate</button>
             <button class="recent-chip" onclick="setPrompt('Hex nut 0.75 inch across flats, 0.25 inch thick')">Hex nut</button>
             <button class="recent-chip" onclick="setPrompt('Linkage arm 8 inches long, 1 inch wide, 0.25 thick with 0.2 inch pin holes')">Linkage arm</button>
             <button class="recent-chip" onclick="setPrompt('Pipe flange 3 inch radius, 0.4 inch thick, 4 bolt holes')">Pipe flange</button>
-            <button class="recent-chip" onclick="setPrompt('L-bracket 3 inches wide, 3 inches tall, 4 inches long, 0.25 wall thickness')">L-bracket</button>
-            <button class="recent-chip" onclick="setPrompt('Cylinder 0.75 inch radius, 3 inches tall')">Cylinder</button>
+            <button class="recent-chip" onclick="setPrompt('L-bracket 3 inches wide, 3 inches tall, 4 inches long, 0.25 wall')">L-bracket</button>
             <button class="recent-chip" onclick="setPrompt('Bushing 0.75 inch OD, 0.5 inch ID, 1 inch long')">Bushing</button>
           </div>
           <div class="btn-row">
@@ -280,6 +398,16 @@
         <div class="card">
           <div class="card-label">Generated FeatureScript</div>
           <div id="gen-status" class="status"></div>
+
+          <!-- AI Thinking (collapsed by default) -->
+          <div id="gen-thinking-wrap" class="thinking-wrap" style="display:none">
+            <div class="thinking-header" onclick="toggleThinking('gen')" id="gen-thinking-header">
+              🧠 AI Reasoning
+              <span class="toggle-icon">▶</span>
+            </div>
+            <div class="thinking-body" id="gen-thinking-body"></div>
+          </div>
+
           <div id="gen-output" class="output-box empty">Your FeatureScript will appear here.</div>
           <div class="btn-row">
             <button class="btn btn-success" id="copy-btn" onclick="copyCode('gen-output')" disabled>Copy to Clipboard</button>
@@ -290,7 +418,7 @@
     </div>
   </div>
 
-  <!-- Debug -->
+  <!-- ── Debug ── -->
   <div id="tab-debug" class="panel">
     <div class="two-col">
       <div>
@@ -320,33 +448,58 @@
     </div>
   </div>
 
-  <!-- Image -->
+  <!-- ── Images (multi-image) ── -->
   <div id="tab-analyze" class="panel">
     <div class="two-col">
+
+      <!-- Left: image slots + controls -->
       <div>
         <div class="card">
-          <div class="card-label">Upload a part image</div>
-          <div class="image-drop" id="drop-zone"
-               onclick="document.getElementById('img-input').click()"
-               ondragover="event.preventDefault();this.classList.add('drag-over')"
-               ondragleave="this.classList.remove('drag-over')"
-               ondrop="handleDrop(event)">
-            <input type="file" id="img-input" accept="image/*" onchange="handleFile(this.files[0])">
-            <div id="drop-text">Click or drag an image here<br><small style="color:var(--muted)">Photo of a real part, a CAD screenshot, or a sketch</small></div>
-            <img id="img-preview" class="image-preview" alt="Preview">
+          <div class="card-label">Reference Images</div>
+          <p class="hint" style="margin-bottom:12px">Add one or more images — a hand sketch, dimension drawing, photo of a real part, etc. Label each so the AI knows what it's looking at.</p>
+
+          <!-- Dynamic image slots rendered here -->
+          <div class="image-slots-container" id="image-slots-container"></div>
+
+          <!-- Add image button -->
+          <div class="add-img-row">
+            <button class="btn btn-ghost" onclick="addImageSlot()" style="font-size:0.82rem; padding:7px 14px;">
+              + Add Another Image
+            </button>
+            <span>Up to 4 images supported</span>
           </div>
-          <p class="card-label" style="margin-top:14px">Additional instructions</p>
-          <input type="text" id="analyze-prompt" placeholder="e.g. Make it 3 inches long, add 0.1 inch fillets">
+
+          <p class="card-label" style="margin-top:16px">Overall Goal / Instructions</p>
+          <input type="text" id="global-prompt"
+            placeholder="What should be generated? e.g. 'Create this gear using the dimensions in image 2'">
+
           <div class="btn-row">
-            <button class="btn btn-primary" id="analyze-btn" onclick="analyzeImg()">Analyze and Generate</button>
+            <button class="btn btn-primary" id="analyze-btn" onclick="analyzeMultiImg()">
+              Analyze &amp; Generate
+            </button>
           </div>
         </div>
       </div>
+
+      <!-- Right: output -->
       <div>
         <div class="card">
-          <div class="card-label">Part description</div>
-          <div id="analyze-desc" class="explanation-box" style="display:block;min-height:52px;color:var(--muted);font-style:italic">Upload an image to see how the AI reads the part.</div>
-          <div class="card-label" style="margin-top:14px">Generated FeatureScript</div>
+          <div class="card-label">Part Description</div>
+          <div id="analyze-desc" class="explanation-box"
+               style="display:block; min-height:52px; color:var(--muted); font-style:italic">
+            Upload images to see how the AI reads the part.
+          </div>
+
+          <!-- AI Thinking -->
+          <div id="analyze-thinking-wrap" class="thinking-wrap" style="display:none; margin-bottom:14px">
+            <div class="thinking-header" onclick="toggleThinking('analyze')" id="analyze-thinking-header">
+              🧠 AI Reasoning
+              <span class="toggle-icon">▶</span>
+            </div>
+            <div class="thinking-body" id="analyze-thinking-body"></div>
+          </div>
+
+          <div class="card-label">Generated FeatureScript</div>
           <div id="analyze-status" class="status"></div>
           <div id="analyze-output" class="output-box empty">FeatureScript will appear here.</div>
           <div class="btn-row">
@@ -354,17 +507,18 @@
           </div>
         </div>
       </div>
+
     </div>
   </div>
 
-  <!-- Guide -->
+  <!-- ── Guide ── -->
   <div id="tab-guide" class="panel">
     <div class="card">
       <div class="card-label">How to use</div>
 
       <div class="guide-section">
         <h3>Step 1 — Generate FeatureScript</h3>
-        <p>Type a description of your part in the Generate tab. Include shape, dimensions, holes, and any fillets. Click Generate or press Ctrl+Enter.</p>
+        <p>Type a description of your part in the Generate tab. Include shape, dimensions, holes, and any fillets. Click Generate or press Ctrl+Enter. The AI Reasoning box shows exactly what the AI understood before generating code.</p>
       </div>
 
       <div class="guide-section">
@@ -374,31 +528,36 @@
 
       <div class="guide-section">
         <h3>Step 3 — Insert the feature</h3>
-        <p>Switch to your Part Studio. The feature appears in the toolbar. Click it, select a plane (Top, Front, Right, or any flat face), then click the checkmark. The geometry appears on the selected plane.</p>
+        <p>Switch to your Part Studio. The feature appears in the toolbar. Click it, select a plane, then click the checkmark.</p>
       </div>
 
       <hr class="guide-divider">
+
+      <div class="guide-section">
+        <h3>Multi-image analysis</h3>
+        <p>Use the Images tab to upload several reference images at once — for example, a hand-drawn sketch as Image 1 and a dimension sheet as Image 2. Label each image so the AI knows its role. The AI synthesizes all images together before generating FeatureScript.</p>
+      </div>
 
       <div class="guide-section">
         <h3>Got an error?</h3>
         <p>Use the Debug tab. Paste your FeatureScript and the error message from Onshape. The AI will explain what went wrong and return a corrected version.</p>
       </div>
 
-      <div class="guide-section">
-        <h3>Have a photo of a part?</h3>
-        <p>Use the Image tab. Upload any photo — a real part, a CAD screenshot, or a hand sketch. The AI will describe it and generate FeatureScript automatically. You can add extra instructions to override specific dimensions.</p>
-      </div>
-
       <hr class="guide-divider">
 
       <div class="guide-section">
         <h3>Supported shapes</h3>
-        <p>Box, cube, block — Cylinder, rod, shaft, pin — Flat plate — Polygon (triangle, hex, any N-sided) — Linkage arm, connecting rod, crank arm — Mounting plate with holes — L-bracket, angle bracket — Pipe flange with bolt circle — Hex nut — Washer — Bushing, sleeve</p>
+        <p>Box / cube / block — Cylinder / rod / shaft — Flat plate — Polygon (triangle, hex, any N-sided) — Linkage / connecting rod — Mounting plate with holes — L-bracket / angle iron — T-bracket — U-channel — Pipe flange — Hex nut — Washer — Bushing — Stepped shaft — <strong>Spur gear</strong> (with real tooth profiles)</p>
+      </div>
+
+      <div class="guide-section">
+        <h3>Gear tips</h3>
+        <p>Say <code>8:1 gear</code> and the AI generates a 64-tooth driven gear (mates with an 8-tooth pinion). Or say <code>spur gear 32 teeth, 2mm module</code> for explicit control. Specify a bore with <code>0.5 inch bore</code>. Face width defaults to 8× the module.</p>
       </div>
 
       <div class="guide-section">
         <h3>Dimension tips</h3>
-        <p>Dimensions default to inches. You can say <code>mm</code> and the AI converts automatically. For cylinders, say <em>diameter</em> or <em>radius</em>. For hex shapes, say <em>across flats</em>. For hollow parts (bushing, washer), specify OD and ID. Missing dimensions default to something sensible.</p>
+        <p>Dimensions default to inches. Say <code>mm</code> and the AI converts automatically. Missing dimensions get sensible mechanical defaults.</p>
       </div>
     </div>
   </div>

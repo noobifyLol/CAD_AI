@@ -4,6 +4,8 @@ const groq         = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const TEXT_MODEL   = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function stripJson(text) {
   if (!text) return "{}";
   const m = text.match(/```json?\s*([\s\S]*?)```/i);
@@ -15,8 +17,10 @@ async function chat(messages, model = TEXT_MODEL) {
   return res?.choices?.[0]?.message?.content ?? "";
 }
 
-const n  = x  => parseFloat(Number(x).toFixed(6)).toString();
-const fs = x  => `${n(x)} * inch`;
+const n  = x => parseFloat(Number(x).toFixed(6)).toString();
+const fs = x => `${n(x)} * inch`;
+
+// ── Sketch / operation helpers ────────────────────────────────────────────────
 
 function preconditionBlock() {
   return `    precondition
@@ -42,6 +46,8 @@ const chamferBlock = (ref, w) => `\n        opChamfer(context, id + "chamfer1", 
             "chamferType" : ChamferType.EQUAL_OFFSETS,
             "width"       : ${fs(w)}
         });`;
+
+// ── Shape templates ───────────────────────────────────────────────────────────
 
 function templateBox(d) {
   const hw = d.widthInches / 2, hh = d.heightInches / 2;
@@ -163,14 +169,14 @@ function templateUChannel(d) {
   const { widthInches: W, heightInches: H, wallThicknessInches: T, depthInches: L } = d;
   return `${planeSetup()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
-        skLineSegment(sketch1, "l1", { "start" : vector(0,0)*inch,                   "end" : vector(${n(W)},0)*inch });
+        skLineSegment(sketch1, "l1", { "start" : vector(0,0)*inch,                    "end" : vector(${n(W)},0)*inch });
         skLineSegment(sketch1, "l2", { "start" : vector(${n(W)},0)*inch,              "end" : vector(${n(W)},${n(H)})*inch });
         skLineSegment(sketch1, "l3", { "start" : vector(${n(W)},${n(H)})*inch,        "end" : vector(${n(W-T)},${n(H)})*inch });
         skLineSegment(sketch1, "l4", { "start" : vector(${n(W-T)},${n(H)})*inch,      "end" : vector(${n(W-T)},${n(T)})*inch });
         skLineSegment(sketch1, "l5", { "start" : vector(${n(W-T)},${n(T)})*inch,      "end" : vector(${n(T)},${n(T)})*inch });
         skLineSegment(sketch1, "l6", { "start" : vector(${n(T)},${n(T)})*inch,        "end" : vector(${n(T)},${n(H)})*inch });
         skLineSegment(sketch1, "l7", { "start" : vector(${n(T)},${n(H)})*inch,        "end" : vector(0,${n(H)})*inch });
-        skLineSegment(sketch1, "l8", { "start" : vector(0,${n(H)})*inch,               "end" : vector(0,0)*inch });
+        skLineSegment(sketch1, "l8", { "start" : vector(0,${n(H)})*inch,              "end" : vector(0,0)*inch });
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
             "entities"  : qSketchRegion(id + "sketch1"),
@@ -285,18 +291,91 @@ function templateBoxWithHole(d) {
         });`;
 }
 
+// ── NEW: Spur Gear template ───────────────────────────────────────────────────
+// Generates a proper toothed gear outline using computed tooth profiles.
+// Each tooth has 4 line segments (root-land, left-flank, tip, right-flank).
+// Adjacent teeth share exact endpoints so the sketch closes cleanly.
+
+function templateSpurGear(d) {
+  const teeth  = Math.max(8, Math.round(d.numTeeth || 20));
+  // moduleInches: standard mechanical module converted to inches (2mm ≈ 0.0787")
+  const mod    = d.moduleInches > 0 ? d.moduleInches : 0.0787402;
+  const pitchR = mod * teeth / 2;
+  const addR   = pitchR + mod;                           // addendum (tip) radius
+  const dedR   = Math.max(mod * 0.5, pitchR - 1.25 * mod); // dedendum (root) radius
+  const faceW  = d.depthInches > 0 ? d.depthInches : mod * 8;
+  const boreR  = d.holeRadiusInches || 0;
+
+  const TAU  = 2 * Math.PI;
+  const ta   = TAU / teeth;   // angular pitch (radians per tooth)
+  const frac = 0.38;          // tooth half-angle as fraction of angular pitch
+
+  // Returns a FeatureScript vector literal for point (r, angle)
+  const vStr = (r, a) =>
+    `vector(${n(Math.cos(a) * r)}, ${n(Math.sin(a) * r)}) * inch`;
+
+  let segs = [];
+  for (let i = 0; i < teeth; i++) {
+    const center = i * ta;
+    // Root-land: from previous tooth's right flank to this tooth's left flank
+    const aGapStart   = center - ta * (1 - frac);   // = (i-1)*ta + frac*ta  (periodic)
+    const aGapEnd     = center - ta * frac;
+    // Tooth flanks and tip
+    const aTipLeft    = center - ta * frac * 0.5;
+    const aTipRight   = center + ta * frac * 0.5;
+    const aFlankRight = center + ta * frac;
+
+    const si = i * 4;
+    segs.push(`skLineSegment(sketch1, "g${si+0}", { "start" : ${vStr(dedR, aGapStart)},   "end" : ${vStr(dedR, aGapEnd)}   });`);
+    segs.push(`skLineSegment(sketch1, "g${si+1}", { "start" : ${vStr(dedR, aGapEnd)},     "end" : ${vStr(addR, aTipLeft)}  });`);
+    segs.push(`skLineSegment(sketch1, "g${si+2}", { "start" : ${vStr(addR, aTipLeft)},    "end" : ${vStr(addR, aTipRight)} });`);
+    segs.push(`skLineSegment(sketch1, "g${si+3}", { "start" : ${vStr(addR, aTipRight)},   "end" : ${vStr(dedR, aFlankRight)} });`);
+    // Note: tooth[i] aFlankRight == tooth[i+1] aGapStart  (mod 2π) → sketch closes ✓
+  }
+
+  const indent  = '        ';
+  const segStr  = segs.map(s => indent + s).join('\n');
+  const boreStr = boreR > 0
+    ? `\n${indent}skCircle(sketch1, "bore", { "center" : vector(0, 0) * inch, "radius" : ${fs(boreR)} });`
+    : '';
+
+  return `${planeSetup()}
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+${segStr}${boreStr}
+        skSolve(sketch1);
+        opExtrude(context, id + "extrude1", {
+            "entities"  : qSketchRegion(id + "sketch1"${boreR > 0 ? ', true' : ''}),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : ${fs(faceW)}
+        });`;
+}
+
+// ── FeatureScript builder ─────────────────────────────────────────────────────
+
 function buildFeatureScript(d) {
-  const holeSafe = ["LINKAGE","PLATE_HOLES","FLANGE","HEX_NUT","WASHER","BUSHING"];
+  // Shapes that manage their own hole logic — do NOT fall through to BOX_WITH_HOLE
+  const holeSafe = ["LINKAGE","PLATE_HOLES","FLANGE","HEX_NUT","WASHER","BUSHING","SPUR_GEAR"];
+
   let body;
   if (d.holeRadiusInches > 0 && !holeSafe.includes(d.shape)) {
     body = templateBoxWithHole(d);
   } else {
     const map = {
-      CYLINDER: templateCylinder, PLATE: templateBox, POLYGON: templatePolygon,
-      LINKAGE: templateLinkage, PLATE_HOLES: templatePlateHoles,
-      L_BRACKET: templateLBracket, T_BRACKET: templateLBracket, U_CHANNEL: templateUChannel,
-      FLANGE: templateFlange, HEX_NUT: templateHexNut, WASHER: templateWasher,
-      BUSHING: templateBushing, STEPPED_SHAFT: templateSteppedShaft,
+      CYLINDER:      templateCylinder,
+      PLATE:         templateBox,
+      POLYGON:       templatePolygon,
+      LINKAGE:       templateLinkage,
+      PLATE_HOLES:   templatePlateHoles,
+      L_BRACKET:     templateLBracket,
+      T_BRACKET:     templateLBracket,
+      U_CHANNEL:     templateUChannel,
+      FLANGE:        templateFlange,
+      HEX_NUT:       templateHexNut,
+      WASHER:        templateWasher,
+      BUSHING:       templateBushing,
+      STEPPED_SHAFT: templateSteppedShaft,
+      SPUR_GEAR:     templateSpurGear,   // ← NEW
     };
     body = (map[d.shape] || templateBox)(d);
   }
@@ -316,13 +395,18 @@ ${body}
 `;
 }
 
+// ── Dimension extraction system prompt ───────────────────────────────────────
+// The model returns JSON + a "thinking" field showing its engineering reasoning.
+
 const DIM_SYSTEM = `You are a mechanical CAD assistant. Read the user's part description and extract the shape type and all dimensions.
-Output ONLY valid JSON. No markdown, no explanation, no commentary.
+Output ONLY valid JSON — no markdown, no explanation, no preamble.
 
-All numeric values must be in inches. Do not include unit strings inside the JSON.
+All numeric values must be in inches (convert mm ÷ 25.4, cm ÷ 2.54).
 
+Required JSON shape:
 {
-  "featureName": "camelCase identifier, letters and digits only, no spaces",
+  "thinking": "1–3 sentences of engineering reasoning: what is this part, what are the key dimensions, how will it be modeled?",
+  "featureName": "camelCase identifier — letters and digits only",
   "featureLabel": "Human readable name",
   "shape": "shape code from the list below",
   "widthInches": 2,
@@ -336,7 +420,9 @@ All numeric values must be in inches. Do not include unit strings inside the JSO
   "wallThicknessInches": 0.25,
   "shaftLengthInches": 4,
   "holeSpacingInches": 1.5,
-  "numHoles": 4
+  "numHoles": 4,
+  "numTeeth": 20,
+  "moduleInches": 0.0787402
 }
 
 SHAPE CODES — pick the single best match:
@@ -344,57 +430,61 @@ SHAPE CODES — pick the single best match:
   CYLINDER      solid round rod, shaft, pin, column, post
   PLATE         flat thin sheet or panel with no holes
   POLYGON       regular N-sided prism — triangle (sides 3), pentagon (5), hexagon (6), octagon (8)
-  LINKAGE       flat bar with exactly one circular hole near each end — connecting rod, crank arm, rocker arm, tie rod, coupler
-  PLATE_HOLES   flat plate with a row or grid of through-holes — mounting plate, gusset, backing plate
-  L_BRACKET     L-shaped or angle-shaped cross-section — shelf bracket, corner bracket, angle iron
+  LINKAGE       flat bar with exactly one circular hole near each end — connecting rod, crank arm, rocker arm
+  PLATE_HOLES   flat plate with a row or grid of through-holes — mounting plate, gusset
+  L_BRACKET     L-shaped cross-section — shelf bracket, corner bracket, angle iron
   T_BRACKET     T-shaped cross-section
   U_CHANNEL     U or C shaped channel — groove rail, extrusion channel
-  FLANGE        round disk with a central bore and bolt holes spaced around the edge — pipe flange, weld neck
-  HEX_NUT       hexagonal nut or hex bolt head with a central bore
+  FLANGE        round disk with central bore and bolt circle — pipe flange, weld neck
+  HEX_NUT       hexagonal nut or bolt head with central bore
   WASHER        thin flat annular disk — flat washer, shim
   BUSHING       hollow cylinder — sleeve bushing, spacer tube, bearing liner
-  STEPPED_SHAFT cylinder that changes to a smaller diameter partway along — shoulder bolt, spindle
+  STEPPED_SHAFT cylinder that steps to a smaller diameter mid-length — shoulder bolt, spindle
+  SPUR_GEAR     toothed gear wheel, spur gear, gear with N teeth, gear ratio X:1, pinion, sprocket
 
-DIMENSION EXTRACTION RULES:
-  millimeters: divide by 25.4 to convert to inches
-  centimeters: divide by 2.54
-  "diameter X" means radiusInches = X / 2
-  "X by Y" or "X x Y" means widthInches = X, heightInches = Y
-  "across flats X" for hex shapes: widthInches = X
-  "OD X, ID Y" means radiusInches = X/2, holeRadiusInches = Y/2
-  For LINKAGE: shaftLengthInches = total bar length, widthInches = bar width, holeRadiusInches = pin hole radius
-  If a dimension is not stated, use a sensible mechanical default:
-    main body length/width/height: 2 inches
-    wall or flange thickness: 0.25 inches
-    small holes: 0.2 inch radius
-    numHoles: 4 for flanges and mounting plates
-  holeRadiusInches = 0 means no hole
-  filletRadiusInches = 0 means no fillet
+DIMENSION RULES:
+  "diameter X"           → radiusInches = X / 2
+  "X by Y" or "X × Y"   → widthInches = X, heightInches = Y
+  "across flats X"       → widthInches = X
+  "OD X, ID Y"           → radiusInches = X/2, holeRadiusInches = Y/2
+  holeRadiusInches = 0   → no hole
+  filletRadiusInches = 0 → no fillet
+  If not stated, use sensible mechanical defaults:
+    body dimensions: 2 inches, wall/flange thickness: 0.25 in, small holes: 0.2 in radius, numHoles: 4
+
+SPUR_GEAR RULES (critical — read carefully):
+  numTeeth:    Tooth count on the gear.
+               For "N:1 gear ratio": use numTeeth = N × 8 (minimum practical pinion = 8 teeth).
+               Example: "8:1 gear" → numTeeth = 64 (driven gear, mates with an 8-tooth pinion).
+               For "gear with N teeth": numTeeth = N directly.
+  moduleInches: Tooth size in inches. Default 0.0787402 (= 2 mm module).
+               If pitch diameter stated: moduleInches = pitchDiameter / numTeeth.
+               Common modules: 1mm=0.03937, 1.5mm=0.05906, 2mm=0.07874, 3mm=0.11811.
+  depthInches:  Face width (gear thickness). Default = moduleInches × 8.
+  holeRadiusInches: Bore/hub hole radius. Default 0 = solid gear.
 
 WORKED EXAMPLES:
+  "8:1 spur gear, 2mm module, 0.5 inch bore"
+    → SPUR_GEAR, numTeeth:64, moduleInches:0.0787402, depthInches:0.629, holeRadiusInches:0.25
+    thinking: "8:1 ratio with 8-tooth minimum pinion means 64 teeth on the driven gear. Module 2mm (0.0787\") gives pitch diameter 5.04\". Face width = 8 × module = 0.63\"."
+
+  "spur gear 20 teeth, 3mm module"
+    → SPUR_GEAR, numTeeth:20, moduleInches:0.11811, depthInches:0.945, holeRadiusInches:0
+    thinking: "20-tooth spur gear at 3mm module. Pitch diameter = 20 × 3mm = 60mm = 2.36\". Face width default = 8 × module = 24mm = 0.945\"."
+
   "6 inch connecting rod, 0.75 wide, quarter inch pin holes"
-    -> LINKAGE, shaftLengthInches:6, widthInches:0.75, depthInches:0.25, holeRadiusInches:0.125
+    → LINKAGE, shaftLengthInches:6, widthInches:0.75, depthInches:0.25, holeRadiusInches:0.125
 
-  "angle iron 2x2x0.25 by 12 inches long"
-    -> L_BRACKET, widthInches:2, heightInches:2, wallThicknessInches:0.25, depthInches:12
+  "angle iron 2×2×0.25 by 12 inches"
+    → L_BRACKET, widthInches:2, heightInches:2, wallThicknessInches:0.25, depthInches:12
 
-  "M10 hex nut"
-    -> HEX_NUT, widthInches:0.63, depthInches:0.315, holeRadiusInches:0.197
-
-  "4 inch flanged coupling with 6 bolt holes, half inch thick"
-    -> FLANGE, radiusInches:2, numHoles:6, depthInches:0.5, holeRadiusInches:0.25
-
-  "round stock 2 inch diameter by 8 inches"
-    -> CYLINDER, radiusInches:1, depthInches:8
+  "4 inch pipe flange, 6 bolt holes, half inch thick"
+    → FLANGE, radiusInches:2, numHoles:6, depthInches:0.5, holeRadiusInches:0.25
 
   "bushing 25mm OD, 16mm ID, 40mm long"
-    -> BUSHING, radiusInches:0.492, holeRadiusInches:0.315, depthInches:1.575
+    → BUSHING, radiusInches:0.492, holeRadiusInches:0.315, depthInches:1.575`;
 
-  "aluminum 6061 block 3x2x1"
-    -> BOX, widthInches:3, heightInches:2, depthInches:1
-
-  "equilateral triangle prism 1.5 inch side, 3 inches tall"
-    -> POLYGON, sides:3, radiusInches:0.866, depthInches:3`;
+// ── Dim extraction ────────────────────────────────────────────────────────────
 
 async function extractDims(prompt) {
   const raw = await chat([
@@ -404,6 +494,7 @@ async function extractDims(prompt) {
   try {
     const d = JSON.parse(stripJson(raw));
     return {
+      thinking:            String(d.thinking            ?? ""),
       featureName:         String(d.featureName         ?? "aiShape").replace(/[^a-zA-Z0-9_]/g, ""),
       featureLabel:        String(d.featureLabel        ?? "AI Shape"),
       shape:               String(d.shape               ?? "BOX"),
@@ -419,24 +510,30 @@ async function extractDims(prompt) {
       shaftLengthInches:   Number(d.shaftLengthInches)  || 4,
       holeSpacingInches:   Number(d.holeSpacingInches)  || 1.5,
       numHoles:            Number(d.numHoles)           || 4,
+      numTeeth:            Number(d.numTeeth)           || 20,
+      moduleInches:        Number(d.moduleInches)       || 0.0787402,
     };
   } catch {
     return {
+      thinking: "Could not parse AI response — using default box geometry.",
       featureName: "simpleCube", featureLabel: "Simple Cube", shape: "BOX",
       widthInches: 2, heightInches: 2, depthInches: 2, radiusInches: 1,
       holeRadiusInches: 0, filletRadiusInches: 0, chamferInches: 0,
-      sides: 6, wallThicknessInches: 0.25, shaftLengthInches: 4, holeSpacingInches: 1.5, numHoles: 4,
+      sides: 6, wallThicknessInches: 0.25, shaftLengthInches: 4,
+      holeSpacingInches: 1.5, numHoles: 4, numTeeth: 20, moduleInches: 0.0787402,
     };
   }
 }
+
+// ── Public exports ────────────────────────────────────────────────────────────
 
 export async function generateFeatureScript(prompt) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   console.log(`[generate] "${prompt}"`);
   const dims = await extractDims(prompt);
-  console.log(`[generate] ${dims.shape} w=${dims.widthInches} h=${dims.heightInches} d=${dims.depthInches} L=${dims.shaftLengthInches} hole=${dims.holeRadiusInches}`);
+  console.log(`[generate] shape=${dims.shape} teeth=${dims.numTeeth} mod=${dims.moduleInches} w=${dims.widthInches} d=${dims.depthInches}`);
   const code = buildFeatureScript(dims);
-  return { code, featureName: dims.featureName, featureLabel: dims.featureLabel };
+  return { code, featureName: dims.featureName, featureLabel: dims.featureLabel, thinking: dims.thinking };
 }
 
 export async function debugFeatureScript(code, errors) {
@@ -474,27 +571,56 @@ Errors to know about:
   }
 }
 
+// ── Single-image analysis (legacy endpoint, keeps backward compat) ────────────
+
 export async function analyzeImage(imageBase64, mimeType, extraPrompt) {
+  return analyzeImages(
+    [{ imageBase64, mimeType, context: extraPrompt || "" }],
+    extraPrompt || ""
+  );
+}
+
+// ── Multi-image analysis ──────────────────────────────────────────────────────
+// images: Array<{ imageBase64: string, mimeType: string, context: string }>
+// globalPrompt: overall instruction from the user
+
+export async function analyzeImages(images, globalPrompt) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[analyze] ${mimeType}`);
+  const count = images.length;
+  console.log(`[analyze-multi] ${count} image(s)`);
 
-  const descRaw = await chat([
-    {
-      role: "user",
-      content: [
-        { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
-        {
-          type: "text",
-          text: `You are a mechanical CAD engineer. Analyze this image of a part or CAD model.
-${extraPrompt ? `The user also said: "${extraPrompt}"` : ""}
-Describe the part clearly for a CAD system. Include the shape type, approximate dimensions in inches, any holes, fillets, or chamfers visible, and what the part is likely used for. Write in plain sentences. Do not use bullet points, arrows, or special characters.`
-        }
-      ]
+  // Build multi-image content array for the vision model
+  const content = [];
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    content.push({
+      type: "image_url",
+      image_url: { url: `data:${img.mimeType || "image/jpeg"};base64,${img.imageBase64}` }
+    });
+    if (img.context && img.context.trim()) {
+      content.push({ type: "text", text: `Image ${i + 1} context: ${img.context.trim()}` });
     }
-  ], VISION_MODEL);
+  }
 
-  console.log(`[analyze] "${descRaw.slice(0, 80)}..."`);
-  const combined = extraPrompt ? `${extraPrompt}. Based on this image: ${descRaw}` : descRaw;
-  const { code, featureName, featureLabel } = await generateFeatureScript(combined);
-  return { description: descRaw, code, featureName, featureLabel };
+  content.push({
+    type: "text",
+    text: `You are a mechanical CAD engineer analyzing ${count} reference image${count > 1 ? "s" : ""} together.
+${globalPrompt ? `The user's goal: "${globalPrompt}"` : ""}
+
+Synthesize ALL images into a single precise part description for an Onshape FeatureScript model. Include:
+- Part type and overall geometry
+- All dimensions (state in inches; convert from mm if visible)
+- Holes, bores, keyways, fillets, chamfers
+- Gear teeth count and module if applicable
+- Likely mechanical function
+
+Write in clear sentences. Be specific. Do not use bullet points.`
+  });
+
+  const descRaw = await chat([{ role: "user", content }], VISION_MODEL);
+  console.log(`[analyze-multi] vision: "${descRaw.slice(0, 100)}..."`);
+
+  const combined = globalPrompt ? `${globalPrompt}. Based on image analysis: ${descRaw}` : descRaw;
+  const { code, featureName, featureLabel, thinking } = await generateFeatureScript(combined);
+  return { description: descRaw, code, featureName, featureLabel, thinking };
 }
