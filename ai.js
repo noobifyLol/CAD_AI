@@ -15,10 +15,8 @@ async function chat(messages, model = TEXT_MODEL) {
   return res?.choices?.[0]?.message?.content ?? "";
 }
 
-// ─── FeatureScript value helpers ──────────────────────────────────────────────
-
-function n(x)  { return parseFloat(Number(x).toFixed(6)).toString(); }
-function fs(x) { return `${n(x)} * inch`; }
+const n  = x  => parseFloat(Number(x).toFixed(6)).toString();
+const fs = x  => `${n(x)} * inch`;
 
 function preconditionBlock() {
   return `    precondition
@@ -34,22 +32,16 @@ function planeSetup() {
             : evPlane(context, { "face" : definition.location });`;
 }
 
-function filletBlock(ref, r) {
-  return `\n        opFillet(context, id + "fillet1", {
+const filletBlock  = (ref, r) => `\n        opFillet(context, id + "fillet1", {
             "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "${ref}", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
             "radius"   : ${fs(r)}
         });`;
-}
 
-function chamferBlock(ref, w) {
-  return `\n        opChamfer(context, id + "chamfer1", {
+const chamferBlock = (ref, w) => `\n        opChamfer(context, id + "chamfer1", {
             "entities"    : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "${ref}", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
             "chamferType" : ChamferType.EQUAL_OFFSETS,
             "width"       : ${fs(w)}
         });`;
-}
-
-// ─── Shape templates ──────────────────────────────────────────────────────────
 
 function templateBox(d) {
   const hw = d.widthInches / 2, hh = d.heightInches / 2;
@@ -106,12 +98,11 @@ function templateLinkage(d) {
   const T  = d.depthInches || 0.25;
   const R  = d.holeRadiusInches > 0 ? d.holeRadiusInches : W * 0.18;
   const hx = L / 2 - R * 2.5;
-  const hw = L / 2, hh = W / 2;
   return `${planeSetup()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "body", {
-            "firstCorner"  : vector(${n(-hw)}, ${n(-hh)}) * inch,
-            "secondCorner" : vector(${n(hw)},  ${n(hh)})  * inch
+            "firstCorner"  : vector(${n(-L/2)}, ${n(-W/2)}) * inch,
+            "secondCorner" : vector(${n(L/2)},  ${n(W/2)})  * inch
         });
         skCircle(sketch1, "holeL", { "center" : vector(${n(-hx)}, 0) * inch, "radius" : ${fs(R)} });
         skCircle(sketch1, "holeR", { "center" : vector(${n( hx)}, 0) * inch, "radius" : ${fs(R)} });
@@ -150,15 +141,15 @@ function templatePlateHoles(d) {
 }
 
 function templateLBracket(d) {
-  const L = d.depthInches, W = d.widthInches, H = d.heightInches, T = d.wallThicknessInches;
+  const { depthInches: L, widthInches: W, heightInches: H, wallThicknessInches: T } = d;
   return `${planeSetup()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
-        skLineSegment(sketch1, "h1", { "start" : vector(0,0)*inch,               "end" : vector(${n(W)},0)*inch });
-        skLineSegment(sketch1, "h2", { "start" : vector(${n(W)},0)*inch,         "end" : vector(${n(W)},${n(T)})*inch });
-        skLineSegment(sketch1, "h3", { "start" : vector(${n(W)},${n(T)})*inch,   "end" : vector(${n(T)},${n(T)})*inch });
-        skLineSegment(sketch1, "v1", { "start" : vector(${n(T)},${n(T)})*inch,   "end" : vector(${n(T)},${n(H)})*inch });
-        skLineSegment(sketch1, "v2", { "start" : vector(${n(T)},${n(H)})*inch,   "end" : vector(0,${n(H)})*inch });
-        skLineSegment(sketch1, "v3", { "start" : vector(0,${n(H)})*inch,          "end" : vector(0,0)*inch });
+        skLineSegment(sketch1, "h1", { "start" : vector(0,0)*inch,             "end" : vector(${n(W)},0)*inch });
+        skLineSegment(sketch1, "h2", { "start" : vector(${n(W)},0)*inch,       "end" : vector(${n(W)},${n(T)})*inch });
+        skLineSegment(sketch1, "h3", { "start" : vector(${n(W)},${n(T)})*inch, "end" : vector(${n(T)},${n(T)})*inch });
+        skLineSegment(sketch1, "v1", { "start" : vector(${n(T)},${n(T)})*inch, "end" : vector(${n(T)},${n(H)})*inch });
+        skLineSegment(sketch1, "v2", { "start" : vector(${n(T)},${n(H)})*inch, "end" : vector(0,${n(H)})*inch });
+        skLineSegment(sketch1, "v3", { "start" : vector(0,${n(H)})*inch,        "end" : vector(0,0)*inch });
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
             "entities"  : qSketchRegion(id + "sketch1"),
@@ -168,14 +159,34 @@ function templateLBracket(d) {
         });${d.filletRadiusInches > 0 ? filletBlock("extrude1", d.filletRadiusInches) : ""}`;
 }
 
+function templateUChannel(d) {
+  const { widthInches: W, heightInches: H, wallThicknessInches: T, depthInches: L } = d;
+  return `${planeSetup()}
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+        skLineSegment(sketch1, "l1", { "start" : vector(0,0)*inch,                   "end" : vector(${n(W)},0)*inch });
+        skLineSegment(sketch1, "l2", { "start" : vector(${n(W)},0)*inch,              "end" : vector(${n(W)},${n(H)})*inch });
+        skLineSegment(sketch1, "l3", { "start" : vector(${n(W)},${n(H)})*inch,        "end" : vector(${n(W-T)},${n(H)})*inch });
+        skLineSegment(sketch1, "l4", { "start" : vector(${n(W-T)},${n(H)})*inch,      "end" : vector(${n(W-T)},${n(T)})*inch });
+        skLineSegment(sketch1, "l5", { "start" : vector(${n(W-T)},${n(T)})*inch,      "end" : vector(${n(T)},${n(T)})*inch });
+        skLineSegment(sketch1, "l6", { "start" : vector(${n(T)},${n(T)})*inch,        "end" : vector(${n(T)},${n(H)})*inch });
+        skLineSegment(sketch1, "l7", { "start" : vector(${n(T)},${n(H)})*inch,        "end" : vector(0,${n(H)})*inch });
+        skLineSegment(sketch1, "l8", { "start" : vector(0,${n(H)})*inch,               "end" : vector(0,0)*inch });
+        skSolve(sketch1);
+        opExtrude(context, id + "extrude1", {
+            "entities"  : qSketchRegion(id + "sketch1"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : ${fs(L)}
+        });`;
+}
+
 function templateFlange(d) {
   const R = d.radiusInches, bR = d.holeRadiusInches || 0.25;
-  const cR = bR * 2, boltR = R * 0.75;
-  const num = Math.max(2, Math.round(d.numHoles || 4));
+  const cR = bR * 2, boltR = R * 0.75, num = Math.max(2, Math.round(d.numHoles || 4));
   let holes = `\n        skCircle(sketch1, "bore", { "center" : vector(0,0)*inch, "radius" : ${fs(cR)} });`;
   for (let i = 0; i < num; i++) {
-    const ang = (2 * Math.PI * i) / num;
-    holes += `\n        skCircle(sketch1, "bh${i+1}", { "center" : vector(${n(boltR*Math.cos(ang))},${n(boltR*Math.sin(ang))})*inch, "radius" : ${fs(bR)} });`;
+    const a = (2 * Math.PI * i) / num;
+    holes += `\n        skCircle(sketch1, "bh${i+1}", { "center" : vector(${n(boltR*Math.cos(a))},${n(boltR*Math.sin(a))})*inch, "radius" : ${fs(bR)} });`;
   }
   return `${planeSetup()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
@@ -190,8 +201,7 @@ function templateFlange(d) {
 }
 
 function templateHexNut(d) {
-  const W = d.widthInches, T = d.depthInches, r = W / Math.sqrt(3);
-  const hR = d.holeRadiusInches || W * 0.22;
+  const r = d.widthInches / Math.sqrt(3), hR = d.holeRadiusInches || d.widthInches * 0.22;
   return `${planeSetup()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRegularPolygon(sketch1, "hex", { "center" : vector(0,0)*inch, "firstVertex" : vector(${n(r)},0)*inch, "sides" : 6 });
@@ -201,12 +211,12 @@ function templateHexNut(d) {
             "entities"  : qSketchRegion(id + "sketch1", true),
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
-            "endDepth"  : ${fs(T)}
+            "endDepth"  : ${fs(d.depthInches)}
         });`;
 }
 
 function templateWasher(d) {
-  const R = d.radiusInches, hR = d.holeRadiusInches || R * 0.4, T = d.depthInches || 0.1;
+  const R = d.radiusInches, hR = d.holeRadiusInches || R * 0.4;
   return `${planeSetup()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skCircle(sketch1, "outer", { "center" : vector(0,0)*inch, "radius" : ${fs(R)} });
@@ -216,12 +226,12 @@ function templateWasher(d) {
             "entities"  : qSketchRegion(id + "sketch1", true),
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
-            "endDepth"  : ${fs(T)}
+            "endDepth"  : ${fs(d.depthInches || 0.1)}
         });`;
 }
 
 function templateBushing(d) {
-  const R = d.radiusInches, hR = d.holeRadiusInches || R * 0.6, T = d.depthInches;
+  const R = d.radiusInches, hR = d.holeRadiusInches || R * 0.6;
   return `${planeSetup()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skCircle(sketch1, "outer", { "center" : vector(0,0)*inch, "radius" : ${fs(R)} });
@@ -231,7 +241,29 @@ function templateBushing(d) {
             "entities"  : qSketchRegion(id + "sketch1", true),
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
-            "endDepth"  : ${fs(T)}
+            "endDepth"  : ${fs(d.depthInches)}
+        });`;
+}
+
+function templateSteppedShaft(d) {
+  const R1 = d.radiusInches, R2 = R1 * 0.6, L1 = d.depthInches * 0.5, L2 = d.depthInches * 0.5;
+  return `${planeSetup()}
+        opCylinder(context, id + "cyl1", {
+            "bottomCenter"  : skPlane.origin,
+            "topCenter"     : skPlane.origin + skPlane.normal * ${fs(L1)},
+            "radius"        : ${fs(R1)},
+            "operationType" : NewBodyOperationType.NEW
+        });
+        opCylinder(context, id + "cyl2", {
+            "bottomCenter"  : skPlane.origin + skPlane.normal * ${fs(L1)},
+            "topCenter"     : skPlane.origin + skPlane.normal * ${fs(L1 + L2)},
+            "radius"        : ${fs(R2)},
+            "operationType" : NewBodyOperationType.NEW
+        });
+        opBoolean(context, id + "union1", {
+            "tools"         : qCreatedBy(id + "cyl2", EntityType.BODY),
+            "targets"       : qCreatedBy(id + "cyl1", EntityType.BODY),
+            "operationType" : BooleanOperationType.UNION
         });`;
 }
 
@@ -256,20 +288,17 @@ function templateBoxWithHole(d) {
 function buildFeatureScript(d) {
   const holeSafe = ["LINKAGE","PLATE_HOLES","FLANGE","HEX_NUT","WASHER","BUSHING"];
   let body;
-  if (d.holeRadiusInches > 0 && !holeSafe.includes(d.shape)) body = templateBoxWithHole(d);
-  else switch (d.shape) {
-    case "CYLINDER":    body = templateCylinder(d);   break;
-    case "PLATE":       body = templateBox(d);        break;
-    case "POLYGON":     body = templatePolygon(d);    break;
-    case "LINKAGE":     body = templateLinkage(d);    break;
-    case "PLATE_HOLES": body = templatePlateHoles(d); break;
-    case "L_BRACKET":
-    case "T_BRACKET":   body = templateLBracket(d);   break;
-    case "FLANGE":      body = templateFlange(d);     break;
-    case "HEX_NUT":     body = templateHexNut(d);     break;
-    case "WASHER":      body = templateWasher(d);     break;
-    case "BUSHING":     body = templateBushing(d);    break;
-    default:            body = templateBox(d);        break;
+  if (d.holeRadiusInches > 0 && !holeSafe.includes(d.shape)) {
+    body = templateBoxWithHole(d);
+  } else {
+    const map = {
+      CYLINDER: templateCylinder, PLATE: templateBox, POLYGON: templatePolygon,
+      LINKAGE: templateLinkage, PLATE_HOLES: templatePlateHoles,
+      L_BRACKET: templateLBracket, T_BRACKET: templateLBracket, U_CHANNEL: templateUChannel,
+      FLANGE: templateFlange, HEX_NUT: templateHexNut, WASHER: templateWasher,
+      BUSHING: templateBushing, STEPPED_SHAFT: templateSteppedShaft,
+    };
+    body = (map[d.shape] || templateBox)(d);
   }
 
   const name  = (d.featureName  || "aiShape").replace(/[^a-zA-Z0-9_]/g, "");
@@ -287,15 +316,15 @@ ${body}
 `;
 }
 
-// ─── Dimension extractor ──────────────────────────────────────────────────────
+const DIM_SYSTEM = `You are a mechanical CAD assistant. Read the user's part description and extract the shape type and all dimensions.
+Output ONLY valid JSON. No markdown, no explanation, no commentary.
 
-const DIM_SYSTEM = `You are a mechanical CAD dimension extractor. Output ONLY a valid JSON object. No markdown, no explanation, no extra text.
+All numeric values must be in inches. Do not include unit strings inside the JSON.
 
-Schema:
 {
-  "featureName": "camelCase identifier",
+  "featureName": "camelCase identifier, letters and digits only, no spaces",
   "featureLabel": "Human readable name",
-  "shape": "BOX|CYLINDER|PLATE|POLYGON|LINKAGE|PLATE_HOLES|L_BRACKET|T_BRACKET|FLANGE|HEX_NUT|WASHER|BUSHING",
+  "shape": "shape code from the list below",
   "widthInches": 2,
   "heightInches": 2,
   "depthInches": 0.25,
@@ -310,32 +339,62 @@ Schema:
   "numHoles": 4
 }
 
-Shape classification — read carefully before choosing:
+SHAPE CODES — pick the single best match:
+  BOX           rectangular block, cube, bar stock, base plate, slab
+  CYLINDER      solid round rod, shaft, pin, column, post
+  PLATE         flat thin sheet or panel with no holes
+  POLYGON       regular N-sided prism — triangle (sides 3), pentagon (5), hexagon (6), octagon (8)
+  LINKAGE       flat bar with exactly one circular hole near each end — connecting rod, crank arm, rocker arm, tie rod, coupler
+  PLATE_HOLES   flat plate with a row or grid of through-holes — mounting plate, gusset, backing plate
+  L_BRACKET     L-shaped or angle-shaped cross-section — shelf bracket, corner bracket, angle iron
+  T_BRACKET     T-shaped cross-section
+  U_CHANNEL     U or C shaped channel — groove rail, extrusion channel
+  FLANGE        round disk with a central bore and bolt holes spaced around the edge — pipe flange, weld neck
+  HEX_NUT       hexagonal nut or hex bolt head with a central bore
+  WASHER        thin flat annular disk — flat washer, shim
+  BUSHING       hollow cylinder — sleeve bushing, spacer tube, bearing liner
+  STEPPED_SHAFT cylinder that changes to a smaller diameter partway along — shoulder bolt, spindle
 
-BOX          — cube, block, rectangular solid, billet, slab with no holes
-CYLINDER     — cylinder, rod, shaft, tube (solid), dowel, pin, post, standoff, barrel, drum, peg, boss
-PLATE        — flat plate, sheet, panel, card, tile, no holes (use PLATE_HOLES if it has holes)
-POLYGON      — triangle, pentagon, hexagon, octagon, N-sided prism; use sides field
-LINKAGE      — connecting rod, linkage arm, link bar, rocker arm, crank arm, pitman arm, tie rod,
-               coupler, push rod, clevis rod, train link, drive rod, motion link, lever arm;
-               any elongated bar with a pin hole at each end
-PLATE_HOLES  — mounting plate, bracket face, gusset, pattern plate; flat rectangle with multiple holes
-L_BRACKET    — L-bracket, angle bracket, shelf bracket, corner bracket, right-angle bracket
-T_BRACKET    — T-bracket, T-plate (uses same template as L_BRACKET)
-FLANGE       — pipe flange, weld flange, bolt flange, circular plate with bolt circle
-HEX_NUT      — hex nut, jam nut, lock nut, nut
-WASHER       — washer, spacer disk, shim, flat ring
-BUSHING      — bushing, sleeve, hollow tube, liner, journal bearing, boss with through-hole
+DIMENSION EXTRACTION RULES:
+  millimeters: divide by 25.4 to convert to inches
+  centimeters: divide by 2.54
+  "diameter X" means radiusInches = X / 2
+  "X by Y" or "X x Y" means widthInches = X, heightInches = Y
+  "across flats X" for hex shapes: widthInches = X
+  "OD X, ID Y" means radiusInches = X/2, holeRadiusInches = Y/2
+  For LINKAGE: shaftLengthInches = total bar length, widthInches = bar width, holeRadiusInches = pin hole radius
+  If a dimension is not stated, use a sensible mechanical default:
+    main body length/width/height: 2 inches
+    wall or flange thickness: 0.25 inches
+    small holes: 0.2 inch radius
+    numHoles: 4 for flanges and mounting plates
+  holeRadiusInches = 0 means no hole
+  filletRadiusInches = 0 means no fillet
 
-Dimension rules:
-- All output must be in INCHES. Convert mm by dividing by 25.4.
-- "diameter X" means radiusInches = X / 2
-- "across flats X" (hex) means widthInches = X; the template converts to circumradius automatically
-- "OD X ID Y" means radiusInches = X/2, holeRadiusInches = Y/2
-- LINKAGE: shaftLengthInches = total length, widthInches = bar width, depthInches = thickness
-- PLATE_HOLES: numHoles counts holes; holeSpacingInches is center-to-center spacing
-- Any dimension not stated: use a sensible mechanical default (don't output 0 for important dims)
-- featureName must be a valid camelCase JS identifier with no spaces or special chars`;
+WORKED EXAMPLES:
+  "6 inch connecting rod, 0.75 wide, quarter inch pin holes"
+    -> LINKAGE, shaftLengthInches:6, widthInches:0.75, depthInches:0.25, holeRadiusInches:0.125
+
+  "angle iron 2x2x0.25 by 12 inches long"
+    -> L_BRACKET, widthInches:2, heightInches:2, wallThicknessInches:0.25, depthInches:12
+
+  "M10 hex nut"
+    -> HEX_NUT, widthInches:0.63, depthInches:0.315, holeRadiusInches:0.197
+
+  "4 inch flanged coupling with 6 bolt holes, half inch thick"
+    -> FLANGE, radiusInches:2, numHoles:6, depthInches:0.5, holeRadiusInches:0.25
+
+  "round stock 2 inch diameter by 8 inches"
+    -> CYLINDER, radiusInches:1, depthInches:8
+
+  "bushing 25mm OD, 16mm ID, 40mm long"
+    -> BUSHING, radiusInches:0.492, holeRadiusInches:0.315, depthInches:1.575
+
+  "aluminum 6061 block 3x2x1"
+    -> BOX, widthInches:3, heightInches:2, depthInches:1
+
+  "equilateral triangle prism 1.5 inch side, 3 inches tall"
+    -> POLYGON, sides:3, radiusInches:0.866, depthInches:3`;
 
 async function extractDims(prompt) {
   const raw = await chat([
@@ -345,7 +404,7 @@ async function extractDims(prompt) {
   try {
     const d = JSON.parse(stripJson(raw));
     return {
-      featureName:         String(d.featureName         ?? "aiShape").replace(/[^a-zA-Z0-9_]/g,""),
+      featureName:         String(d.featureName         ?? "aiShape").replace(/[^a-zA-Z0-9_]/g, ""),
       featureLabel:        String(d.featureLabel        ?? "AI Shape"),
       shape:               String(d.shape               ?? "BOX"),
       widthInches:         Number(d.widthInches)        || 2,
@@ -362,49 +421,45 @@ async function extractDims(prompt) {
       numHoles:            Number(d.numHoles)           || 4,
     };
   } catch {
-    return { featureName:"simpleCube", featureLabel:"Simple Cube", shape:"BOX",
-             widthInches:2, heightInches:2, depthInches:2, radiusInches:1,
-             holeRadiusInches:0, filletRadiusInches:0, chamferInches:0,
-             sides:6, wallThicknessInches:0.25, shaftLengthInches:4,
-             holeSpacingInches:1.5, numHoles:4 };
+    return {
+      featureName: "simpleCube", featureLabel: "Simple Cube", shape: "BOX",
+      widthInches: 2, heightInches: 2, depthInches: 2, radiusInches: 1,
+      holeRadiusInches: 0, filletRadiusInches: 0, chamferInches: 0,
+      sides: 6, wallThicknessInches: 0.25, shaftLengthInches: 4, holeSpacingInches: 1.5, numHoles: 4,
+    };
   }
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
 export async function generateFeatureScript(prompt) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[AI] Generating: "${prompt}"`);
+  console.log(`[generate] "${prompt}"`);
   const dims = await extractDims(prompt);
-  console.log(`[AI] shape=${dims.shape} w=${dims.widthInches} h=${dims.heightInches} d=${dims.depthInches} L=${dims.shaftLengthInches}`);
+  console.log(`[generate] ${dims.shape} w=${dims.widthInches} h=${dims.heightInches} d=${dims.depthInches} L=${dims.shaftLengthInches} hole=${dims.holeRadiusInches}`);
   const code = buildFeatureScript(dims);
-  console.log(`[AI] done — ${code.length} chars`);
   return { code, featureName: dims.featureName, featureLabel: dims.featureLabel };
 }
 
 export async function debugFeatureScript(code, errors) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[AI] Debugging FeatureScript (${code.length} chars)`);
+  console.log(`[debug] ${code.length} chars`);
 
   const raw = await chat([
     {
       role: "system",
-      content: `You are an Onshape FeatureScript debugger. The user gives you broken FeatureScript and error messages.
+      content: `You are an Onshape FeatureScript debugger. Fix every error in the code the user provides.
+Return a JSON object with exactly two fields:
+{ "explanation": "plain English description of every problem and how you fixed it",
+  "fixed": "the complete corrected FeatureScript with no markdown code fences" }
 
-Return ONLY a JSON object:
-{ "explanation": "plain English — what was wrong and what you changed",
-  "fixed": "the complete corrected FeatureScript with no markdown and no backticks" }
-
-Common fixes to apply:
-- NUMBER * inch * inch → NUMBER * inch
-- qOriginPlane(context, Plane.XY) → plane(WORLD_ORIGIN, Z_DIRECTION)
-- evPlane(...).normal used as sketch plane → assign evPlane to variable first, use variable.normal
-- skPolygon → skRegularPolygon
-- isLength / isBoolean in feature body → move into precondition or remove
-- Missing skSolve() → add after last sketch entity, before opExtrude
-- Multiple export const blocks → keep only the last
-- return statement in body → delete
-- Raw number for geometry dimension → add * inch`
+Errors to know about:
+- "* inch * inch" is a double unit — remove the second "* inch"
+- qOriginPlane(context, Plane.XY) should be plane(WORLD_ORIGIN, Z_DIRECTION)
+- skPolygon does not exist — use skRegularPolygon
+- isLength or isBoolean inside the feature body must be deleted or moved to the precondition block
+- skSolve() must be called after the last sketch entity and before opExtrude
+- If there are two export const blocks, keep only the last one
+- Return statements in the feature body should be deleted
+- Bare numbers like "endDepth": 2 are missing a unit — change to "endDepth": 2 * inch`
     },
     { role: "user", content: `FEATURESCRIPT:\n${code}\n\nERRORS:\n${errors}` }
   ]);
@@ -415,13 +470,13 @@ Common fixes to apply:
     return { fixed, explanation: parsed.explanation || "Fixed." };
   } catch {
     const cleaned = raw.replace(/^```[\w]*\n?/gm, "").replace(/^```$/gm, "").trim();
-    return { fixed: cleaned || code, explanation: "Could not parse the fix response — raw output returned." };
+    return { fixed: cleaned || code, explanation: "Could not parse the structured response. Raw output shown." };
   }
 }
 
 export async function analyzeImage(imageBase64, mimeType, extraPrompt) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[AI] Analyzing image (${mimeType})`);
+  console.log(`[analyze] ${mimeType}`);
 
   const descRaw = await chat([
     {
@@ -430,24 +485,16 @@ export async function analyzeImage(imageBase64, mimeType, extraPrompt) {
         { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
         {
           type: "text",
-          text: `You are a mechanical CAD engineer. Examine this image of a part or CAD model.
-${extraPrompt ? `User note: "${extraPrompt}"` : ""}
-
-Describe the part for a CAD dimension extractor:
-- Overall shape category (box, cylinder, L-bracket, linkage arm, flange, etc.)
-- Key dimensions in inches where estimable
-- Presence of holes, fillets, chamfers and their approximate sizes
-- Mechanical function of the part
-
-Be specific. Plain text only, no lists, no headers.`
+          text: `You are a mechanical CAD engineer. Analyze this image of a part or CAD model.
+${extraPrompt ? `The user also said: "${extraPrompt}"` : ""}
+Describe the part clearly for a CAD system. Include the shape type, approximate dimensions in inches, any holes, fillets, or chamfers visible, and what the part is likely used for. Write in plain sentences. Do not use bullet points, arrows, or special characters.`
         }
       ]
     }
   ], VISION_MODEL);
 
-  console.log(`[AI] Image description: ${descRaw.slice(0, 100)}...`);
-
-  const combinedPrompt = extraPrompt ? `${extraPrompt}. Based on image: ${descRaw}` : descRaw;
-  const { code, featureName, featureLabel } = await generateFeatureScript(combinedPrompt);
+  console.log(`[analyze] "${descRaw.slice(0, 80)}..."`);
+  const combined = extraPrompt ? `${extraPrompt}. Based on this image: ${descRaw}` : descRaw;
+  const { code, featureName, featureLabel } = await generateFeatureScript(combined);
   return { description: descRaw, code, featureName, featureLabel };
 }

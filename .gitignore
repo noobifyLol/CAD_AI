@@ -4,3 +4,4 @@ vcpkg/
 .env
 env
 docs/
+test.js
