@@ -1079,3 +1079,17 @@ ok so here is my desing plan right now, the feature leads to render link and the
 
 **5/3/26**
 Got a backend frontend and backend that is unblocked from MCPS technologies and can generate gears and other basic shapes into ones environemtns. It cna also analyize images.
+
+Later this day the code wouldn't deploy 
+**The fix**
+The Render error is fixed. In ai.js there was a chunk of browser UI code accidentally pasted into the server module, and analyzeImage() ended up inside an unclosed function, which is why Node threw SyntaxError: Unexpected token 'export'.
+
+I removed that frontend-only block from ai.js and restored analyzeImage() so it correctly delegates to analyzeImages(...). Both files now pass syntax checks:
+
+
+node --check ai.js
+
+node --check server.js
+
+
+You should be able to redeploy to Render now.
