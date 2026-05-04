@@ -447,49 +447,76 @@
       </div>
     </div>
   </div>
+ <!-- ── Images (multi-image) ── -->
+<div id="tab-analyze" class="panel">
+  <div class="two-col">
+    
+    <!-- Left: image slots + controls -->
+    <div>
+      <div class="card">
+        <div class="card-label">Reference Images</div>
+        <p class="hint" style="margin-bottom:12px">
+          Add one or more images — a hand sketch, dimension drawing, photo of a real part, etc. Label each so the AI knows what it's looking at.
+        </p>
 
-  <!-- ── Images (multi-image) ── -->
-  <div id="tab-analyze" class="panel">
-    <div class="two-col">
+        <!-- Dynamic image slots rendered here -->
+        <div class="image-slots-container" id="image-slots-container">
+          
+          <!-- INITIAL DEFAULT SLOT (Template for JS generation) -->
+          <div class="image-slot" style="margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px;">
+            <div class="card-label">Image 1</div>
+            
+            <!-- Drag and Drop Zone -->
+            <div class="image-drop drop-zone" 
+                 onclick="this.querySelector('.img-input').click()"
+                 ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                 ondragleave="this.classList.remove('drag-over')"
+                 ondrop="handleDrop(event, this)">
+              
+              <!-- Changed to CLASS instead of ID to prevent HTML collisions -->
+              <input type="file" class="img-input" accept="image/*" onchange="handleFile(this.files[0], this)" style="display:none;">
+              
+              <div class="drop-text">
+                Click or drag an image here<br>
+                <small style="color:var(--muted)">Photo of a real part, CAD screenshot, or sketch</small>
+              </div>
+              <img class="img-preview" style="display:none; max-width:100%; margin-top:10px;" alt="Preview">
+            </div>
 
-      <!-- Left: image slots + controls -->
-      <div>
-        <div class="card">
-          <div class="card-label">Reference Images</div>
-          <p class="hint" style="margin-bottom:12px">Add one or more images — a hand sketch, dimension drawing, photo of a real part, etc. Label each so the AI knows what it's looking at.</p>
-
-          <!-- Dynamic image slots rendered here -->
-          <div class="image-slots-container" id="image-slots-container"></div>
-
-          <!-- Add image button -->
-          <div class="add-img-row">
-            <button class="btn btn-ghost" onclick="addImageSlot()" style="font-size:0.82rem; padding:7px 14px;">
-              + Add Another Image
-            </button>
-            <span>Up to 4 images supported</span>
+            <!-- Slot-specific label -->
+            <p class="card-label" style="margin-top:10px; font-size: 0.85rem;">Image Label / Specifics</p>
+            <input type="text" class="slot-prompt" placeholder="e.g. Top view dimensions, or 'Make this 3 inches long'">
           </div>
+          <!-- END INITIAL SLOT -->
 
-          <p class="card-label" style="margin-top:16px">Overall Goal / Instructions</p>
-          <input type="text" id="global-prompt"
-            placeholder="What should be generated? e.g. 'Create this gear using the dimensions in image 2'">
+        </div>
 
-          <div class="btn-row">
-            <button class="btn btn-primary" id="analyze-btn" onclick="analyzeMultiImg()">
-              Analyze &amp; Generate
-            </button>
-          </div>
+        <!-- Add image button -->
+        <div class="add-img-row" style="display: flex; align-items: center; justify-content: space-between;">
+          <button class="btn btn-ghost" onclick="addImageSlot()" style="font-size:0.82rem; padding:7px 14px;">
+            + Add Another Image
+          </button>
+          <span style="font-size: 0.8rem; color: var(--muted);">Up to 4 images supported</span>
+        </div>
+
+        <p class="card-label" style="margin-top:20px">Overall Goal / Instructions</p>
+        <input type="text" id="global-prompt" placeholder="What should be generated? e.g. 'Create this gear using the dimensions in image 2'">
+
+        <div class="btn-row" style="margin-top: 16px;">
+          <button class="btn btn-primary" id="analyze-btn" onclick="analyzeMultiImg()">Analyze & Generate</button>
         </div>
       </div>
-
-      <!-- Right: output -->
-      <div>
+    </div>
+    
+    <!-- Right Column (Placeholder for Results/Viewer) -->
+     <div>
         <div class="card">
           <div class="card-label">Part Description</div>
           <div id="analyze-desc" class="explanation-box"
                style="display:block; min-height:52px; color:var(--muted); font-style:italic">
             Upload images to see how the AI reads the part.
           </div>
-
+ 
           <!-- AI Thinking -->
           <div id="analyze-thinking-wrap" class="thinking-wrap" style="display:none; margin-bottom:14px">
             <div class="thinking-header" onclick="toggleThinking('analyze')" id="analyze-thinking-header">
@@ -498,7 +525,7 @@
             </div>
             <div class="thinking-body" id="analyze-thinking-body"></div>
           </div>
-
+ 
           <div class="card-label">Generated FeatureScript</div>
           <div id="analyze-status" class="status"></div>
           <div id="analyze-output" class="output-box empty">FeatureScript will appear here.</div>
@@ -507,9 +534,13 @@
           </div>
         </div>
       </div>
-
+ 
     </div>
   </div>
+    
+  </div>
+</div>
+      
 
   <!-- ── Guide ── -->
   <div id="tab-guide" class="panel">

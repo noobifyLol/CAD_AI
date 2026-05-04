@@ -1076,3 +1076,6 @@ now since onshape connection is finished now it is all a prompt engineering and 
 Still modified design, this approach was calling API's key so I would just have to using render backend cappabliites to do this 
 **Current plan**
 ok so here is my desing plan right now, the feature leads to render link and then in that link id where the user puts the prompt probably in like onshape or something idk and then the server post out a json string with the featurescript that they want
+
+**5/3/26**
+Got a backend frontend and backend that is unblocked from MCPS technologies and can generate gears and other basic shapes into ones environemtns. It cna also analyize images.

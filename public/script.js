@@ -98,57 +98,173 @@ async function debugCode() {
 }
 
 let currentImageBase64 = null, currentMime = null;
+let multiImages = [];
 
-function handleFile(file) {
+function getImageSlotElements(source) {
+  const slot = source?.closest?.('.image-slot');
+  if (!slot) return null;
+
+  return {
+    slot,
+    dropText: slot.querySelector('.drop-text'),
+    preview: slot.querySelector('.img-preview'),
+    input: slot.querySelector('.img-input'),
+    prompt: slot.querySelector('.slot-prompt')
+  };
+}
+
+function updateAnalyzeDescription(text, isPlaceholder = false) {
+  const descEl = document.getElementById('analyze-desc');
+  descEl.textContent = text;
+  descEl.style.fontStyle = isPlaceholder ? 'italic' : 'normal';
+  descEl.style.color = isPlaceholder ? 'var(--muted)' : 'var(--text)';
+}
+
+function syncSlotLabels() {
+  document.querySelectorAll('#image-slots-container .image-slot').forEach((slot, index) => {
+    slot.dataset.index = String(index);
+
+    const title = slot.querySelector('.slot-title');
+    if (title) title.textContent = `Image ${index + 1}`;
+
+    const removeBtn = slot.querySelector('.slot-remove-btn');
+    if (removeBtn) removeBtn.style.display = index === 0 ? 'none' : 'inline-flex';
+  });
+}
+
+function collectMultiImages() {
+  return Array.from(document.querySelectorAll('#image-slots-container .image-slot'))
+    .map(slot => {
+      const index = Number(slot.dataset.index);
+      const prompt = slot.querySelector('.slot-prompt')?.value.trim() || '';
+      const image = multiImages[index];
+
+      if (!image?.imageBase64) return null;
+      return { ...image, context: prompt };
+    })
+    .filter(Boolean);
+}
+
+function handleFile(file, source) {
   if (!file || !file.type.startsWith('image/')) return;
-  currentMime = file.type;
+
+  const els = getImageSlotElements(source);
+  if (!els) {
+    currentMime = file.type;
+    const reader = new FileReader();
+    reader.onload = e => {
+      currentImageBase64 = e.target.result.split(',')[1];
+    };
+    reader.readAsDataURL(file);
+    return;
+  }
+
+  const index = Number(els.slot.dataset.index);
   const reader = new FileReader();
   reader.onload = e => {
-    currentImageBase64 = e.target.result.split(',')[1];
-    document.getElementById('drop-text').style.display = 'none';
-    const img = document.getElementById('img-preview');
-    img.src = e.target.result;
-    img.style.display = 'block';
+    const dataUrl = e.target.result;
+    multiImages[index] = {
+      imageBase64: dataUrl.split(',')[1],
+      mimeType: file.type
+    };
+
+    if (els.dropText) els.dropText.style.display = 'none';
+    if (els.preview) {
+      els.preview.src = dataUrl;
+      els.preview.style.display = 'block';
+    }
+
+    if (index === 0) {
+      currentImageBase64 = multiImages[index].imageBase64;
+      currentMime = file.type;
+    }
   };
   reader.readAsDataURL(file);
 }
 
-function handleDrop(e) {
+function handleDrop(e, dropZone) {
   e.preventDefault();
-  document.getElementById('drop-zone').classList.remove('drag-over');
+  if (dropZone) dropZone.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
-  if (file) handleFile(file);
+  if (file) handleFile(file, dropZone);
+}
+
+function addImageSlot() {
+  const container = document.getElementById('image-slots-container');
+  const currentCount = container.querySelectorAll('.image-slot').length;
+  if (currentCount >= 4) {
+    setStatus('analyze-status', 'You can upload up to 4 images.', 'error');
+    return;
+  }
+
+  const slot = document.createElement('div');
+  slot.className = 'image-slot';
+  slot.innerHTML = `
+    <div class="slot-header">
+      <div class="card-label slot-title">Image ${currentCount + 1}</div>
+      <button type="button" class="slot-remove-btn" onclick="removeImageSlot(this)">Remove</button>
+    </div>
+    <div class="image-drop drop-zone"
+         onclick="this.querySelector('.img-input').click()"
+         ondragover="event.preventDefault(); this.classList.add('drag-over')"
+         ondragleave="this.classList.remove('drag-over')"
+         ondrop="handleDrop(event, this)">
+      <input type="file" class="img-input" accept="image/*" onchange="handleFile(this.files[0], this)" style="display:none;">
+      <div class="drop-text">
+        Click or drag an image here<br>
+        <small style="color:var(--muted)">Add another reference angle, drawing, or dimension sheet</small>
+      </div>
+      <img class="img-preview" style="display:none; max-width:100%; margin-top:10px;" alt="Preview">
+    </div>
+    <p class="card-label" style="margin-top:10px; font-size: 0.85rem;">Image Label / Specifics</p>
+    <input type="text" class="slot-prompt" placeholder="e.g. Side view dimensions or 'Use this hole spacing'">
+  `;
+
+  container.appendChild(slot);
+  syncSlotLabels();
+  requestAnimationFrame(() => slot.classList.add('slot-visible'));
+}
+
+function removeImageSlot(button) {
+  const slot = button.closest('.image-slot');
+  if (!slot) return;
+
+  const index = Number(slot.dataset.index);
+  multiImages.splice(index, 1);
+  slot.remove();
+  syncSlotLabels();
 }
 
 async function analyzeImg() {
-  if (!currentImageBase64) {
-    setStatus('analyze-status', 'Please upload an image first.', 'error');
+  return analyzeMultiImg();
+}
+
+async function analyzeMultiImg() {
+  const images = collectMultiImages();
+  if (images.length === 0) {
+    setStatus('analyze-status', 'Please upload at least one image.', 'error');
     return;
   }
-  const prompt = document.getElementById('analyze-prompt').value.trim();
 
-  setStatus('analyze-status', 'Analyzing image...', 'loading');
-  document.getElementById('analyze-desc').textContent = 'Analyzing...';
+  const globalPrompt = document.getElementById('global-prompt')?.value.trim() || '';
+  setStatus('analyze-status', 'Analyzing images...', 'loading');
+  updateAnalyzeDescription('Analyzing...', true);
 
   try {
-    const r = await fetch('/analyze', {
+    const r = await fetch('/analyze-multi', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: currentImageBase64, mimeType: currentMime, prompt })
+      body: JSON.stringify({ images, globalPrompt })
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Analysis failed');
 
-    const descEl = document.getElementById('analyze-desc');
-    descEl.textContent = data.description;
-    descEl.style.fontStyle = 'normal';
-    descEl.style.color = 'var(--text)';
-
+    updateAnalyzeDescription(data.description);
     setOutput('analyze-output', data.code, 'analyze-copy-btn');
     setStatus('analyze-status', `Generated "${data.featureLabel}"`, 'ok');
   } catch (e) {
     setStatus('analyze-status', `Error: ${e.message}`, 'error');
-    document.getElementById('analyze-desc').textContent = 'Analysis failed.';
+    updateAnalyzeDescription('Analysis failed.', true);
   }
 }
 
@@ -156,4 +272,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('gen-prompt').addEventListener('keydown', e => {
     if (e.key === 'Enter' && e.ctrlKey) generate();
   });
+
+  syncSlotLabels();
+  const firstSlot = document.querySelector('#image-slots-container .image-slot');
+  if (firstSlot) firstSlot.classList.add('slot-visible');
 });

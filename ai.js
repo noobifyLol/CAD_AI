@@ -556,7 +556,9 @@ Errors to know about:
 - skSolve() must be called after the last sketch entity and before opExtrude
 - If there are two export const blocks, keep only the last one
 - Return statements in the feature body should be deleted
-- Bare numbers like "endDepth": 2 are missing a unit — change to "endDepth": 2 * inch`
+- Bare numbers like "endDepth": 2 are missing a unit — change to "endDepth": 2 * inch
+- remember FeatureScript syntax like for example 'annotation' is lowercased and 'var' is spelt like that`
+
     },
     { role: "user", content: `FEATURESCRIPT:\n${code}\n\nERRORS:\n${errors}` }
   ]);
@@ -571,7 +573,105 @@ Errors to know about:
   }
 }
 
-// ── Single-image analysis (legacy endpoint, keeps backward compat) ────────────
+let multiImages = [];
+
+function addImageSlot() {
+  const container = document.getElementById("image-slots-container");
+  if (container.children.length >= 4) return;
+
+  const index = container.children.length;
+
+  const slot = document.createElement("div");
+  slot.className = "drop-box";
+  slot.id = `drop-box-${index}`;
+  slot.innerHTML = `
+    <p id="drop-text-${index}">Click or drag an image here</p>
+    <input type="file" accept="image/*" style="display:none" id="file-input-${index}">
+    <img id="preview-${index}" class="drop-preview">
+    <textarea id="context-${index}" class="drop-context" placeholder="Optional: context for this image"></textarea>
+  `;
+
+  // Click opens file picker
+  slot.addEventListener("click", () => {
+    document.getElementById(`file-input-${index}`).click();
+  });
+
+  // Drag events
+  slot.addEventListener("dragover", e => {
+    e.preventDefault();
+    slot.classList.add("drag-over");
+  });
+
+  slot.addEventListener("dragleave", () => {
+    slot.classList.remove("drag-over");
+  });
+
+  slot.addEventListener("drop", e => {
+    e.preventDefault();
+    slot.classList.remove("drag-over");
+    const file = e.dataTransfer.files[0];
+    if (file) handleMultiImage(file, index);
+  });
+
+  // File input handler
+  document.getElementById(`file-input-${index}`).addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (file) handleMultiImage(file, index);
+  });
+
+  container.appendChild(slot);
+}
+
+function handleMultiImage(file, index) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const base64 = e.target.result.split(",")[1];
+    const mime = file.type;
+
+    multiImages[index] = { imageBase64: base64, mimeType: mime, context: "" };
+
+    document.getElementById(`drop-text-${index}`).style.display = "none";
+
+    const img = document.getElementById(`preview-${index}`);
+    img.src = e.target.result;
+    img.style.display = "block";
+  };
+  reader.readAsDataURL(file);
+}
+
+async function analyzeMultiImg() {
+  const globalPrompt = document.getElementById("global-prompt").value.trim();
+
+  // Attach per-image context
+  multiImages = multiImages.map((img, i) => ({
+    ...img,
+    context: document.getElementById(`context-${i}`).value.trim()
+  }));
+
+  if (multiImages.length === 0) {
+    setStatus("analyze-status", "Please upload at least one image.", "error");
+    return;
+  }
+
+  setStatus("analyze-status", "Analyzing images...", "loading");
+
+  try {
+    const r = await fetch("/analyze-multi", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images: multiImages, globalPrompt })
+    });
+
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Analysis failed");
+
+    document.getElementById("analyze-desc").textContent = data.description;
+    setOutput("analyze-output", data.code, "analyze-copy-btn");
+    setStatus("analyze-status", `Generated "${data.featureLabel}"`, "ok");
+
+  } catch (err) {
+    setStatus("analyze-status", `Error: ${err.message}`, "error");
+  }
 
 export async function analyzeImage(imageBase64, mimeType, extraPrompt) {
   return analyzeImages(
@@ -623,4 +723,5 @@ Write in clear sentences. Be specific. Do not use bullet points.`
   const combined = globalPrompt ? `${globalPrompt}. Based on image analysis: ${descRaw}` : descRaw;
   const { code, featureName, featureLabel, thinking } = await generateFeatureScript(combined);
   return { description: descRaw, code, featureName, featureLabel, thinking };
+}
 }
