@@ -3,7 +3,7 @@ import express from "express";
 import { generateFeatureScript, debugFeatureScript, analyzeImage, analyzeImages } from "./ai.js";
 
 const app  = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 10000);
 
 app.use(express.json({ limit: "20mb" })); // large enough for multiple base64 images
 app.use(express.static("public"));

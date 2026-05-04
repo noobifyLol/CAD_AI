@@ -674,7 +674,8 @@ async function analyzeMultiImg() {
   }
 
 export async function analyzeImage(imageBase64, mimeType, extraPrompt) {
-  return analyzeImages(
+  // Ensure this calls 'analyzeMultiImg' if that is what you named your handler
+  return analyzeMultiImg(
     [{ imageBase64, mimeType, context: extraPrompt || "" }],
     extraPrompt || ""
   );
