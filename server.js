@@ -1,34 +1,141 @@
 import "dotenv/config";
 import express from "express";
-import { generateFeatureScript, debugFeatureScript, analyzeImage, analyzeImages } from "./ai.js";
+import { createClient } from "@supabase/supabase-js";
+import { analyzeImage, analyzeImages, debugFeatureScript, generateFeatureScript } from "./ai.js";
 
-const app  = express();
+const app = express();
 const PORT = Number(process.env.PORT || 10000);
 
-app.use(express.json({ limit: "20mb" })); // large enough for multiple base64 images
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
+
+app.use(express.json({ limit: "20mb" }));
 app.use(express.static("public"));
 
-// ── Generate FeatureScript from a text prompt ─────────────────────────────────
+if (!supabase) {
+  console.warn("[DB] Supabase is disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY to enable learning/logging.");
+}
+
+function extractKeywords(prompt, limit = 5) {
+  const stopWords = new Set([
+    "the", "and", "for", "with", "that", "this", "make", "build", "create", "using",
+    "part", "model", "feature", "featurescript", "inch", "inches", "from", "into"
+  ]);
+
+  const words = String(prompt || "").toLowerCase().match(/[a-z0-9_]+/g) || [];
+  return [...new Set(words.filter(word => word.length > 2 && !stopWords.has(word)))].slice(0, limit);
+}
+
+function jsonSafe(value) {
+  return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+async function fetchLearningContext(prompt) {
+  const learningContext = {
+    prompt,
+    examples: [],
+    notes: [],
+  };
+
+  if (!supabase || !prompt) return learningContext;
+
+  const keywords = extractKeywords(prompt);
+  let query = supabase
+    .from("generations")
+    .select("prompt, shape_type, confidence, dims, featurescript, thinking")
+    .limit(6);
+
+  if (keywords.length) {
+    const filters = keywords
+      .flatMap(keyword => [`prompt.ilike.%${keyword}%`, `shape_type.ilike.%${keyword}%`])
+      .join(",");
+    query = query.or(filters);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn("[DB] Could not load learning examples:", error.message);
+    return learningContext;
+  }
+
+  learningContext.examples = Array.isArray(data) ? data.filter(Boolean).slice(0, 3) : [];
+
+  const shapes = [...new Set(learningContext.examples.map(example => example.shape_type).filter(Boolean))];
+  if (shapes.length) {
+    learningContext.notes.push(`Recent related shapes in the project database: ${shapes.join(", ")}.`);
+  }
+
+  const reasoningHints = learningContext.examples
+    .map(example => String(example.thinking || "").split("\n")[0].trim())
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (reasoningHints.length) {
+    learningContext.notes.push(`Prior reasoning patterns: ${reasoningHints.join(" | ")}`);
+  }
+
+  return learningContext;
+}
+
+async function logGeneration(prompt, result) {
+  if (!supabase) return;
+
+  const payload = {
+    prompt,
+    shape_type: result?.dims?.shape || null,
+    confidence: result?.dims?.confidence || null,
+    dims: jsonSafe(result?.dims),
+    featurescript: result?.code || "",
+    thinking: result?.thinking || "",
+  };
+
+  const { error } = await supabase.from("generations").insert([payload]);
+  if (error) {
+    console.warn("[DB] Failed to log generation:", error.message);
+  }
+}
+
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    supabaseEnabled: Boolean(supabase),
+  });
+});
+
 app.post("/generate", async (req, res) => {
-  const prompt = (req.body.prompt || "").trim();
+  const prompt = String(req.body.prompt || "").trim();
   if (!prompt) return res.status(400).json({ error: "No prompt provided." });
 
   try {
-    const { code, featureName, featureLabel, thinking } = await generateFeatureScript(prompt);
-    res.json({ code, featureName, featureLabel, thinking });
+    const learningContext = await fetchLearningContext(prompt);
+    const result = await generateFeatureScript(prompt, { learningContext });
+    await logGeneration(prompt, result);
+    res.json({
+      code: result.code,
+      featureName: result.featureName,
+      featureLabel: result.featureLabel,
+      thinking: result.thinking,
+      generationMode: result.generationMode,
+    });
   } catch (err) {
     console.error("[/generate]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── Debug / fix broken FeatureScript ─────────────────────────────────────────
 app.post("/debug", async (req, res) => {
-  const { code, errors } = req.body;
+  const code = String(req.body.code || "").trim();
+  const errors = String(req.body.errors || "").trim();
   if (!code) return res.status(400).json({ error: "No FeatureScript provided." });
 
   try {
-    const { fixed, explanation } = await debugFeatureScript(code, errors || "");
+    const learningContext = await fetchLearningContext(`${errors}\n${code.slice(0, 400)}`);
+    const { fixed, explanation } = await debugFeatureScript(code, errors, { learningContext });
     res.json({ fixed, explanation });
   } catch (err) {
     console.error("[/debug]", err.message);
@@ -36,37 +143,44 @@ app.post("/debug", async (req, res) => {
   }
 });
 
-// ── Analyze a single image (legacy) ──────────────────────────────────────────
 app.post("/analyze", async (req, res) => {
-  const { imageBase64, mimeType, prompt } = req.body;
+  const imageBase64 = req.body.imageBase64;
+  const mimeType = req.body.mimeType || "image/jpeg";
+  const prompt = String(req.body.prompt || "").trim();
   if (!imageBase64) return res.status(400).json({ error: "No image provided." });
 
   try {
-    const { description, code, featureName, featureLabel, thinking } =
-      await analyzeImage(imageBase64, mimeType || "image/jpeg", prompt || "");
-    res.json({ description, code, featureName, featureLabel, thinking });
+    const learningContext = await fetchLearningContext(prompt);
+    const result = await analyzeImage(imageBase64, mimeType, prompt, { learningContext });
+    await logGeneration(prompt || "Image analysis", result);
+    res.json(result);
   } catch (err) {
     console.error("[/analyze]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── Analyze multiple images together ─────────────────────────────────────────
-// Body: {
-//   images: Array<{ imageBase64: string, mimeType: string, context: string }>,
-//   globalPrompt: string
-// }
 app.post("/analyze-multi", async (req, res) => {
-  const { images, globalPrompt } = req.body;
-  if (!Array.isArray(images) || images.length === 0)
+  const images = Array.isArray(req.body.images) ? req.body.images : [];
+  const globalPrompt = String(req.body.globalPrompt || "").trim();
+
+  if (images.length === 0) {
     return res.status(400).json({ error: "No images provided." });
-  if (images.some(img => !img.imageBase64))
+  }
+  if (images.some(img => !img?.imageBase64)) {
     return res.status(400).json({ error: "One or more images are missing base64 data." });
+  }
 
   try {
-    const { description, code, featureName, featureLabel, thinking } =
-      await analyzeImages(images, globalPrompt || "");
-    res.json({ description, code, featureName, featureLabel, thinking });
+    const contextualPrompt = [
+      globalPrompt,
+      ...images.map(img => String(img.context || "").trim()).filter(Boolean),
+    ].join(" | ");
+
+    const learningContext = await fetchLearningContext(contextualPrompt);
+    const result = await analyzeImages(images, globalPrompt, { learningContext });
+    await logGeneration(contextualPrompt || "Multi-image analysis", result);
+    res.json(result);
   } catch (err) {
     console.error("[/analyze-multi]", err.message);
     res.status(500).json({ error: err.message });
@@ -74,6 +188,5 @@ app.post("/analyze-multi", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n🚀 AI CAD Generator running at http://localhost:${PORT}`);
-  console.log(`   Open that URL in your browser to use the tool.\n`);
+  console.log(`[Server] Listening on http://localhost:${PORT}`);
 });

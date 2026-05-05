@@ -47,6 +47,13 @@ function planeVar() {
             : evPlane(context, { "face" : definition.location });`;
 }
 
+function fsPoint(xExpr, yExpr, zExpr = null) {
+  if (zExpr === null) {
+    return `vector((${xExpr}) / inch, (${yExpr}) / inch) * inch`;
+  }
+  return `vector((${xExpr}) / inch, (${yExpr}) / inch, (${zExpr}) / inch) * inch`;
+}
+
 // ─── Shape templates ──────────────────────────────────────────────────────────
 // Each template returns { precondition: string, body: string }.
 // The precondition block goes between the two { } blocks of defineFeature.
@@ -67,8 +74,8 @@ function tBox(d) {
     body: `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "rect1", {
-            "firstCorner"  : vector(-0.5, -0.5) * definition.width,
-            "secondCorner" : vector( 0.5,  0.5) * definition.height
+            "firstCorner"  : ${fsPoint("-definition.width / 2", "-definition.height / 2")},
+            "secondCorner" : ${fsPoint("definition.width / 2", "definition.height / 2")}
         });
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
@@ -142,8 +149,8 @@ function tLinkage(d) {
         var holeOffset = definition.length * 0.5 - definition.holeRadius * 2.5;
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "body", {
-            "firstCorner"  : vector(-0.5, -0.5) * definition.length,
-            "secondCorner" : vector( 0.5,  0.5) * definition.width
+            "firstCorner"  : ${fsPoint("-definition.length / 2", "-definition.width / 2")},
+            "secondCorner" : ${fsPoint("definition.length / 2", "definition.width / 2")}
         });
         skCircle(sketch1, "holeL", { "center" : vector(-1, 0) * holeOffset, "radius" : definition.holeRadius });
         skCircle(sketch1, "holeR", { "center" : vector( 1, 0) * holeOffset, "radius" : definition.holeRadius });
@@ -177,8 +184,8 @@ function tPlateHoles(d) {
     body: `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "plate", {
-            "firstCorner"  : vector(-0.5, -0.5) * definition.width,
-            "secondCorner" : vector( 0.5,  0.5) * definition.height
+            "firstCorner"  : ${fsPoint("-definition.width / 2", "-definition.height / 2")},
+            "secondCorner" : ${fsPoint("definition.width / 2", "definition.height / 2")}
         });${circles}
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
@@ -474,6 +481,184 @@ ${template.body}
 `;
 }
 
+const STOP_WORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "into", "from", "make", "build",
+  "create", "using", "inch", "inches", "mm", "part", "feature", "featurescript",
+  "model", "needs", "need", "have", "has", "like", "able", "user", "adjust",
+  "dimension", "dimensions", "change", "changes", "thing", "shape"
+]);
+
+function normalizeText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function extractPromptKeywords(prompt, limit = 6) {
+  const words = normalizeText(prompt)
+    .toLowerCase()
+    .match(/[a-z0-9_]+/g) || [];
+  return [...new Set(words.filter(word => word.length > 2 && !STOP_WORDS.has(word)))].slice(0, limit);
+}
+
+function summarizeDimsForPrompt(dims) {
+  return JSON.stringify({
+    shape: dims.shape,
+    confidence: dims.confidence,
+    widthInches: dims.widthInches,
+    heightInches: dims.heightInches,
+    depthInches: dims.depthInches,
+    radiusInches: dims.radiusInches,
+    holeRadiusInches: dims.holeRadiusInches,
+    filletRadiusInches: dims.filletRadiusInches,
+    sides: dims.sides,
+    wallThicknessInches: dims.wallThicknessInches,
+    shaftLengthInches: dims.shaftLengthInches,
+    holeSpacingInches: dims.holeSpacingInches,
+    numHoles: dims.numHoles,
+    numTeeth: dims.numTeeth,
+  });
+}
+
+function summarizeFeatureScript(code, maxLines = 12) {
+  return normalizeText(
+    String(code || "")
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .slice(0, maxLines)
+      .join(" ")
+  );
+}
+
+function buildLearningContextText(learningContext = {}) {
+  const lines = [];
+  const examples = Array.isArray(learningContext.examples) ? learningContext.examples : [];
+  const notes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
+  const promptKeywords = extractPromptKeywords(learningContext.prompt || "");
+
+  if (promptKeywords.length) {
+    lines.push(`User prompt keywords: ${promptKeywords.join(", ")}`);
+  }
+
+  if (notes.length) {
+    lines.push("Project-specific guidance from prior runs:");
+    notes.forEach((note, index) => lines.push(`${index + 1}. ${normalizeText(note)}`));
+  }
+
+  if (examples.length) {
+    lines.push("Similar prior generations from the database:");
+    examples.slice(0, 3).forEach((example, index) => {
+      const dimsText = example.dims ? summarizeDimsForPrompt(example.dims) : "{}";
+      const codeText = summarizeFeatureScript(example.featurescript);
+      lines.push(
+        `${index + 1}. Prompt="${normalizeText(example.prompt)}" | shape=${example.shape_type || "UNKNOWN"} | confidence=${example.confidence || "UNKNOWN"}`
+      );
+      lines.push(`   dims=${dimsText}`);
+      if (codeText) lines.push(`   pattern=${codeText}`);
+    });
+  }
+
+  return lines.join("\n").trim();
+}
+
+function withLearningContext(basePrompt, learningContext) {
+  const learningText = buildLearningContextText(learningContext);
+  if (!learningText) return basePrompt;
+  return `${basePrompt}\n\nDATABASE CONTEXT\n${learningText}`;
+}
+
+function clampNumber(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
+function normalizeDims(dims) {
+  const normalized = {
+    featureName: String(dims.featureName || "aiShape").replace(/[^a-zA-Z0-9_]/g, "") || "aiShape",
+    featureLabel: String(dims.featureLabel || "AI Shape"),
+    shape: String(dims.shape || "CUSTOM"),
+    confidence: String(dims.confidence || "MEDIUM").toUpperCase(),
+    widthInches: clampNumber(dims.widthInches, 2, 0.01, 240),
+    heightInches: clampNumber(dims.heightInches, 2, 0.01, 240),
+    depthInches: clampNumber(dims.depthInches, 0.25, 0.01, 240),
+    radiusInches: clampNumber(dims.radiusInches, 1, 0.01, 120),
+    holeRadiusInches: clampNumber(dims.holeRadiusInches, 0, 0, 120),
+    filletRadiusInches: clampNumber(dims.filletRadiusInches, 0, 0, 24),
+    sides: Math.max(3, Math.min(16, Math.round(Number(dims.sides) || 6))),
+    wallThicknessInches: clampNumber(dims.wallThicknessInches, 0.25, 0.01, 24),
+    shaftLengthInches: clampNumber(dims.shaftLengthInches, 4, 0.05, 240),
+    holeSpacingInches: clampNumber(dims.holeSpacingInches, 1.5, 0.01, 120),
+    numHoles: Math.max(1, Math.min(24, Math.round(Number(dims.numHoles) || 4))),
+    numTeeth: Math.max(6, Math.min(200, Math.round(Number(dims.numTeeth) || 20))),
+    parseFailed: Boolean(dims.parseFailed),
+  };
+
+  if (!normalized.featureLabel.trim()) normalized.featureLabel = "AI Shape";
+  if (normalized.holeRadiusInches * 2 >= normalized.radiusInches && ["WASHER", "BUSHING"].includes(normalized.shape)) {
+    normalized.holeRadiusInches = Math.max(0.01, normalized.radiusInches * 0.6);
+  }
+  return normalized;
+}
+
+function promptLooksComplex(prompt) {
+  return /assembly|hinge|joint|cam|freeform|organic|thread|helical|spring|loft|spline|enclosure|mount|slot|rib|web|pocket|boss|complex|custom|motor|gearbox|bearing block|filleted/i.test(prompt || "");
+}
+
+function shouldUseTemplate(prompt, dims) {
+  const simpleShapes = new Set([
+    "BOX", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
+    "L_BRACKET", "T_BRACKET", "FLANGE", "HEX_NUT", "WASHER", "BUSHING",
+    "HITCH_PEG", "GEAR_SPUR"
+  ]);
+
+  if (dims.parseFailed) return false;
+  if (!simpleShapes.has(dims.shape)) return false;
+  if (dims.confidence === "LOW") return false;
+  if (promptLooksComplex(prompt)) return false;
+  return true;
+}
+
+function sanitizeFeatureScript(code) {
+  let cleaned = String(code || "")
+    .replace(/^```[\w-]*\s*/gm, "")
+    .replace(/```$/gm, "")
+    .replace(/\r/g, "")
+    .trim();
+
+  const fsStart = cleaned.indexOf("FeatureScript");
+  if (fsStart > 0) {
+    cleaned = cleaned.slice(fsStart);
+  }
+
+  cleaned = cleaned
+    .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
+    .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
+    .replace(/^\s*return\s+[^;]*;\s*$/gm, "")
+    .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);');
+
+  const featureAnnotations = [...cleaned.matchAll(/annotation\s*\{\s*"Feature Type Name"\s*:/g)];
+  if (featureAnnotations.length > 1) {
+    const lastIndex = featureAnnotations[featureAnnotations.length - 1].index;
+    cleaned = cleaned.slice(lastIndex);
+    if (!cleaned.startsWith("FeatureScript")) {
+      cleaned = `FeatureScript 2931;\nimport(path : "onshape/std/geometry.fs", version : "2931.0");\n\n${cleaned}`;
+    }
+  }
+
+  if (cleaned.startsWith("FeatureScript") && !/import\s*\(\s*path\s*:\s*"onshape\/std\//.test(cleaned)) {
+    cleaned = cleaned.replace(
+      /^FeatureScript\s+\d+\s*;/,
+      'FeatureScript 2931;\nimport(path : "onshape/std/geometry.fs", version : "2931.0");'
+    );
+  }
+
+  if (!cleaned.startsWith("FeatureScript") && /annotation\s*\{\s*"Feature Type Name"\s*:/.test(cleaned)) {
+    cleaned = `FeatureScript 2931;\nimport(path : "onshape/std/geometry.fs", version : "2931.0");\n\n${cleaned}`;
+  }
+
+  return cleaned.trim();
+}
+
 // ─── Dimension extractor ──────────────────────────────────────────────────────
 
 const DIM_SYSTEM = `You are a mechanical CAD dimension extractor with engineering knowledge.
@@ -540,46 +725,54 @@ Unit rules:
 - Missing dims: use sensible mechanical defaults, never 0 for main dimensions
 - confidence: HIGH if all dims explicit, MEDIUM if some inferred, LOW if mostly guessed`;
 
-async function extractDims(prompt) {
+async function extractDims(prompt, learningContext = {}) {
   const raw = await chat([
-    { role: "system", content: DIM_SYSTEM },
+    { role: "system", content: withLearningContext(DIM_SYSTEM, learningContext) },
     { role: "user",   content: prompt.trim() }
   ]);
   try {
-    const d = JSON.parse(stripJson(raw));
-    return {
-      featureName:         String(d.featureName         ?? "aiShape").replace(/[^a-zA-Z0-9_]/g,""),
-      featureLabel:        String(d.featureLabel        ?? "AI Shape"),
-      shape:               String(d.shape               ?? "BOX"),
-      confidence:          String(d.confidence          ?? "MEDIUM"),
-      widthInches:         Number(d.widthInches)        || 2,
-      heightInches:        Number(d.heightInches)       || 2,
-      depthInches:         Number(d.depthInches)        || 0.25,
-      radiusInches:        Number(d.radiusInches)       || 1,
-      holeRadiusInches:    Number(d.holeRadiusInches)   || 0,
-      filletRadiusInches:  Number(d.filletRadiusInches) || 0,
-      sides:               Number(d.sides)              || 6,
-      wallThicknessInches: Number(d.wallThicknessInches)|| 0.25,
-      shaftLengthInches:   Number(d.shaftLengthInches)  || 4,
-      holeSpacingInches:   Number(d.holeSpacingInches)  || 1.5,
-      numHoles:            Number(d.numHoles)           || 4,
-      numTeeth:            Number(d.numTeeth)           || 20,
-    };
+    const parsed = JSON.parse(stripJson(raw));
+    const d = normalizeDims({
+      featureName:         String(parsed.featureName         ?? "aiShape").replace(/[^a-zA-Z0-9_]/g,""),
+      featureLabel:        String(parsed.featureLabel        ?? "AI Shape"),
+      shape:               String(parsed.shape               ?? "CUSTOM"),
+      confidence:          String(parsed.confidence          ?? "MEDIUM"),
+      widthInches:         Number(parsed.widthInches)        || 2,
+      heightInches:        Number(parsed.heightInches)       || 2,
+      depthInches:         Number(parsed.depthInches)        || 0.25,
+      radiusInches:        Number(parsed.radiusInches)       || 1,
+      holeRadiusInches:    Number(parsed.holeRadiusInches)   || 0,
+      filletRadiusInches:  Number(parsed.filletRadiusInches) || 0,
+      sides:               Number(parsed.sides)              || 6,
+      wallThicknessInches: Number(parsed.wallThicknessInches)|| 0.25,
+      shaftLengthInches:   Number(parsed.shaftLengthInches)  || 4,
+      holeSpacingInches:   Number(parsed.holeSpacingInches)  || 1.5,
+      numHoles:            Number(parsed.numHoles)           || 4,
+      numTeeth:            Number(parsed.numTeeth)           || 20,
+      parseFailed: false,
+    });
+    return d;
   } catch {
-    return {
-      featureName:"simpleCube", featureLabel:"Simple Cube", shape:"BOX", confidence:"LOW",
+    return normalizeDims({
+      featureName:"customFeature", featureLabel:"Custom Feature", shape:"CUSTOM", confidence:"LOW",
       widthInches:2, heightInches:2, depthInches:2, radiusInches:1,
       holeRadiusInches:0, filletRadiusInches:0, sides:6,
       wallThicknessInches:0.25, shaftLengthInches:4, holeSpacingInches:1.5, numHoles:4, numTeeth:20,
-    };
+      parseFailed: true,
+    });
   }
 }
 
 // ─── Thinking trace ───────────────────────────────────────────────────────────
 
-function buildThinkingTrace(prompt, d) {
+function buildThinkingTrace(prompt, d, meta = {}) {
   const lines = [`Prompt analyzed: "${prompt}"`];
   lines.push(`Shape: ${d.shape}  |  Confidence: ${d.confidence}`);
+  lines.push(`Generation mode: ${meta.generationMode === "custom" ? "AI-authored parametric feature" : "Validated template"}`);
+
+  if (meta.learningExamples) {
+    lines.push(`Database context: used ${meta.learningExamples} similar prior generation(s) as guidance.`);
+  }
 
   if (d.shape === "GEAR_SPUR") {
     const m = (2 * d.radiusInches) / d.numTeeth;
@@ -611,23 +804,108 @@ function buildThinkingTrace(prompt, d) {
   if (d.confidence === "LOW") {
     lines.push(`Note: Low confidence — dimensions were not stated explicitly and are estimated.`);
   }
+  if (meta.customReasoning) {
+    lines.push(`Custom model notes: ${normalizeText(meta.customReasoning)}`);
+  }
   return lines.join("\n");
+}
+
+const CUSTOM_FEATURE_SYSTEM = `You are an expert Onshape FeatureScript author.
+Return ONLY a JSON object:
+{
+  "featureName": "camelCaseName",
+  "featureLabel": "Readable Feature Name",
+  "reasoning": "1-3 sentence summary of the modeling strategy",
+  "code": "complete raw FeatureScript file"
+}
+
+Your job is to generate flexible, editable, compile-safe FeatureScript for complex or custom 3D parts.
+
+Hard rules from the Onshape FeatureScript docs:
+- Define exactly one custom feature with annotation { "Feature Type Name" : ... } and export const ...
+- Use a precondition block with editable parameters. Prefer isLength(...) for dimensions, isInteger(...) for counts, and booleans for toggles.
+- If the prompt does not provide every dimension, choose sensible defaults and expose them as parameters so the user can change them later.
+- Use newSketchOnPlane(...) or newSketch(..., { "sketchPlane" : ... }) for sketches and call skSolve(...) before opExtrude/opRevolve.
+- Use operation definition maps such as opExtrude(context, id + "extrude1", { ... }).
+- Do not invent APIs or map fields. Do not use startAngle/endAngle on opCylinder.
+- When a definition parameter already comes from isLength(...), use definition.param directly in the body. Do not multiply it by * inch again.
+- Avoid duplicate export const blocks, markdown fences, comments about uncertainty, or placeholder TODO code.
+- Prefer robust, simple geometry over flashy but brittle code.
+
+Goal:
+- Match the user's requested shape as closely as possible.
+- Keep the model adjustable in the Onshape dialog.
+- Minimize the chance of FeatureScript syntax or map/type errors.`;
+
+async function generateCustomFeatureScript(prompt, dims, learningContext = {}) {
+  const systemPrompt = withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext);
+  const userPrompt = [
+    `User request: ${prompt.trim()}`,
+    `Extracted dimensions: ${summarizeDimsForPrompt(dims)}`,
+    `If the part is still ambiguous, prefer a flexible parametric interpretation that the user can edit in Onshape.`,
+    `Return valid JSON only.`
+  ].join("\n");
+
+  const raw = await chat([
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt }
+  ]);
+
+  try {
+    const parsed = JSON.parse(stripJson(raw));
+    return {
+      featureName: String(parsed.featureName || dims.featureName || "customFeature"),
+      featureLabel: String(parsed.featureLabel || dims.featureLabel || "Custom Feature"),
+      reasoning: String(parsed.reasoning || ""),
+      code: sanitizeFeatureScript(parsed.code || raw),
+    };
+  } catch {
+    return {
+      featureName: dims.featureName || "customFeature",
+      featureLabel: dims.featureLabel || "Custom Feature",
+      reasoning: "The generator returned a non-JSON response, so the raw code was sanitized and repaired.",
+      code: sanitizeFeatureScript(raw),
+    };
+  }
 }
 
 // ─── Public: Generate ─────────────────────────────────────────────────────────
 
-export async function generateFeatureScript(prompt) {
+export async function generateFeatureScript(prompt, options = {}) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   console.log(`[AI] Generating: "${prompt}"`);
 
-  const dims = await extractDims(prompt);
+  const dims = await extractDims(prompt, options.learningContext);
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
-  const thinking = buildThinkingTrace(prompt, dims);
-  const code     = buildFeatureScript(dims);
+  const generationMode = shouldUseTemplate(prompt, dims) ? "template" : "custom";
+  let code;
+  let customReasoning = "";
+  let featureName = dims.featureName;
+  let featureLabel = dims.featureLabel;
+
+  if (generationMode === "template") {
+    code = buildFeatureScript(dims);
+  } else {
+    const custom = await generateCustomFeatureScript(prompt, dims, options.learningContext);
+    featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
+    featureLabel = custom.featureLabel || featureLabel;
+    customReasoning = custom.reasoning;
+
+    const repaired = await debugFeatureScript(custom.code, "", {
+      learningContext: options.learningContext,
+    });
+    code = sanitizeFeatureScript(repaired.fixed);
+  }
+
+  const thinking = buildThinkingTrace(prompt, dims, {
+    generationMode,
+    learningExamples: Array.isArray(options.learningContext?.examples) ? options.learningContext.examples.length : 0,
+    customReasoning,
+  });
 
   console.log(`[AI] done — ${code.length} chars`);
-  return { code, featureName: dims.featureName, featureLabel: dims.featureLabel, thinking, dims };
+  return { code, featureName, featureLabel, thinking, dims, generationMode };
 }
 
 // ─── Public: Debug ────────────────────────────────────────────────────────────
@@ -689,34 +967,32 @@ FIX RULES:
 7. Multiple export const → keep only the last block
 8. return statement in body (other than bare "return;") → delete`;
 
-export async function debugFeatureScript(code, errors) {
+export async function debugFeatureScript(code, errors, options = {}) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-  console.log(`[AI] Debugging (${code.length} chars)`);
+  const sanitizedInput = sanitizeFeatureScript(code);
+  console.log(`[AI] Debugging (${sanitizedInput.length} chars)`);
 
   const raw = await chat([
-    { role: "system", content: DEBUG_SYSTEM },
-    { role: "user",   content: `FEATURESCRIPT:\n${code}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
+    { role: "system", content: withLearningContext(DEBUG_SYSTEM, options.learningContext) },
+    { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
   ]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));
-    const fixed = (parsed.fixed || code)
-      .replace(/^```[\w]*\n?/gm, "")
-      .replace(/^```$/gm, "")
-      .trim();
+    const fixed = sanitizeFeatureScript(parsed.fixed || sanitizedInput);
     return { fixed, explanation: parsed.explanation || "Fixed." };
   } catch {
-    return { fixed: code, explanation: "Could not parse the AI response. The original code is returned unchanged." };
+    return { fixed: sanitizedInput, explanation: "Could not parse the AI response. The sanitized original code is returned unchanged." };
   }
 }
 
 // ─── Public: Analyze images ───────────────────────────────────────────────────
 
-export async function analyzeImage(imageBase64, mimeType, extraPrompt) {
-  return analyzeImages([{ imageBase64, mimeType, context: "Reference" }], extraPrompt);
+export async function analyzeImage(imageBase64, mimeType, extraPrompt, options = {}) {
+  return analyzeImages([{ imageBase64, mimeType, context: "Reference" }], extraPrompt, options);
 }
 
-export async function analyzeImages(images, extraPrompt) {
+export async function analyzeImages(images, extraPrompt, options = {}) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   console.log(`[AI] Analyzing ${images.length} image(s)`);
 
@@ -735,6 +1011,6 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
   const descRaw = await chat([{ role: "user", content }], VISION_MODEL);
   const combinedPrompt = extraPrompt ? `${extraPrompt}. From images: ${descRaw}` : descRaw;
 
-  const { code, featureName, featureLabel, thinking } = await generateFeatureScript(combinedPrompt);
+  const { code, featureName, featureLabel, thinking } = await generateFeatureScript(combinedPrompt, options);
   return { description: descRaw, code, featureName, featureLabel, thinking };
 }

@@ -20,6 +20,35 @@ function setOutput(id, code, copyBtnId) {
   if (copyBtnId) document.getElementById(copyBtnId).disabled = false;
 }
 
+function setThinking(prefix, text) {
+  const wrap = document.getElementById(`${prefix}-thinking-wrap`);
+  const body = document.getElementById(`${prefix}-thinking-body`);
+  const header = document.getElementById(`${prefix}-thinking-header`);
+  if (!wrap || !body || !header) return;
+
+  if (!text) {
+    wrap.style.display = 'none';
+    body.textContent = '';
+    body.classList.remove('open');
+    header.classList.remove('open');
+    return;
+  }
+
+  wrap.style.display = 'block';
+  body.textContent = text;
+  body.classList.remove('open');
+  header.classList.remove('open');
+}
+
+function toggleThinking(prefix) {
+  const body = document.getElementById(`${prefix}-thinking-body`);
+  const header = document.getElementById(`${prefix}-thinking-header`);
+  if (!body || !header) return;
+
+  body.classList.toggle('open');
+  header.classList.toggle('open');
+}
+
 async function copyCode(outputId) {
   const text = document.getElementById(outputId).textContent;
   await navigator.clipboard.writeText(text);
@@ -50,6 +79,7 @@ async function generate() {
   btn.innerHTML = '<div class="spinner"></div><span>Generating</span>';
   btn.disabled = true;
   setStatus('gen-status', 'Calling Groq AI...', 'loading');
+  setThinking('gen', '');
 
   try {
     const r = await fetch('/generate', {
@@ -60,8 +90,10 @@ async function generate() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Generation failed');
     setOutput('gen-output', data.code, 'copy-btn');
+    setThinking('gen', data.thinking || '');
     setStatus('gen-status', `Generated "${data.featureLabel}"`, 'ok');
   } catch (e) {
+    setThinking('gen', '');
     setStatus('gen-status', `Error: ${e.message}`, 'error');
   } finally {
     btn.textContent = 'Generate FeatureScript';
@@ -249,6 +281,7 @@ async function analyzeMultiImg() {
   const globalPrompt = document.getElementById('global-prompt')?.value.trim() || '';
   setStatus('analyze-status', 'Analyzing images...', 'loading');
   updateAnalyzeDescription('Analyzing...', true);
+  setThinking('analyze', '');
 
   try {
     const r = await fetch('/analyze-multi', {
@@ -261,10 +294,12 @@ async function analyzeMultiImg() {
 
     updateAnalyzeDescription(data.description);
     setOutput('analyze-output', data.code, 'analyze-copy-btn');
+    setThinking('analyze', data.thinking || '');
     setStatus('analyze-status', `Generated "${data.featureLabel}"`, 'ok');
   } catch (e) {
     setStatus('analyze-status', `Error: ${e.message}`, 'error');
     updateAnalyzeDescription('Analysis failed.', true);
+    setThinking('analyze', '');
   }
 }
 
