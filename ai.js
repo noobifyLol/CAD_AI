@@ -28,7 +28,7 @@ function n(x) { return parseFloat(Number(x).toFixed(6)).toString(); }
 
 // Bounds helper: [min_inch, default_inch, max_inch] formatted for isLength
 function lenBounds(min, def, max) {
-  return `{ (inch) : [${n(min)}, ${n(def)}, ${n(max)}] }`;
+  return `{ (inch) : [${n(min)}, ${n(def)}, ${n(max)}] } as LengthBoundSpec`;
 }
 
 function preconditionPlane() {
@@ -533,6 +533,7 @@ function buildLearningContextText(learningContext = {}) {
   const lines = [];
   const examples = Array.isArray(learningContext.examples) ? learningContext.examples : [];
   const notes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
+  const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
   const promptKeywords = extractPromptKeywords(learningContext.prompt || "");
 
   if (promptKeywords.length) {
@@ -554,6 +555,22 @@ function buildLearningContextText(learningContext = {}) {
       );
       lines.push(`   dims=${dimsText}`);
       if (codeText) lines.push(`   pattern=${codeText}`);
+    });
+  }
+
+  if (knowledge.length) {
+    lines.push("CAD modeling knowledge to apply:");
+    knowledge.slice(0, 4).forEach((entry, index) => {
+      const title = normalizeText(entry.title || `Knowledge ${index + 1}`);
+      const summary = normalizeText(entry.summary || "");
+      const hints = Array.isArray(entry.parameter_hints || entry.parameterHints) ? (entry.parameter_hints || entry.parameterHints) : [];
+      const notesList = Array.isArray(entry.modeling_notes || entry.modelingNotes) ? (entry.modeling_notes || entry.modelingNotes) : [];
+      const keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
+
+      lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}`);
+      if (keywords.length) lines.push(`   keywords=${keywords.join(", ")}`);
+      if (hints.length) lines.push(`   parameters=${hints.map(normalizeText).join(" | ")}`);
+      if (notesList.length) lines.push(`   modeling=${notesList.map(normalizeText).join(" | ")}`);
     });
   }
 
@@ -634,7 +651,8 @@ function sanitizeFeatureScript(code) {
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*return\s+[^;]*;\s*$/gm, "")
-    .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);');
+    .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
+    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, $2 as LengthBoundSpec);');
 
   const featureAnnotations = [...cleaned.matchAll(/annotation\s*\{\s*"Feature Type Name"\s*:/g)];
   if (featureAnnotations.length > 1) {
@@ -824,6 +842,8 @@ Your job is to generate flexible, editable, compile-safe FeatureScript for compl
 Hard rules from the Onshape FeatureScript docs:
 - Define exactly one custom feature with annotation { "Feature Type Name" : ... } and export const ...
 - Use a precondition block with editable parameters. Prefer isLength(...) for dimensions, isInteger(...) for counts, and booleans for toggles.
+- Never write "definition.someParam is Length". That is invalid FeatureScript. Use isLength(definition.someParam, LENGTH_BOUNDS); or a typed custom bound spec.
+- If you use a custom inline length bound, cast it as LengthBoundSpec.
 - If the prompt does not provide every dimension, choose sensible defaults and expose them as parameters so the user can change them later.
 - Use newSketchOnPlane(...) or newSketch(..., { "sketchPlane" : ... }) for sketches and call skSolve(...) before opExtrude/opRevolve.
 - Use operation definition maps such as opExtrude(context, id + "extrude1", { ... }).
@@ -896,6 +916,15 @@ export async function generateFeatureScript(prompt, options = {}) {
       learningContext: options.learningContext,
     });
     code = sanitizeFeatureScript(repaired.fixed);
+
+    if (hasFatalFeatureScriptPatterns(code)) {
+      console.warn("[AI] Fatal FeatureScript patterns remained after repair; falling back to validated template.");
+      code = buildFeatureScript({
+        ...dims,
+        shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
+      });
+      customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Fallback used because the AI-authored code still contained invalid FeatureScript type or bounds syntax.`;
+    }
   }
 
   const thinking = buildThinkingTrace(prompt, dims, {
@@ -931,7 +960,7 @@ opCylinder signature:
 isLength in precondition:
   annotation { "Name" : "My Param" }
   isLength(definition.myParam, LENGTH_BOUNDS);
-  or with custom bounds: isLength(definition.myParam, { (inch) : [0.01, 1.0, 24.0] });
+  or with custom bounds: isLength(definition.myParam, { (inch) : [0.01, 1.0, 24.0] } as LengthBoundSpec);
   "definition.myParam is Length" is WRONG — Length is not a type specifier.
 
 newSketchOnPlane (for user-selected planes, not newSketch):
@@ -966,6 +995,16 @@ FIX RULES:
 6. skPolygon → skRegularPolygon
 7. Multiple export const → keep only the last block
 8. return statement in body (other than bare "return;") → delete`;
+
+function hasFatalFeatureScriptPatterns(code) {
+  const text = String(code || "");
+  return [
+    /\bdefinition\.\w+\s+is\s+Length\s*;/,
+    /isLength\(\s*definition\.\w+\s*,\s*\{(?![\s\S]*LengthBoundSpec)/,
+    /"startAngle"\s*:/,
+    /"endAngle"\s*:/,
+  ].some(pattern => pattern.test(text));
+}
 
 export async function debugFeatureScript(code, errors, options = {}) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");

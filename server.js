@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { analyzeImage, analyzeImages, debugFeatureScript, generateFeatureScript } from "./ai.js";
 
@@ -13,6 +14,9 @@ const supabase = supabaseUrl && supabaseKey
       auth: { persistSession: false, autoRefreshToken: false },
     })
   : null;
+const localCadKnowledge = JSON.parse(
+  readFileSync(new URL("./data/cadKnowledge.json", import.meta.url), "utf8")
+);
 
 app.use(express.json({ limit: "20mb" }));
 app.use(express.static("public"));
@@ -35,11 +39,39 @@ function jsonSafe(value) {
   return JSON.parse(JSON.stringify(value ?? {}));
 }
 
+function scoreKnowledgeEntry(prompt, entry) {
+  const haystack = [
+    entry.title,
+    entry.summary,
+    ...(entry.tags || []),
+    ...(entry.keywords || []),
+    ...(entry.parameterHints || []),
+    ...(entry.modelingNotes || []),
+  ].join(" ").toLowerCase();
+
+  return extractKeywords(prompt, 8).reduce((score, keyword) => {
+    if (haystack.includes(keyword)) return score + 1;
+    return score;
+  }, 0);
+}
+
+function getLocalKnowledge(prompt, limit = 3) {
+  if (!prompt) return [];
+
+  return [...localCadKnowledge]
+    .map(entry => ({ ...entry, score: scoreKnowledgeEntry(prompt, entry) }))
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ score, ...entry }) => entry);
+}
+
 async function fetchLearningContext(prompt) {
   const learningContext = {
     prompt,
     examples: [],
     notes: [],
+    knowledge: getLocalKnowledge(prompt),
   };
 
   if (!supabase || !prompt) return learningContext;
@@ -77,6 +109,32 @@ async function fetchLearningContext(prompt) {
 
   if (reasoningHints.length) {
     learningContext.notes.push(`Prior reasoning patterns: ${reasoningHints.join(" | ")}`);
+  }
+
+  if (learningContext.knowledge.length) {
+    learningContext.notes.push(`Matched ${learningContext.knowledge.length} CAD knowledge record(s) for this request.`);
+  }
+
+  if (supabase) {
+    const knowledgeTerms = extractKeywords(prompt, 4);
+    let knowledgeQuery = supabase
+      .from("cad_knowledge")
+      .select("title, summary, tags, keywords, parameter_hints, modeling_notes, example_prompt")
+      .limit(5);
+
+    if (knowledgeTerms.length) {
+      const knowledgeFilters = knowledgeTerms
+        .map(keyword => `keywords.cs.{${keyword}},tags.cs.{${keyword}},title.ilike.%${keyword}%`)
+        .join(",");
+      knowledgeQuery = knowledgeQuery.or(knowledgeFilters);
+    }
+
+    const { data: knowledgeRows, error: knowledgeError } = await knowledgeQuery;
+    if (knowledgeError) {
+      console.warn("[DB] Could not load CAD knowledge:", knowledgeError.message);
+    } else if (Array.isArray(knowledgeRows) && knowledgeRows.length) {
+      learningContext.knowledge = [...learningContext.knowledge, ...knowledgeRows].slice(0, 5);
+    }
   }
 
   return learningContext;

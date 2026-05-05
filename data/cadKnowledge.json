@@ -1,0 +1,122 @@
+[
+  {
+    "title": "Parametric Box Body",
+    "summary": "Use a centered rectangle sketch and blind extrude for robot bodies, housings, and simple block geometry.",
+    "tags": ["box", "plate", "body", "chassis", "robot"],
+    "keywords": ["box", "body", "robot", "chassis", "housing", "plate"],
+    "parameterHints": [
+      "Expose width, height, and depth as editable length parameters.",
+      "Use a fillet radius parameter only if a rounded edge is explicitly requested."
+    ],
+    "modelingNotes": [
+      "Sketch the base profile on a selectable plane with newSketchOnPlane.",
+      "Keep the rectangle centered around the origin so later mirrors and mating are easier."
+    ],
+    "example_prompt": "Robot body 12 inches wide, 6 inches tall, 4 inches deep with 0.25 inch fillets"
+  },
+  {
+    "title": "Bushing Or Sleeve",
+    "summary": "Model bushings and spacers as concentric circles extruded to length.",
+    "tags": ["bushing", "washer", "sleeve", "spacer"],
+    "keywords": ["bushing", "sleeve", "spacer", "bearing", "liner"],
+    "parameterHints": [
+      "Expose outer radius, inner radius, and length.",
+      "Validate that inner radius stays smaller than outer radius."
+    ],
+    "modelingNotes": [
+      "Use one sketch with two concentric circles and extrude the ring region.",
+      "Prefer editable radii over hardcoded diameters in the body."
+    ],
+    "example_prompt": "Bushing with 0.75 inch outer diameter, 0.5 inch inner diameter, and 1 inch length"
+  },
+  {
+    "title": "Linkage Arm",
+    "summary": "Use a centered bar sketch with end holes for train linkages, couplers, and lever arms.",
+    "tags": ["linkage", "arm", "lever", "coupler"],
+    "keywords": ["linkage", "arm", "lever", "coupler", "connecting rod", "clevis"],
+    "parameterHints": [
+      "Expose total length, bar width, thickness, and pin hole radius.",
+      "Compute hole offset from total length and hole size to preserve end material."
+    ],
+    "modelingNotes": [
+      "Create the outer rectangle and end holes in the same sketch.",
+      "Keep holes symmetric unless the prompt explicitly requests asymmetry."
+    ],
+    "example_prompt": "Linkage arm 5 inches long, 1 inch wide, 0.25 inch thick with 0.2 inch pin holes"
+  },
+  {
+    "title": "Flange With Bolt Circle",
+    "summary": "Model circular flanges with a bore and evenly patterned bolt holes.",
+    "tags": ["flange", "bolt circle", "mount"],
+    "keywords": ["flange", "bolt", "bolt circle", "mount", "hub"],
+    "parameterHints": [
+      "Expose outer radius, bore radius, hole radius, hole count, and thickness.",
+      "If bolt circle diameter is not given, use a derived radius around 70 to 80 percent of outer radius."
+    ],
+    "modelingNotes": [
+      "Generate all circles in one sketch before extruding.",
+      "Evenly distribute bolt holes using cosine and sine from the center."
+    ],
+    "example_prompt": "Round flange 4 inch OD with 1 inch bore and 4 bolt holes"
+  },
+  {
+    "title": "L Bracket",
+    "summary": "Use a simple 2D L profile extruded to length for angle brackets and corner supports.",
+    "tags": ["bracket", "angle", "support"],
+    "keywords": ["bracket", "angle", "corner", "support", "l bracket"],
+    "parameterHints": [
+      "Expose arm width, arm height, wall thickness, and extrusion length.",
+      "Keep wall thickness smaller than both arm dimensions."
+    ],
+    "modelingNotes": [
+      "Sketch a closed L profile instead of extruding a full plate and cutting it afterward.",
+      "Use simple straight segments for reliability."
+    ],
+    "example_prompt": "L bracket 3 inches by 4 inches, 0.25 inch wall, 2 inch long"
+  },
+  {
+    "title": "Hitch Peg Or Mushroom Pin",
+    "summary": "Model a pin with a cylindrical shaft and domed or revolved head.",
+    "tags": ["peg", "pin", "hitch", "axle"],
+    "keywords": ["peg", "pin", "hitch", "axle", "mushroom", "shaft"],
+    "parameterHints": [
+      "Expose shaft radius, shaft height, and head radius.",
+      "If head height is not provided, approximate a rounded cap from the head radius."
+    ],
+    "modelingNotes": [
+      "Create the shaft with a cylinder-like operation and the head with a revolve profile.",
+      "Union the head and shaft at the end."
+    ],
+    "example_prompt": "Hitch peg with 0.25 inch shaft diameter, 0.5 inch shaft height, and 0.42 inch dome head"
+  },
+  {
+    "title": "Spur Gear",
+    "summary": "Use an involute-inspired 2D tooth profile and extrude it to face width for train gears and pinions.",
+    "tags": ["gear", "spur gear", "pinion"],
+    "keywords": ["gear", "spur", "pinion", "tooth", "diametral pitch"],
+    "parameterHints": [
+      "Expose tooth count and face width; derive pitch geometry from pitch radius or diametral pitch.",
+      "Add a bore radius parameter when the gear must mount to a shaft."
+    ],
+    "modelingNotes": [
+      "Keep pressure angle at 20 degrees unless the prompt requests otherwise.",
+      "Prefer a valid simplified gear profile over an overcomplicated but brittle one."
+    ],
+    "example_prompt": "20 tooth spur gear with 2 inch pitch diameter and 0.5 inch face width"
+  },
+  {
+    "title": "Slotted Mounting Plate",
+    "summary": "For adjustable mounts, use a plate profile with one or more slots instead of only round holes.",
+    "tags": ["slot", "mounting plate", "adjustable"],
+    "keywords": ["slot", "slotted", "mount", "adjustable", "plate", "bracket"],
+    "parameterHints": [
+      "Expose plate width, plate height, thickness, slot length, slot width, and slot spacing.",
+      "If the prompt is ambiguous, use centered slots with enough margin to the outer edge."
+    ],
+    "modelingNotes": [
+      "Build each slot from two circles connected by tangent lines in the same sketch.",
+      "Extrude the resulting sketch region with the slot cutouts already present."
+    ],
+    "example_prompt": "Mounting plate 6 by 3 inches with two 1.5 inch slots"
+  }
+]
