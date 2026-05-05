@@ -26,19 +26,15 @@ async function chat(messages, model = TEXT_MODEL) {
 
 function n(x) { return parseFloat(Number(x).toFixed(6)).toString(); }
 
-// Bounds helper: [min_inch, default_inch, max_inch] formatted for isLength
-function lenBounds(min, def, max) {
-  return `{ (inch) : [${n(min)}, ${n(def)}, ${n(max)}] } as LengthBoundSpec`;
-}
-
 function preconditionPlane() {
   return `        annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;`;
 }
 
 function preconditionLength(paramName, label, min, def, max) {
-  return `        annotation { "Name" : "${label}" }
-        isLength(definition.${paramName}, ${lenBounds(min, def, max)});`;
+  const defaultExpr = `${n(Math.min(Math.max(def, min), max))} * inch`;
+  return `        annotation { "Name" : "${label}", "Default" : "${defaultExpr}" }
+        isLength(definition.${paramName}, LENGTH_BOUNDS);`;
 }
 
 function planeVar() {
@@ -652,7 +648,7 @@ function sanitizeFeatureScript(code) {
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*return\s+[^;]*;\s*$/gm, "")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
-    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, $2 as LengthBoundSpec);');
+    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);');
 
   const featureAnnotations = [...cleaned.matchAll(/annotation\s*\{\s*"Feature Type Name"\s*:/g)];
   if (featureAnnotations.length > 1) {
@@ -843,7 +839,7 @@ Hard rules from the Onshape FeatureScript docs:
 - Define exactly one custom feature with annotation { "Feature Type Name" : ... } and export const ...
 - Use a precondition block with editable parameters. Prefer isLength(...) for dimensions, isInteger(...) for counts, and booleans for toggles.
 - Never write "definition.someParam is Length". That is invalid FeatureScript. Use isLength(definition.someParam, LENGTH_BOUNDS); or a typed custom bound spec.
-- If you use a custom inline length bound, cast it as LengthBoundSpec.
+- Prefer LENGTH_BOUNDS for all length parameters and set the initial value through annotation { "Default" : "1 * inch" }.
 - If the prompt does not provide every dimension, choose sensible defaults and expose them as parameters so the user can change them later.
 - Use newSketchOnPlane(...) or newSketch(..., { "sketchPlane" : ... }) for sketches and call skSolve(...) before opExtrude/opRevolve.
 - Use operation definition maps such as opExtrude(context, id + "extrude1", { ... }).
@@ -958,9 +954,8 @@ opCylinder signature:
   NO startAngle. NO endAngle. NO angle params whatsoever.
 
 isLength in precondition:
-  annotation { "Name" : "My Param" }
+  annotation { "Name" : "My Param", "Default" : "1 * inch" }
   isLength(definition.myParam, LENGTH_BOUNDS);
-  or with custom bounds: isLength(definition.myParam, { (inch) : [0.01, 1.0, 24.0] } as LengthBoundSpec);
   "definition.myParam is Length" is WRONG — Length is not a type specifier.
 
 newSketchOnPlane (for user-selected planes, not newSketch):
@@ -1000,7 +995,7 @@ function hasFatalFeatureScriptPatterns(code) {
   const text = String(code || "");
   return [
     /\bdefinition\.\w+\s+is\s+Length\s*;/,
-    /isLength\(\s*definition\.\w+\s*,\s*\{(?![\s\S]*LengthBoundSpec)/,
+    /isLength\(\s*definition\.\w+\s*,\s*\{/,
     /"startAngle"\s*:/,
     /"endAngle"\s*:/,
   ].some(pattern => pattern.test(text));
