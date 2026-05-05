@@ -93,4 +93,5 @@ The core issue: after the AI writes to the Feature Studio, that write itself cre
 The actual likely culprit: the Feature Studio had compile errors, so Onshape may not have committed a clean microversion from the write. The new absorbAIWriteMicroversion() function waits 1.5 seconds after writing and explicitly fetches the post-write MV, so the stored value is always fresh regardless of Onshape's behavior.
 Also added /trigger?force=true to bypass the prompt-unchanged check when you want to force a re-run.
 
-
+**5/4/26**
+Many errors : Currently here are some problems with, I think it is using pre geenrated code for the prompt which is bad and so of the pre generate mdoels fs doesn't even compile. Also when a featureScirp generates, the user can't modify how large or smal lthe thing is, so there a way for the user to modify a tool's sketch when it does it or just tell the AI to make variables so the they can change it and also I don't thin kthe thinking function is orking. Also we need to remover the function shapes from the featurescript cod , whenver it's something that the AI doesn't know, it just reulsts in a cube or any other basic shape. The debugging functino also doens't work. 
