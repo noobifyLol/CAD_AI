@@ -1,186 +1,109 @@
-create extension if not exists pgcrypto;
-create extension if not exists pg_trgm;
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Adaptive CAD Memory — migration
+-- Run once in your Supabase SQL editor or via the CLI:
+--   supabase db push
+-- ─────────────────────────────────────────────────────────────────────────────
 
-create table if not exists public.generations (
-  id uuid primary key default gen_random_uuid(),
-  prompt text not null,
-  shape_type text,
-  confidence text,
-  dims jsonb not null default '{}'::jsonb,
-  featurescript text not null default '',
-  thinking text not null default '',
-  char_count integer,
-  user_rating smallint,
-  user_feedback text,
-  created_at timestamptz not null default now()
+-- 1. Add missing columns to existing generations table
+alter table if exists generations
+  add column if not exists char_count    int4,
+  add column if not exists user_rating   int2,
+  add column if not exists user_feedback text;
+
+-- 2. cad_memory — scored CAD skill records
+create table if not exists cad_memory (
+  id               uuid primary key default gen_random_uuid(),
+  memory_type      text not null default 'skill',
+  title            text not null,
+  summary          text,
+  shape_type       text,
+  tags             text[]   not null default '{}',
+  keywords         text[]   not null default '{}',
+  parameter_hints  text[]   not null default '{}',
+  modeling_notes   text[]   not null default '{}',
+  feature_pattern  text,
+  failure_modes    text[]   not null default '{}',
+  validation_rules text[]   not null default '{}',
+  quality_score    float8   not null default 0.5,
+  usage_count      int4     not null default 0,
+  success_count    int4     not null default 0,
+  failure_count    int4     not null default 0,
+  is_active        boolean  not null default true,
+  source_table     text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  constraint cad_memory_title_unique unique (title)
 );
 
-alter table public.generations add column if not exists char_count integer;
-alter table public.generations add column if not exists user_rating smallint;
-alter table public.generations add column if not exists user_feedback text;
+create index if not exists cad_memory_shape_idx     on cad_memory (shape_type);
+create index if not exists cad_memory_quality_idx   on cad_memory (quality_score desc);
+create index if not exists cad_memory_is_active_idx on cad_memory (is_active);
 
-create table if not exists public.debug_sessions (
-  id uuid primary key default gen_random_uuid(),
-  original_code text not null default '',
-  error_messages text not null default '',
-  fixed_code text not null default '',
-  explanation text not null default '',
-  was_helpful boolean,
-  created_at timestamptz not null default now()
+-- 3. cad_generation_memory_matches — links generations to the memories that influenced them
+create table if not exists cad_generation_memory_matches (
+  id              uuid primary key default gen_random_uuid(),
+  generation_id   uuid references generations (id) on delete cascade,
+  memory_id       uuid references cad_memory (id)  on delete cascade,
+  score_rank      int4    not null default 0,
+  score_snapshot  float8  not null default 0,
+  created_at      timestamptz not null default now()
 );
 
-create table if not exists public.image_analyses (
-  id uuid primary key default gen_random_uuid(),
-  image_count smallint not null default 1,
-  image_contexts text[] not null default '{}',
-  global_prompt text not null default '',
-  ai_description text not null default '',
-  generation_id uuid references public.generations(id) on delete set null,
-  created_at timestamptz not null default now()
+create index if not exists cgmm_generation_idx on cad_generation_memory_matches (generation_id);
+create index if not exists cgmm_memory_idx     on cad_generation_memory_matches (memory_id);
+
+-- 4. cad_feedback_events — raw feedback signals
+create table if not exists cad_feedback_events (
+  id            uuid primary key default gen_random_uuid(),
+  generation_id uuid references generations (id) on delete cascade,
+  signal        text    not null default 'feedback',
+  rating        int2,
+  weight        float8  not null default 0,
+  notes         text,
+  created_at    timestamptz not null default now()
 );
 
-create table if not exists public.shape_knowledge (
-  id uuid primary key default gen_random_uuid(),
-  shape_type text not null unique,
-  aliases text[] not null default '{}',
-  description text not null default '',
-  default_dims jsonb not null default '{}'::jsonb,
-  notes text,
-  created_at timestamptz not null default now()
+create index if not exists cfe_generation_idx on cad_feedback_events (generation_id);
+
+-- 5. cad_memory_pruning_events — audit trail for deactivated memories
+create table if not exists cad_memory_pruning_events (
+  id                   uuid primary key default gen_random_uuid(),
+  memory_id            uuid references cad_memory (id) on delete cascade,
+  reason               text,
+  quality_score_before float8,
+  created_at           timestamptz not null default now()
 );
 
-create table if not exists public.cad_knowledge (
-  id uuid primary key default gen_random_uuid(),
-  title text not null unique,
-  summary text not null default '',
-  tags text[] not null default '{}',
-  keywords text[] not null default '{}',
-  parameter_hints text[] not null default '{}',
-  modeling_notes text[] not null default '{}',
-  example_prompt text,
-  created_at timestamptz not null default now()
-);
+-- ─── RPCs ────────────────────────────────────────────────────────────────────
 
-create table if not exists public.cad_memory (
-  id uuid primary key default gen_random_uuid(),
-  memory_type text not null default 'skill',
-  title text not null unique,
-  summary text not null default '',
-  shape_type text,
-  tags text[] not null default '{}',
-  keywords text[] not null default '{}',
-  parameter_hints text[] not null default '{}',
-  modeling_notes text[] not null default '{}',
-  feature_pattern text,
-  failure_modes text[] not null default '{}',
-  validation_rules text[] not null default '{}',
-  source_table text,
-  source_id uuid,
-  quality_score numeric(6, 3) not null default 0.500,
-  usage_count integer not null default 0,
-  success_count integer not null default 0,
-  failure_count integer not null default 0,
-  is_active boolean not null default true,
-  last_used_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create unique index if not exists cad_memory_title_shape_unique
-  on public.cad_memory (lower(title), coalesce(shape_type, ''));
-
-create unique index if not exists cad_memory_title_unique
-  on public.cad_memory (title);
-
-create index if not exists cad_memory_active_quality_idx
-  on public.cad_memory (is_active, quality_score desc);
-
-create index if not exists cad_memory_shape_idx
-  on public.cad_memory (shape_type);
-
-create index if not exists cad_memory_keywords_gin_idx
-  on public.cad_memory using gin (keywords);
-
-create index if not exists cad_memory_tags_gin_idx
-  on public.cad_memory using gin (tags);
-
-create index if not exists cad_knowledge_keywords_gin_idx
-  on public.cad_knowledge using gin (keywords);
-
-create index if not exists cad_knowledge_tags_gin_idx
-  on public.cad_knowledge using gin (tags);
-
-create table if not exists public.cad_generation_memory_matches (
-  id uuid primary key default gen_random_uuid(),
-  generation_id uuid not null references public.generations(id) on delete cascade,
-  memory_id uuid not null references public.cad_memory(id) on delete cascade,
-  score_rank integer,
-  score_snapshot numeric(8, 3),
-  created_at timestamptz not null default now()
-);
-
-create index if not exists cad_generation_memory_generation_idx
-  on public.cad_generation_memory_matches (generation_id);
-
-create index if not exists cad_generation_memory_memory_idx
-  on public.cad_generation_memory_matches (memory_id);
-
-create table if not exists public.cad_feedback_events (
-  id uuid primary key default gen_random_uuid(),
-  generation_id uuid references public.generations(id) on delete cascade,
-  signal text not null,
-  rating smallint,
-  weight numeric(6, 3) not null default 0,
-  notes text,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists cad_feedback_generation_idx
-  on public.cad_feedback_events (generation_id);
-
-create table if not exists public.cad_memory_pruning_events (
-  id uuid primary key default gen_random_uuid(),
-  memory_id uuid references public.cad_memory(id) on delete set null,
-  action text not null,
-  reason text not null,
-  score_before numeric(6, 3),
-  created_at timestamptz not null default now()
-);
-
-create or replace function public.search_cad_memory(
-  query_text text default '',
-  query_keywords text[] default '{}',
-  query_shape text default null,
-  match_limit integer default 8
+-- 6. search_cad_memory — scored keyword + shape search
+create or replace function search_cad_memory(
+  query_text     text    default '',
+  query_keywords text[]  default '{}',
+  query_shape    text    default null,
+  match_limit    int     default 8
 )
 returns table (
-  id uuid,
-  memory_type text,
-  title text,
-  summary text,
-  shape_type text,
-  tags text[],
-  keywords text[],
-  parameter_hints text[],
-  modeling_notes text[],
-  feature_pattern text,
-  failure_modes text[],
+  id               uuid,
+  memory_type      text,
+  title            text,
+  summary          text,
+  shape_type       text,
+  tags             text[],
+  keywords         text[],
+  parameter_hints  text[],
+  modeling_notes   text[],
+  feature_pattern  text,
+  failure_modes    text[],
   validation_rules text[],
-  quality_score numeric,
-  usage_count integer,
-  success_count integer,
-  failure_count integer,
-  match_score numeric
+  quality_score    float8,
+  usage_count      int4,
+  success_count    int4,
+  failure_count    int4,
+  match_score      float8
 )
-language sql
-stable
+language sql stable
 as $$
-  with q as (
-    select
-      lower(coalesce(query_text, '')) as text,
-      coalesce(query_keywords, '{}')::text[] as keywords,
-      nullif(query_shape, '') as shape
-  )
   select
     m.id,
     m.memory_type,
@@ -199,132 +122,135 @@ as $$
     m.success_count,
     m.failure_count,
     (
-      m.quality_score
-      + case when q.shape is not null and m.shape_type = q.shape then 0.35 else 0 end
+      m.quality_score * 2
+      + case when m.shape_type = query_shape and query_shape is not null then 3 else 0 end
       + (
-        select count(*)::numeric * 0.12
-        from unnest(q.keywords) as k(keyword)
-        where k.keyword = any(m.keywords)
-           or k.keyword = any(m.tags)
-           or lower(m.title) like '%' || k.keyword || '%'
-           or lower(m.summary) like '%' || k.keyword || '%'
-      )
-      + similarity(lower(m.title || ' ' || m.summary), q.text) * 0.25
+          select count(*)::float8
+          from unnest(query_keywords) kw
+          where
+            m.title      ilike '%' || kw || '%'
+            or m.summary ilike '%' || kw || '%'
+            or kw = any(m.keywords)
+            or kw = any(m.tags)
+        )
     ) as match_score
-  from public.cad_memory m
-  cross join q
+  from cad_memory m
   where m.is_active = true
-  order by match_score desc, m.quality_score desc, m.updated_at desc
-  limit greatest(1, least(coalesce(match_limit, 8), 20));
+  order by match_score desc
+  limit match_limit;
 $$;
 
-create or replace function public.mark_cad_memory_used(memory_ids uuid[])
+-- 7. mark_cad_memory_used — increment usage_count for retrieved memories
+create or replace function mark_cad_memory_used(memory_ids uuid[])
 returns void
 language sql
 as $$
-  update public.cad_memory
+  update cad_memory
   set
     usage_count = usage_count + 1,
-    last_used_at = now(),
-    updated_at = now()
-  where id = any(coalesce(memory_ids, '{}')::uuid[]);
+    updated_at  = now()
+  where id = any(memory_ids);
 $$;
 
-create or replace function public.record_cad_feedback(
+-- 8. record_cad_feedback — apply a feedback signal to linked memory quality scores
+create or replace function record_cad_feedback(
   p_generation_id uuid,
-  p_signal text,
-  p_weight numeric default null,
-  p_notes text default null,
-  p_rating smallint default null
+  p_signal        text    default 'feedback',
+  p_weight        float8  default 0,
+  p_notes         text    default null,
+  p_rating        int2    default null
 )
 returns void
 language plpgsql
 as $$
 declare
-  v_weight numeric := coalesce(
-    p_weight,
-    case
-      when p_rating is not null then (p_rating - 3) * 0.04
-      when p_signal = 'copied' then 0.04
-      when p_signal = 'helpful' then 0.08
-      when p_signal = 'debug_requested' then -0.03
-      when p_signal = 'compile_error' then -0.08
-      when p_signal = 'needs_fix' then -0.08
-      when p_signal = 'bad' then -0.12
-      else 0
-    end
-  );
+  v_memory_id uuid;
 begin
-  insert into public.cad_feedback_events (generation_id, signal, rating, weight, notes)
-  values (p_generation_id, coalesce(p_signal, 'feedback'), p_rating, v_weight, p_notes);
+  -- Insert the raw feedback event
+  insert into cad_feedback_events (generation_id, signal, rating, weight, notes)
+  values (p_generation_id, p_signal, p_rating, p_weight, p_notes);
 
-  update public.generations
-  set
-    user_rating = coalesce(p_rating, user_rating),
-    user_feedback = coalesce(p_notes, user_feedback)
-  where id = p_generation_id;
+  -- Update generation rating / feedback if provided
+  if p_rating is not null or p_notes is not null then
+    update generations
+    set
+      user_rating   = coalesce(p_rating,   user_rating),
+      user_feedback = coalesce(p_notes,    user_feedback)
+    where id = p_generation_id;
+  end if;
 
-  update public.cad_memory m
-  set
-    quality_score = least(1, greatest(0, m.quality_score + v_weight)),
-    success_count = success_count + case when v_weight > 0 then 1 else 0 end,
-    failure_count = failure_count + case when v_weight < 0 then 1 else 0 end,
-    updated_at = now()
-  from public.cad_generation_memory_matches gm
-  where gm.memory_id = m.id
-    and gm.generation_id = p_generation_id;
+  -- Propagate weight to each linked memory's quality score
+  for v_memory_id in
+    select memory_id
+    from cad_generation_memory_matches
+    where generation_id = p_generation_id
+  loop
+    update cad_memory
+    set
+      quality_score  = greatest(0, least(1, quality_score + p_weight)),
+      success_count  = case when p_weight > 0 then success_count + 1 else success_count end,
+      failure_count  = case when p_weight < 0 then failure_count + 1 else failure_count end,
+      updated_at     = now()
+    where id = v_memory_id;
+  end loop;
 end;
 $$;
 
-create or replace function public.prune_cad_memory()
-returns integer
+-- 9. prune_cad_memory — deactivate repeatedly failing memories
+create or replace function prune_cad_memory()
+returns int
 language plpgsql
 as $$
 declare
-  v_count integer;
+  v_count int := 0;
+  v_row   record;
 begin
-  with candidates as (
+  for v_row in
     select id, quality_score
-    from public.cad_memory
-    where is_active = true
-      and usage_count >= 8
-      and quality_score < 0.25
-      and failure_count > success_count
-  ),
-  deactivated as (
-    update public.cad_memory m
+    from cad_memory
+    where
+      is_active     = true
+      and failure_count  > 3
+      and quality_score  < 0.2
+  loop
+    update cad_memory
     set is_active = false, updated_at = now()
-    from candidates c
-    where m.id = c.id
-    returning m.id, c.quality_score
-  )
-  insert into public.cad_memory_pruning_events (memory_id, action, reason, score_before)
-  select id, 'deactivate', 'low score after repeated failed feedback', quality_score
-  from deactivated;
+    where id = v_row.id;
 
-  get diagnostics v_count = row_count;
-  return coalesce(v_count, 0);
+    insert into cad_memory_pruning_events (memory_id, reason, quality_score_before)
+    values (v_row.id, 'failure_count > 3 and quality_score < 0.2', v_row.quality_score);
+
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
 end;
 $$;
 
-insert into public.cad_memory (
-  memory_type,
-  title,
-  summary,
-  tags,
-  keywords,
-  parameter_hints,
-  modeling_notes,
-  source_table
-)
-select
-  'seed',
-  title,
-  summary,
-  tags,
-  keywords,
-  parameter_hints,
-  modeling_notes,
-  'cad_knowledge'
-from public.cad_knowledge
-on conflict do nothing;
+-- ─── Row-level security (match existing tables) ───────────────────────────────
+alter table cad_memory                      enable row level security;
+alter table cad_generation_memory_matches   enable row level security;
+alter table cad_feedback_events             enable row level security;
+alter table cad_memory_pruning_events       enable row level security;
+
+-- Public read + anon insert (same pattern as generations table)
+create policy if not exists "anon read cad_memory"
+  on cad_memory for select using (true);
+create policy if not exists "anon insert cad_memory"
+  on cad_memory for insert with check (true);
+create policy if not exists "anon update cad_memory"
+  on cad_memory for update using (true);
+
+create policy if not exists "anon insert memory_matches"
+  on cad_generation_memory_matches for insert with check (true);
+create policy if not exists "anon read memory_matches"
+  on cad_generation_memory_matches for select using (true);
+
+create policy if not exists "anon insert feedback_events"
+  on cad_feedback_events for insert with check (true);
+create policy if not exists "anon read feedback_events"
+  on cad_feedback_events for select using (true);
+
+create policy if not exists "anon read pruning_events"
+  on cad_memory_pruning_events for select using (true);
+create policy if not exists "anon insert pruning_events"
+  on cad_memory_pruning_events for insert with check (true);

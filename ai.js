@@ -582,7 +582,7 @@ function buildLearningContextText(learningContext = {}) {
 
   if (knowledge.length) {
     lines.push("CAD modeling knowledge to apply:");
-    knowledge.slice(0, 4).forEach((entry, index) => {
+    knowledge.slice(0, 3).forEach((entry, index) => {
       const title = normalizeText(entry.title || `Knowledge ${index + 1}`);
       const summary = normalizeText(entry.summary || "").slice(0, 120); // cap summary
       const hints = Array.isArray(entry.parameter_hints || entry.parameterHints) ? (entry.parameter_hints || entry.parameterHints) : [];
