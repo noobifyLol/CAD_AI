@@ -164,12 +164,47 @@
     font-family: "Cascadia Code", "Fira Code", "Menlo", monospace;
     font-size: 0.8rem;
     white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
     max-height: 440px;
     overflow-y: auto;
     color: #90c8a0;
     min-height: 56px;
   }
   .output-box.empty { color: var(--muted); font-family: inherit; font-style: italic; font-size: 0.88rem; }
+
+  /* ── Part description wrap fix ── */
+  #analyze-desc {
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  /* ── Copy toast ── */
+  #copy-toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--green);
+    color: #fff;
+    padding: 10px 22px;
+    border-radius: 24px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 9999;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    white-space: nowrap;
+  }
+  #copy-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 
   .status {
     padding: 9px 13px;
@@ -594,6 +629,9 @@
   </div>
 
 </div>
+
+<!-- Copy toast notification -->
+<div id="copy-toast">✓ Copied to clipboard</div>
 
 <script src="script.js"></script>
 </body>

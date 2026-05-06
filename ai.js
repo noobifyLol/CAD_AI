@@ -1,17 +1,43 @@
 import Groq from "groq-sdk";
 
-const groq         = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const TEXT_MODEL   = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
-const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+const groq           = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const TEXT_MODEL     = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
+const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "llama-3.1-8b-instant";
+const VISION_MODEL   = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 
 function stripJson(text) {
   const m = text?.match(/```json?\s*([\s\S]*?)```/i);
   return (m ? m[1] : (text || "{}")).trim();
 }
 
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function chat(messages, model = TEXT_MODEL) {
-  const res = await groq.chat.completions.create({ model, temperature: 0.0, messages });
-  return res?.choices?.[0]?.message?.content ?? "";
+  const modelsToTry = model === TEXT_MODEL
+    ? [TEXT_MODEL, FALLBACK_MODEL]
+    : [model];                          // vision model — no fallback
+
+  for (const m of modelsToTry) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await groq.chat.completions.create({ model: m, temperature: 0.0, messages });
+        const text = res?.choices?.[0]?.message?.content ?? "";
+        if (m !== model) console.warn(`[AI] Used fallback model ${m}`);
+        return text;
+      } catch (err) {
+        const is429 = err?.status === 429 || String(err?.message || "").includes("rate_limit");
+        if (is429 && attempt < 2) {
+          const wait = 8000 * (attempt + 1);   // 8 s, then 16 s
+          console.warn(`[AI] TPM rate-limit on ${m}, retrying in ${wait / 1000}s…`);
+          await sleep(wait);
+          continue;
+        }
+        if (is429 && m === TEXT_MODEL) break;  // try fallback model next
+        throw err;
+      }
+    }
+  }
+  throw new Error("All Groq models are rate-limited. Please wait a moment and try again.");
 }
 
 // ─── FeatureScript building blocks ───────────────────────────────────────────
@@ -543,9 +569,9 @@ function buildLearningContextText(learningContext = {}) {
 
   if (examples.length) {
     lines.push("Similar prior generations from the database:");
-    examples.slice(0, 3).forEach((example, index) => {
+    examples.slice(0, 2).forEach((example, index) => {   // was 3, now 2
       const dimsText = example.dims ? summarizeDimsForPrompt(example.dims) : "{}";
-      const codeText = summarizeFeatureScript(example.featurescript);
+      const codeText = summarizeFeatureScript(example.featurescript, 6); // was 12 lines, now 6
       lines.push(
         `${index + 1}. Prompt="${normalizeText(example.prompt)}" | shape=${example.shape_type || "UNKNOWN"} | confidence=${example.confidence || "UNKNOWN"}`
       );
@@ -556,17 +582,17 @@ function buildLearningContextText(learningContext = {}) {
 
   if (knowledge.length) {
     lines.push("CAD modeling knowledge to apply:");
-    knowledge.slice(0, 4).forEach((entry, index) => {
+    knowledge.slice(0, 3).forEach((entry, index) => {    // was 4, now 3
       const title = normalizeText(entry.title || `Knowledge ${index + 1}`);
-      const summary = normalizeText(entry.summary || "");
+      const summary = normalizeText(entry.summary || "").slice(0, 120); // cap summary
       const hints = Array.isArray(entry.parameter_hints || entry.parameterHints) ? (entry.parameter_hints || entry.parameterHints) : [];
       const notesList = Array.isArray(entry.modeling_notes || entry.modelingNotes) ? (entry.modeling_notes || entry.modelingNotes) : [];
       const keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
 
       lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}`);
-      if (keywords.length) lines.push(`   keywords=${keywords.join(", ")}`);
-      if (hints.length) lines.push(`   parameters=${hints.map(normalizeText).join(" | ")}`);
-      if (notesList.length) lines.push(`   modeling=${notesList.map(normalizeText).join(" | ")}`);
+      if (keywords.length) lines.push(`   keywords=${keywords.slice(0, 5).join(", ")}`);
+      if (hints.length) lines.push(`   parameters=${hints.slice(0, 3).map(normalizeText).join(" | ")}`);
+      if (notesList.length) lines.push(`   modeling=${notesList.slice(0, 2).map(normalizeText).join(" | ")}`);
     });
   }
 
@@ -1043,7 +1069,11 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
   });
 
   const descRaw = await chat([{ role: "user", content }], VISION_MODEL);
-  const combinedPrompt = extraPrompt ? `${extraPrompt}. From images: ${descRaw}` : descRaw;
+
+  // Cap the description so the downstream generateFeatureScript calls stay within TPM limits.
+  // Vision descriptions can be very long; 600 chars is plenty for dimension extraction.
+  const descForGen = descRaw.length > 600 ? descRaw.slice(0, 600) + "…" : descRaw;
+  const combinedPrompt = extraPrompt ? `${extraPrompt}. From images: ${descForGen}` : descForGen;
 
   const { code, featureName, featureLabel, thinking } = await generateFeatureScript(combinedPrompt, options);
   return { description: descRaw, code, featureName, featureLabel, thinking };

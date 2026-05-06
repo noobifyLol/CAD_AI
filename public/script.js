@@ -49,13 +49,18 @@ function toggleThinking(prefix) {
   header.classList.toggle('open');
 }
 
+function showCopyToast() {
+  const toast = document.getElementById('copy-toast');
+  if (!toast) return;
+  toast.classList.add('show');
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
 async function copyCode(outputId) {
   const text = document.getElementById(outputId).textContent;
   await navigator.clipboard.writeText(text);
-  const btn = event.target.closest('.btn');
-  const orig = btn.textContent;
-  btn.textContent = 'Copied';
-  setTimeout(() => { btn.textContent = orig; }, 1600);
+  showCopyToast();
 }
 
 function setPrompt(text) {
