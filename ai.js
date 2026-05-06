@@ -582,17 +582,25 @@ function buildLearningContextText(learningContext = {}) {
 
   if (knowledge.length) {
     lines.push("CAD modeling knowledge to apply:");
-    knowledge.slice(0, 3).forEach((entry, index) => {    // was 4, now 3
+    knowledge.slice(0, 4).forEach((entry, index) => {
       const title = normalizeText(entry.title || `Knowledge ${index + 1}`);
       const summary = normalizeText(entry.summary || "").slice(0, 120); // cap summary
       const hints = Array.isArray(entry.parameter_hints || entry.parameterHints) ? (entry.parameter_hints || entry.parameterHints) : [];
       const notesList = Array.isArray(entry.modeling_notes || entry.modelingNotes) ? (entry.modeling_notes || entry.modelingNotes) : [];
       const keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
+      const failureModes = Array.isArray(entry.failure_modes || entry.failureModes) ? (entry.failure_modes || entry.failureModes) : [];
+      const validationRules = Array.isArray(entry.validation_rules || entry.validationRules) ? (entry.validation_rules || entry.validationRules) : [];
+      const memoryType = normalizeText(entry.memory_type || entry.memoryType || "");
+      const quality = Number.isFinite(Number(entry.quality_score)) ? Number(entry.quality_score).toFixed(2) : "";
+      const featurePattern = normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 180);
 
-      lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}`);
+      lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}${memoryType || quality ? ` (${[memoryType, quality && `q=${quality}`].filter(Boolean).join(", ")})` : ""}`);
       if (keywords.length) lines.push(`   keywords=${keywords.slice(0, 5).join(", ")}`);
       if (hints.length) lines.push(`   parameters=${hints.slice(0, 3).map(normalizeText).join(" | ")}`);
       if (notesList.length) lines.push(`   modeling=${notesList.slice(0, 2).map(normalizeText).join(" | ")}`);
+      if (featurePattern) lines.push(`   pattern=${featurePattern}`);
+      if (failureModes.length) lines.push(`   avoid=${failureModes.slice(0, 2).map(normalizeText).join(" | ")}`);
+      if (validationRules.length) lines.push(`   validate=${validationRules.slice(0, 2).map(normalizeText).join(" | ")}`);
     });
   }
 
@@ -1075,6 +1083,6 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
   const descForGen = descRaw.length > 600 ? descRaw.slice(0, 600) + "…" : descRaw;
   const combinedPrompt = extraPrompt ? `${extraPrompt}. From images: ${descForGen}` : descForGen;
 
-  const { code, featureName, featureLabel, thinking } = await generateFeatureScript(combinedPrompt, options);
-  return { description: descRaw, code, featureName, featureLabel, thinking };
+  const generated = await generateFeatureScript(combinedPrompt, options);
+  return { description: descRaw, ...generated };
 }

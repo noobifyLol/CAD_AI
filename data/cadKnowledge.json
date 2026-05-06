@@ -1,5 +1,29 @@
 [
   {
+    "title": "FeatureScript Compile Safety",
+    "summary": "Use conservative FeatureScript APIs and parameter preconditions so generated code is more likely to compile on the first paste.",
+    "tags": ["featurescript", "compile", "safety", "precondition"],
+    "keywords": ["featurescript", "compile", "precondition", "isLength", "skSolve", "opExtrude"],
+    "parameterHints": [
+      "Expose dimensions with annotation defaults plus isLength(definition.name, LENGTH_BOUNDS).",
+      "Use isInteger for counts such as teeth, holes, and pattern instances."
+    ],
+    "modelingNotes": [
+      "Call skSolve before opExtrude or opRevolve.",
+      "Never multiply definition.lengthParam by inch in the body because isLength already returns a Length."
+    ],
+    "featurePattern": "FeatureScript 2931; import geometry.fs; define one exported feature; precondition plane and dimensions; build one stable sketch; skSolve; create body with opExtrude/opRevolve/opCylinder.",
+    "failureModes": [
+      "definition.foo is Length is invalid FeatureScript.",
+      "startAngle and endAngle are not valid opCylinder map keys."
+    ],
+    "validationRules": [
+      "Exactly one export const feature should exist.",
+      "All sketch entities must be solved before downstream operations."
+    ],
+    "example_prompt": "Create a compile-safe parametric mounting block"
+  },
+  {
     "title": "Parametric Box Body",
     "summary": "Use a centered rectangle sketch and blind extrude for robot bodies, housings, and simple block geometry.",
     "tags": ["box", "plate", "body", "chassis", "robot"],
@@ -11,6 +35,15 @@
     "modelingNotes": [
       "Sketch the base profile on a selectable plane with newSketchOnPlane.",
       "Keep the rectangle centered around the origin so later mirrors and mating are easier."
+    ],
+    "featurePattern": "Centered rectangle from -width/2,-height/2 to width/2,height/2, solve sketch, extrude blind to depth.",
+    "failureModes": [
+      "Do not create an off-origin corner rectangle unless the user asks for a datum-corner model.",
+      "Do not hardcode dimensions if they can be exposed as parameters."
+    ],
+    "validationRules": [
+      "Width, height, and depth must all be greater than zero.",
+      "Fillet radius should be less than half the smallest nearby edge."
     ],
     "example_prompt": "Robot body 12 inches wide, 6 inches tall, 4 inches deep with 0.25 inch fillets"
   },
@@ -27,6 +60,15 @@
       "Use one sketch with two concentric circles and extrude the ring region.",
       "Prefer editable radii over hardcoded diameters in the body."
     ],
+    "featurePattern": "Create two concentric circles in the same sketch, solve, then extrude the annular sketch region.",
+    "failureModes": [
+      "Do not allow the inner radius to equal or exceed the outer radius.",
+      "Do not convert a diameter into a radius twice."
+    ],
+    "validationRules": [
+      "OD X means outer radius X/2.",
+      "ID Y means inner radius Y/2."
+    ],
     "example_prompt": "Bushing with 0.75 inch outer diameter, 0.5 inch inner diameter, and 1 inch length"
   },
   {
@@ -41,6 +83,15 @@
     "modelingNotes": [
       "Create the outer rectangle and end holes in the same sketch.",
       "Keep holes symmetric unless the prompt explicitly requests asymmetry."
+    ],
+    "featurePattern": "Sketch a centered rounded or rectangular bar, place two symmetric pin holes along the length axis, solve, extrude to thickness.",
+    "failureModes": [
+      "Do not place holes too close to the edge; leave at least 2x hole radius of material.",
+      "Do not confuse total length with center-to-center hole spacing."
+    ],
+    "validationRules": [
+      "Hole radius must be smaller than half the bar width.",
+      "Thickness should be a separate editable depth parameter."
     ],
     "example_prompt": "Linkage arm 5 inches long, 1 inch wide, 0.25 inch thick with 0.2 inch pin holes"
   },
@@ -57,6 +108,15 @@
       "Generate all circles in one sketch before extruding.",
       "Evenly distribute bolt holes using cosine and sine from the center."
     ],
+    "featurePattern": "Outer circle plus bore circle plus N bolt-hole circles on a bolt circle radius, then extrude the remaining region.",
+    "failureModes": [
+      "Do not put bolt holes outside the flange OD.",
+      "Do not make the bore larger than the outer radius."
+    ],
+    "validationRules": [
+      "Bolt circle radius plus hole radius must be less than outer radius.",
+      "Use at least 3 bolt holes unless the prompt says otherwise."
+    ],
     "example_prompt": "Round flange 4 inch OD with 1 inch bore and 4 bolt holes"
   },
   {
@@ -71,6 +131,15 @@
     "modelingNotes": [
       "Sketch a closed L profile instead of extruding a full plate and cutting it afterward.",
       "Use simple straight segments for reliability."
+    ],
+    "featurePattern": "Closed L polygon with outside arm dimensions and inside notch based on wall thickness, then extrude along depth.",
+    "failureModes": [
+      "Do not make wall thickness greater than either leg.",
+      "Do not leave the L profile open."
+    ],
+    "validationRules": [
+      "The polygon must be closed before sketch solve.",
+      "Wall thickness should be exposed as an editable parameter."
     ],
     "example_prompt": "L bracket 3 inches by 4 inches, 0.25 inch wall, 2 inch long"
   },
@@ -87,13 +156,22 @@
       "Create the shaft with a cylinder-like operation and the head with a revolve profile.",
       "Union the head and shaft at the end."
     ],
+    "featurePattern": "opCylinder shaft from base to height, revolve a half-dome or cap profile around the center axis, then boolean union.",
+    "failureModes": [
+      "Do not use opCylinder angle parameters.",
+      "Do not leave the head and shaft as separate bodies unless requested."
+    ],
+    "validationRules": [
+      "Head radius should be greater than or equal to shaft radius.",
+      "The revolve axis must align with the shaft axis."
+    ],
     "example_prompt": "Hitch peg with 0.25 inch shaft diameter, 0.5 inch shaft height, and 0.42 inch dome head"
   },
   {
     "title": "Spur Gear",
     "summary": "Use an involute-inspired 2D tooth profile and extrude it to face width for train gears and pinions.",
     "tags": ["gear", "spur gear", "pinion"],
-    "keywords": ["gear", "spur", "pinion", "tooth", "diametral pitch"],
+    "keywords": ["gear", "spur", "pinion", "tooth", "teeth", "diametral pitch", "module"],
     "parameterHints": [
       "Expose tooth count and face width; derive pitch geometry from pitch radius or diametral pitch.",
       "Add a bore radius parameter when the gear must mount to a shaft."
@@ -101,6 +179,15 @@
     "modelingNotes": [
       "Keep pressure angle at 20 degrees unless the prompt requests otherwise.",
       "Prefer a valid simplified gear profile over an overcomplicated but brittle one."
+    ],
+    "featurePattern": "Generate alternating root/flank/tip/flank points around the pitch circle, solve one closed sketch, then extrude to face width.",
+    "failureModes": [
+      "Do not ask the LLM to invent a full involute API.",
+      "Do not generate hundreds of separate sketch operations when a compact loop can create the tooth outline."
+    ],
+    "validationRules": [
+      "Tooth count should be at least 6.",
+      "Pitch radius, root radius, and tip radius must stay positive and ordered root < pitch < tip."
     ],
     "example_prompt": "20 tooth spur gear with 2 inch pitch diameter and 0.5 inch face width"
   },
@@ -117,6 +204,87 @@
       "Build each slot from two circles connected by tangent lines in the same sketch.",
       "Extrude the resulting sketch region with the slot cutouts already present."
     ],
+    "featurePattern": "Outer rectangle plus each slot as a capsule profile using two equal-radius circles and tangent line segments.",
+    "failureModes": [
+      "Do not make slot width larger than slot length.",
+      "Do not place slots beyond plate boundaries."
+    ],
+    "validationRules": [
+      "Slot radius is slot width / 2.",
+      "Slot center spacing must leave edge margin."
+    ],
     "example_prompt": "Mounting plate 6 by 3 inches with two 1.5 inch slots"
+  },
+  {
+    "title": "Ribbed Bracket Or Gusset",
+    "summary": "Add triangular ribs or gussets to brackets when stiffness or load support is requested.",
+    "tags": ["rib", "gusset", "bracket", "stiffener"],
+    "keywords": ["rib", "gusset", "stiffener", "reinforced", "support", "load"],
+    "parameterHints": [
+      "Expose rib thickness, rib height, and rib count when the prompt requests reinforcement.",
+      "Default rib thickness can be close to wall thickness."
+    ],
+    "modelingNotes": [
+      "Keep ribs simple and symmetric for first-pass generated CAD.",
+      "A triangular prism rib is usually more robust than complex curved webbing."
+    ],
+    "featurePattern": "Create the base bracket first, then add triangular rib profiles on the side plane and extrude/union them into the bracket.",
+    "failureModes": [
+      "Do not create ribs that float without touching both supported faces.",
+      "Do not overcomplicate with lofts unless the user specifically asks."
+    ],
+    "validationRules": [
+      "Ribs should intersect the main bracket body.",
+      "Rib thickness should be less than the bracket width."
+    ],
+    "example_prompt": "Reinforced L bracket with two triangular gussets"
+  },
+  {
+    "title": "Shell Or Enclosure",
+    "summary": "For cases and housings, model an outer block with editable wall thickness and an open side.",
+    "tags": ["enclosure", "shell", "case", "housing"],
+    "keywords": ["enclosure", "shell", "case", "housing", "box", "wall thickness"],
+    "parameterHints": [
+      "Expose width, height, depth, wall thickness, and optional lid clearance.",
+      "Keep wall thickness below one third of the smallest outer dimension."
+    ],
+    "modelingNotes": [
+      "Use simple rectangular shell logic before adding bosses, clips, or vents.",
+      "If the exact open face is unclear, default to an open top."
+    ],
+    "featurePattern": "Create outer box, create inner offset cavity based on wall thickness, subtract or sketch the ring profile and extrude as a shell-like body.",
+    "failureModes": [
+      "Do not let wall thickness consume the interior cavity.",
+      "Do not add tiny snap details unless dimensions are provided."
+    ],
+    "validationRules": [
+      "Inner width/height/depth must remain positive.",
+      "Open face should match the prompt or default to top."
+    ],
+    "example_prompt": "Small electronics enclosure 4 x 3 x 1.5 inches with 0.1 inch walls"
+  },
+  {
+    "title": "Image Based CAD Interpretation",
+    "summary": "When generating from images, prioritize explicit dimensions and simple manufacturable geometry over visual decoration.",
+    "tags": ["image", "vision", "dimensions", "cad interpretation"],
+    "keywords": ["image", "photo", "drawing", "dimension", "reference", "analyze"],
+    "parameterHints": [
+      "If a dimension is visible, use it directly.",
+      "If a dimension is missing, infer conservatively and expose it as an editable parameter."
+    ],
+    "modelingNotes": [
+      "Separate what is visible from what is inferred in the reasoning trace.",
+      "Use image labels to decide which view controls dimensions."
+    ],
+    "featurePattern": "Vision description -> compact dimension prompt -> extractDims -> template if known shape, custom FeatureScript only for genuinely complex geometry.",
+    "failureModes": [
+      "Do not pass long image descriptions into multiple LLM calls.",
+      "Do not treat shadows, perspective, or material texture as required geometry."
+    ],
+    "validationRules": [
+      "Generated dimensions should be editable.",
+      "If confidence is low, the reasoning should say which dimensions were inferred."
+    ],
+    "example_prompt": "Use this dimensioned drawing to generate the mounting bracket"
   }
 ]

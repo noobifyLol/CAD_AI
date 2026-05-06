@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "seed:knowledge": "node scripts/seedCadKnowledge.js"
+    "seed:knowledge": "node scripts/seedCadKnowledge.js",
+    "db:learning-report": "node scripts/dbLearningReport.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",

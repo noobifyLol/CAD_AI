@@ -13,10 +13,15 @@ function setStatus(id, msg, type) {
   el.className = `status show ${type}`;
 }
 
-function setOutput(id, code, copyBtnId) {
+const outputGenerationIds = {};
+let debugSourceGenerationId = null;
+
+function setOutput(id, code, copyBtnId, generationId = null) {
   const el = document.getElementById(id);
   el.textContent = code;
   el.classList.remove('empty');
+  if (generationId) outputGenerationIds[id] = generationId;
+  else delete outputGenerationIds[id];
   if (copyBtnId) document.getElementById(copyBtnId).disabled = false;
 }
 
@@ -61,6 +66,15 @@ async function copyCode(outputId) {
   const text = document.getElementById(outputId).textContent;
   await navigator.clipboard.writeText(text);
   showCopyToast();
+
+  const generationId = outputGenerationIds[outputId];
+  if (generationId) {
+    fetch('/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generationId, signal: 'copied' })
+    }).catch(() => {});
+  }
 }
 
 function setPrompt(text) {
@@ -72,6 +86,7 @@ function sendToDebug() {
   const code = document.getElementById('gen-output').textContent;
   if (code && !document.getElementById('gen-output').classList.contains('empty')) {
     document.getElementById('debug-code').value = code;
+    debugSourceGenerationId = outputGenerationIds['gen-output'] || null;
     switchTab('debug');
   }
 }
@@ -94,7 +109,7 @@ async function generate() {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Generation failed');
-    setOutput('gen-output', data.code, 'copy-btn');
+    setOutput('gen-output', data.code, 'copy-btn', data.generationId);
     setThinking('gen', data.thinking || '');
     setStatus('gen-status', `Generated "${data.featureLabel}"`, 'ok');
   } catch (e) {
@@ -118,7 +133,7 @@ async function debugCode() {
     const r = await fetch('/debug', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, errors })
+      body: JSON.stringify({ code, errors, generationId: debugSourceGenerationId })
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Debug failed');
@@ -150,9 +165,18 @@ function getImageSlotElements(source) {
   };
 }
 
+function formatAnalyzeDescription(text) {
+  return String(text || '')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/([^\n])\n(?=[^\n])/g, '$1 ')
+    .trim();
+}
+
 function updateAnalyzeDescription(text, isPlaceholder = false) {
   const descEl = document.getElementById('analyze-desc');
-  descEl.textContent = text;
+  descEl.textContent = isPlaceholder ? text : formatAnalyzeDescription(text);
   descEl.style.fontStyle = isPlaceholder ? 'italic' : 'normal';
   descEl.style.color = isPlaceholder ? 'var(--muted)' : 'var(--text)';
 }
@@ -298,7 +322,7 @@ async function analyzeMultiImg() {
     if (!r.ok) throw new Error(data.error || 'Analysis failed');
 
     updateAnalyzeDescription(data.description);
-    setOutput('analyze-output', data.code, 'analyze-copy-btn');
+    setOutput('analyze-output', data.code, 'analyze-copy-btn', data.generationId);
     setThinking('analyze', data.thinking || '');
     setStatus('analyze-status', `Generated "${data.featureLabel}"`, 'ok');
   } catch (e) {

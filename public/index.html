@@ -86,6 +86,7 @@
   .panel.active { display: block; }
 
   .two-col { display: grid; gap: 20px; }
+  .two-col > * { min-width: 0; }
   @media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } }
 
   .card {
@@ -175,11 +176,16 @@
 
   /* ── Part description wrap fix ── */
   #analyze-desc {
-    word-break: break-word;
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
+    display: block;
+    width: 100%;
+    min-height: 52px;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: anywhere;
     max-height: 260px;
     overflow-y: auto;
+    color: var(--muted);
+    font-style: italic;
   }
 
   /* ── Copy toast ── */
@@ -498,8 +504,11 @@
         <div class="image-slots-container" id="image-slots-container">
           
           <!-- INITIAL DEFAULT SLOT (Template for JS generation) -->
-          <div class="image-slot" style="margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px;">
-            <div class="card-label">Image 1</div>
+          <div class="image-slot">
+            <div class="slot-header">
+              <div class="card-label slot-title">Image 1</div>
+              <button type="button" class="slot-remove-btn" style="display:none">Remove</button>
+            </div>
             
             <!-- Drag and Drop Zone -->
             <div class="image-drop drop-zone" 
@@ -547,8 +556,7 @@
      <div>
         <div class="card">
           <div class="card-label">Part Description</div>
-          <div id="analyze-desc" class="explanation-box"
-               style="display:block; min-height:52px; color:var(--muted); font-style:italic">
+          <div id="analyze-desc" class="explanation-box">
             Upload images to see how the AI reads the part.
           </div>
  
@@ -572,9 +580,6 @@
  
     </div>
   </div>
-    
-  </div>
-</div>
       
 
   <!-- ── Guide ── -->
