@@ -4,11 +4,92 @@
 --   supabase db push
 -- ─────────────────────────────────────────────────────────────────────────────
 
+create extension if not exists pgcrypto;
+
+-- 0. Base tables used by the app. These are included here so a fresh Supabase
+-- project can be set up from one SQL file instead of needing docs/schema first.
+create table if not exists generations (
+  id            uuid primary key default gen_random_uuid(),
+  created_at    timestamptz not null default now(),
+  prompt        text not null,
+  shape_type    text,
+  confidence    text,
+  dims          jsonb not null default '{}'::jsonb,
+  featurescript text not null,
+  thinking      text
+);
+
+create index if not exists generations_created_at_idx
+  on generations (created_at desc);
+
+create index if not exists generations_shape_type_idx
+  on generations (shape_type);
+
+create table if not exists cad_knowledge (
+  id              uuid primary key default gen_random_uuid(),
+  created_at      timestamptz not null default now(),
+  title           text not null unique,
+  summary         text not null,
+  tags            text[] not null default '{}',
+  keywords        text[] not null default '{}',
+  parameter_hints text[] not null default '{}',
+  modeling_notes  text[] not null default '{}',
+  example_prompt  text
+);
+
+create index if not exists cad_knowledge_keywords_idx
+  on cad_knowledge using gin (keywords);
+
+create index if not exists cad_knowledge_tags_idx
+  on cad_knowledge using gin (tags);
+
+create table if not exists shape_knowledge (
+  id           uuid primary key default gen_random_uuid(),
+  created_at   timestamptz not null default now(),
+  shape_type   text not null unique,
+  aliases      text[] not null default '{}',
+  description  text,
+  default_dims jsonb not null default '{}'::jsonb,
+  notes        text
+);
+
+create table if not exists image_analyses (
+  id             uuid primary key default gen_random_uuid(),
+  created_at     timestamptz not null default now(),
+  image_count    int4 not null default 1,
+  image_contexts text[] not null default '{}',
+  global_prompt  text,
+  ai_description text,
+  generation_id  uuid references generations (id) on delete set null
+);
+
+create table if not exists debug_sessions (
+  id             uuid primary key default gen_random_uuid(),
+  created_at     timestamptz not null default now(),
+  original_code  text not null default '',
+  error_messages text not null default '',
+  fixed_code     text not null default '',
+  explanation    text not null default ''
+);
+
 -- 1. Add missing columns to existing generations table
 alter table if exists generations
-  add column if not exists char_count    int4,
+  add column if not exists char_count    int4 generated always as (char_length(featurescript)) stored,
   add column if not exists user_rating   int2,
   add column if not exists user_feedback text;
+
+alter table if exists image_analyses
+  add column if not exists image_count    int4 not null default 1,
+  add column if not exists image_contexts text[] not null default '{}',
+  add column if not exists global_prompt  text,
+  add column if not exists ai_description text,
+  add column if not exists generation_id  uuid references generations (id) on delete set null;
+
+alter table if exists debug_sessions
+  add column if not exists original_code  text not null default '',
+  add column if not exists error_messages text not null default '',
+  add column if not exists fixed_code     text not null default '',
+  add column if not exists explanation    text not null default '';
 
 -- 2. cad_memory — scored CAD skill records
 create table if not exists cad_memory (
@@ -227,30 +308,89 @@ end;
 $$;
 
 -- ─── Row-level security (match existing tables) ───────────────────────────────
+alter table generations                    enable row level security;
+alter table cad_knowledge                  enable row level security;
+alter table shape_knowledge                enable row level security;
+alter table image_analyses                 enable row level security;
+alter table debug_sessions                 enable row level security;
 alter table cad_memory                      enable row level security;
 alter table cad_generation_memory_matches   enable row level security;
 alter table cad_feedback_events             enable row level security;
 alter table cad_memory_pruning_events       enable row level security;
 
--- Public read + anon insert (same pattern as generations table)
-create policy if not exists "anon read cad_memory"
+-- Public read + anon insert/update. This app currently uses the anon key from
+-- the server only; tighten these policies before exposing direct browser DB writes.
+drop policy if exists "anon read generations" on generations;
+create policy "anon read generations"
+  on generations for select using (true);
+drop policy if exists "anon insert generations" on generations;
+create policy "anon insert generations"
+  on generations for insert with check (true);
+drop policy if exists "anon update generations" on generations;
+create policy "anon update generations"
+  on generations for update using (true);
+
+drop policy if exists "anon read cad_knowledge" on cad_knowledge;
+create policy "anon read cad_knowledge"
+  on cad_knowledge for select using (true);
+drop policy if exists "anon insert cad_knowledge" on cad_knowledge;
+create policy "anon insert cad_knowledge"
+  on cad_knowledge for insert with check (true);
+drop policy if exists "anon update cad_knowledge" on cad_knowledge;
+create policy "anon update cad_knowledge"
+  on cad_knowledge for update using (true);
+
+drop policy if exists "anon read shape_knowledge" on shape_knowledge;
+create policy "anon read shape_knowledge"
+  on shape_knowledge for select using (true);
+drop policy if exists "anon insert shape_knowledge" on shape_knowledge;
+create policy "anon insert shape_knowledge"
+  on shape_knowledge for insert with check (true);
+drop policy if exists "anon update shape_knowledge" on shape_knowledge;
+create policy "anon update shape_knowledge"
+  on shape_knowledge for update using (true);
+
+drop policy if exists "anon read image_analyses" on image_analyses;
+create policy "anon read image_analyses"
+  on image_analyses for select using (true);
+drop policy if exists "anon insert image_analyses" on image_analyses;
+create policy "anon insert image_analyses"
+  on image_analyses for insert with check (true);
+
+drop policy if exists "anon read debug_sessions" on debug_sessions;
+create policy "anon read debug_sessions"
+  on debug_sessions for select using (true);
+drop policy if exists "anon insert debug_sessions" on debug_sessions;
+create policy "anon insert debug_sessions"
+  on debug_sessions for insert with check (true);
+
+drop policy if exists "anon read cad_memory" on cad_memory;
+create policy "anon read cad_memory"
   on cad_memory for select using (true);
-create policy if not exists "anon insert cad_memory"
+drop policy if exists "anon insert cad_memory" on cad_memory;
+create policy "anon insert cad_memory"
   on cad_memory for insert with check (true);
-create policy if not exists "anon update cad_memory"
+drop policy if exists "anon update cad_memory" on cad_memory;
+create policy "anon update cad_memory"
   on cad_memory for update using (true);
 
-create policy if not exists "anon insert memory_matches"
+drop policy if exists "anon insert memory_matches" on cad_generation_memory_matches;
+create policy "anon insert memory_matches"
   on cad_generation_memory_matches for insert with check (true);
-create policy if not exists "anon read memory_matches"
+drop policy if exists "anon read memory_matches" on cad_generation_memory_matches;
+create policy "anon read memory_matches"
   on cad_generation_memory_matches for select using (true);
 
-create policy if not exists "anon insert feedback_events"
+drop policy if exists "anon insert feedback_events" on cad_feedback_events;
+create policy "anon insert feedback_events"
   on cad_feedback_events for insert with check (true);
-create policy if not exists "anon read feedback_events"
+drop policy if exists "anon read feedback_events" on cad_feedback_events;
+create policy "anon read feedback_events"
   on cad_feedback_events for select using (true);
 
-create policy if not exists "anon read pruning_events"
+drop policy if exists "anon read pruning_events" on cad_memory_pruning_events;
+create policy "anon read pruning_events"
   on cad_memory_pruning_events for select using (true);
-create policy if not exists "anon insert pruning_events"
+drop policy if exists "anon insert pruning_events" on cad_memory_pruning_events;
+create policy "anon insert pruning_events"
   on cad_memory_pruning_events for insert with check (true);

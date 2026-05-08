@@ -4,4 +4,9 @@ vcpkg/
 .env
 env
 docs/
+!docs/
+docs/*
+!docs/CAD_AI_LEARNING_LOOP.md
 test.js
+.server*.log
+

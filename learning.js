@@ -31,9 +31,37 @@ function jsonSafe(value) {
   return JSON.parse(JSON.stringify(value ?? {}));
 }
 
+function dbLogResult({ id = null, ok = false, skipped = false, error = null, code = null, table = null, action = null, createdAt = new Date().toISOString(), details = null } = {}) {
+  return { id, ok, skipped, error, code, table, action, createdAt, details };
+}
+
+function dbErrorResult(table, action, error) {
+  return dbLogResult({
+    ok: false,
+    table,
+    action,
+    error: error?.message || String(error || "Unknown database error"),
+    code: error?.code || null,
+  });
+}
+
+function safeTextArray(value, limit = 8) {
+  return (Array.isArray(value) ? value : [])
+    .map(item => normalizeText(item))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function clampQualityScore(value, fallback = 0.55) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(1, parsed));
+}
+
 function inferShapeFromPrompt(prompt) {
   const text = normalizeText(prompt).toLowerCase();
   const shapeHints = [
+    ["ROBOT_MECH", /\b(robot|robotic|mech|mecha|android|humanoid)\b/],
     ["GEAR_SPUR", /\b(gear|spur|pinion|teeth|tooth|diametral pitch|module)\b/],
     ["FLANGE", /\b(flange|bolt circle|bore)\b/],
     ["L_BRACKET", /\b(l bracket|angle bracket|corner bracket)\b/],
@@ -384,7 +412,14 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
   }
 
   async function logGeneration(prompt, result, metadata = {}) {
-    if (!supabase) return null;
+    if (!supabase) {
+      return dbLogResult({
+        skipped: true,
+        table: "generations",
+        action: "insert",
+        error: "Supabase is disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY.",
+      });
+    }
 
     const payload = {
       prompt,
@@ -393,53 +428,88 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
       dims: jsonSafe(result?.dims),
       featurescript: result?.code || "",
       thinking: result?.thinking || "",
-      char_count: String(result?.code || "").length,
     };
 
     const { data, error } = await supabase
       .from("generations")
       .insert([payload])
-      .select("id")
+      .select("id,created_at")
       .single();
 
     if (error) {
       warnOnce(warned, "log_generation", `[DB] Failed to log generation: ${error.message}`);
-      return null;
+      return dbErrorResult("generations", "insert", error);
     }
 
     await linkMemoryMatches(data?.id, metadata.learningContext?.memoryMatches || []);
-    return data?.id || null;
+    return dbLogResult({
+      id: data?.id || null,
+      ok: Boolean(data?.id),
+      table: "generations",
+      action: "insert",
+      createdAt: data?.created_at || new Date().toISOString(),
+    });
   }
 
   async function logImageAnalysis({ imageCount, imageContexts, globalPrompt, aiDescription, generationId }) {
-    if (!supabase) return;
+    if (!supabase) {
+      return dbLogResult({
+        skipped: true,
+        table: "image_analyses",
+        action: "insert",
+        error: "Supabase is disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY.",
+      });
+    }
 
-    const { error } = await supabase.from("image_analyses").insert([{
+    const { data, error } = await supabase.from("image_analyses").insert([{
       image_count: imageCount,
       image_contexts: imageContexts || [],
       global_prompt: globalPrompt || "",
       ai_description: aiDescription || "",
       generation_id: generationId || null,
-    }]);
+    }]).select("id,created_at").single();
 
     if (error && !isMissingDbObject(error)) {
       warnOnce(warned, "image_analyses", `[DB] Failed to log image analysis: ${error.message}`);
     }
+    if (error) return dbErrorResult("image_analyses", "insert", error);
+    return dbLogResult({
+      id: data?.id || null,
+      ok: Boolean(data?.id),
+      table: "image_analyses",
+      action: "insert",
+      createdAt: data?.created_at || new Date().toISOString(),
+    });
   }
 
   async function logDebugSession({ originalCode, errorMessages, fixedCode, explanation }) {
-    if (!supabase) return;
+    if (!supabase) {
+      return dbLogResult({
+        skipped: true,
+        table: "debug_sessions",
+        action: "insert",
+        error: "Supabase is disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY.",
+      });
+    }
 
-    const { error } = await supabase.from("debug_sessions").insert([{
+    const { data, error } = await supabase.from("debug_sessions").insert([{
       original_code: originalCode || "",
       error_messages: errorMessages || "",
       fixed_code: fixedCode || "",
       explanation: explanation || "",
-    }]);
+    }]).select("id,created_at").single();
 
     if (error && !isMissingDbObject(error)) {
       warnOnce(warned, "debug_sessions", `[DB] Failed to log debug session: ${error.message}`);
     }
+    if (error) return dbErrorResult("debug_sessions", "insert", error);
+    return dbLogResult({
+      id: data?.id || null,
+      ok: Boolean(data?.id),
+      table: "debug_sessions",
+      action: "insert",
+      createdAt: data?.created_at || new Date().toISOString(),
+    });
   }
 
   function defaultFeedbackWeight(signal, rating) {
@@ -447,6 +517,7 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
 
     return {
       copied: 0.04,
+      good: 0.08,
       helpful: 0.08,
       debug_requested: -0.03,
       compile_error: -0.08,
@@ -456,7 +527,14 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
   }
 
   async function recordFeedback({ generationId, signal = "feedback", rating, feedback, weight }) {
-    if (!supabase || !generationId) return { ok: false, skipped: true };
+    if (!supabase || !generationId) {
+      return {
+        ok: false,
+        skipped: true,
+        createdAt: new Date().toISOString(),
+        error: !supabase ? "Supabase is disabled." : "No generationId provided.",
+      };
+    }
 
     const safeRating = Number.isFinite(Number(rating))
       ? Math.max(1, Math.min(5, Math.round(Number(rating))))
@@ -473,7 +551,9 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
       p_rating: safeRating,
     });
 
-    if (!rpc.error) return { ok: true };
+    if (!rpc.error) {
+      return { ok: true, weight: safeWeight, createdAt: new Date().toISOString() };
+    }
     if (rpc.error && !isMissingDbObject(rpc.error)) {
       warnOnce(warned, "record_cad_feedback_rpc", `[DB] Feedback RPC failed: ${rpc.error.message}`);
     }
@@ -502,7 +582,136 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
       if (error) warnOnce(warned, "feedback_generation_update", `[DB] Failed to update generation feedback: ${error.message}`);
     }
 
-    return { ok: !event.error || isMissingDbObject(event.error) };
+    return {
+      ok: !event.error || isMissingDbObject(event.error),
+      weight: safeWeight,
+      createdAt: new Date().toISOString(),
+      error: event.error && !isMissingDbObject(event.error) ? event.error.message : null,
+    };
+  }
+
+  async function fetchGenerationSnapshot({ generationId, prompt }) {
+    if (!supabase) {
+      return {
+        supabaseEnabled: false,
+        generation: null,
+        memoryMatches: [],
+        feedbackEvents: [],
+        diagnostics: await diagnostics(),
+      };
+    }
+
+    let generation = null;
+    if (generationId) {
+      const { data, error } = await supabase
+        .from("generations")
+        .select("id,created_at,prompt,shape_type,confidence,dims,thinking,user_rating,user_feedback,char_count")
+        .eq("id", generationId)
+        .maybeSingle();
+      if (!error) generation = data || null;
+    }
+
+    if (!generation && prompt) {
+      const { data, error } = await supabase
+        .from("generations")
+        .select("id,created_at,prompt,shape_type,confidence,dims,thinking,user_rating,user_feedback,char_count")
+        .ilike("prompt", `%${String(prompt).slice(0, 80)}%`)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (!error && Array.isArray(data)) generation = data[0] || null;
+    }
+
+    const matches = generation?.id
+      ? await supabase
+          .from("cad_generation_memory_matches")
+          .select("score_rank,score_snapshot,cad_memory(id,title,shape_type,quality_score,usage_count,success_count,failure_count)")
+          .eq("generation_id", generation.id)
+          .order("score_rank", { ascending: true })
+      : { data: [], error: null };
+
+    const feedback = generation?.id
+      ? await supabase
+          .from("cad_feedback_events")
+          .select("signal,rating,weight,notes,created_at")
+          .eq("generation_id", generation.id)
+          .order("created_at", { ascending: false })
+          .limit(8)
+      : { data: [], error: null };
+
+    return {
+      supabaseEnabled: true,
+      generation,
+      memoryMatches: matches.error ? [] : matches.data || [],
+      feedbackEvents: feedback.error ? [] : feedback.data || [],
+      diagnostics: await diagnostics(),
+    };
+  }
+
+  async function saveLearningAnalysis({ analysis, prompt, generationId, signal, rating, feedback }) {
+    if (!supabase) {
+      return dbLogResult({
+        skipped: true,
+        table: "cad_memory",
+        action: "upsert",
+        error: "Supabase is disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY.",
+      });
+    }
+
+    const candidate = analysis?.memoryCandidate || analysis?.memory_candidate || null;
+    if (!candidate?.title) {
+      return dbLogResult({
+        skipped: true,
+        table: "cad_memory",
+        action: "upsert",
+        error: "AI analysis did not produce a memory candidate.",
+      });
+    }
+
+    const shapeHint = candidate.shape_type || candidate.shapeType || inferShapeFromPrompt(prompt);
+    const title = normalizeText(candidate.title).slice(0, 120);
+    const summaryParts = [
+      normalizeText(candidate.summary || analysis?.summary || ""),
+      generationId ? `Source generation: ${generationId}.` : "",
+      signal ? `Signal: ${signal}.` : "",
+      rating ? `Rating: ${rating}.` : "",
+      feedback ? `Feedback: ${normalizeText(feedback).slice(0, 240)}` : "",
+    ].filter(Boolean);
+
+    const payload = {
+      memory_type: "feedback_lesson",
+      title,
+      summary: summaryParts.join(" "),
+      shape_type: shapeHint || null,
+      tags: safeTextArray(candidate.tags || ["feedback", "generated"]),
+      keywords: safeTextArray(candidate.keywords || extractKeywords(prompt, 8)),
+      parameter_hints: safeTextArray(candidate.parameterHints || candidate.parameter_hints),
+      modeling_notes: safeTextArray(candidate.modelingNotes || candidate.modeling_notes),
+      feature_pattern: normalizeText(candidate.featurePattern || candidate.feature_pattern || "").slice(0, 1000) || null,
+      failure_modes: safeTextArray(candidate.failureModes || candidate.failure_modes),
+      validation_rules: safeTextArray(candidate.validationRules || candidate.validation_rules),
+      quality_score: clampQualityScore(candidate.qualityScore ?? candidate.quality_score, signal === "good" || Number(rating) >= 4 ? 0.68 : 0.45),
+      source_table: "cad_feedback_events",
+      is_active: true,
+    };
+
+    const { data, error } = await supabase
+      .from("cad_memory")
+      .upsert([payload], { onConflict: "title" })
+      .select("id,created_at")
+      .single();
+
+    if (error) {
+      warnOnce(warned, "save_learning_analysis", `[DB] Failed to save AI learning analysis: ${error.message}`);
+      return dbErrorResult("cad_memory", "upsert", error);
+    }
+
+    return dbLogResult({
+      id: data?.id || null,
+      ok: Boolean(data?.id),
+      table: "cad_memory",
+      action: "upsert",
+      createdAt: data?.created_at || new Date().toISOString(),
+    });
   }
 
   async function countTable(table) {
@@ -560,6 +769,7 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
         "cad_memory stores scored CAD skill records used for retrieval, promotion, demotion, and pruning.",
         "cad_generation_memory_matches links each generated result to the exact memories that influenced it.",
         "cad_feedback_events turns copy/helpful/debug signals into quality-score updates for those memories.",
+        "If cad_memory or cad_feedback_events are missing, run supabase/migrations/20260505213000_adaptive_cad_memory.sql, then npm run seed:knowledge.",
       ],
     };
   }
@@ -570,6 +780,8 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
     logImageAnalysis,
     logDebugSession,
     recordFeedback,
+    fetchGenerationSnapshot,
+    saveLearningAnalysis,
     diagnostics,
   };
 }

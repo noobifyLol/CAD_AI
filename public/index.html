@@ -210,6 +210,126 @@
     transform: translateX(-50%) translateY(0);
   }
 
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, 0.62);
+    z-index: 10000;
+  }
+  .modal-backdrop.show { display: flex; }
+  .run-modal {
+    width: min(560px, 100%);
+    max-height: min(760px, 92vh);
+    overflow-y: auto;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+    padding: 18px;
+  }
+  .modal-head {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .modal-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .modal-time {
+    margin-top: 3px;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .modal-close {
+    margin-left: auto;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  .modal-close:hover { color: var(--text); border-color: var(--accent); }
+  .modal-summary {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 8px;
+    background: #111928;
+    border: 1px solid #1e2d44;
+    color: #a9b9d0;
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+  .modal-summary.ok {
+    background: #081e18;
+    border-color: #0f3828;
+    color: var(--green);
+  }
+  .modal-summary.error {
+    background: #200e14;
+    border-color: #4a1828;
+    color: var(--red);
+  }
+  .modal-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .modal-stat {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 10px;
+    background: rgba(255,255,255,0.02);
+    min-width: 0;
+  }
+  .modal-stat span {
+    display: block;
+    color: var(--muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+  }
+  .modal-stat strong {
+    display: block;
+    color: var(--text);
+    font-size: 0.86rem;
+    word-break: break-word;
+  }
+  .feedback-panel {
+    display: none;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .feedback-panel.show { display: block; }
+  .feedback-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .learning-result {
+    display: none;
+    margin-top: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--think-border);
+    background: var(--think);
+    color: var(--think-text);
+    padding: 11px;
+    font-size: 0.84rem;
+    line-height: 1.6;
+  }
+  .learning-result.show { display: block; }
+
   .status {
     padding: 9px 13px;
     border-radius: 8px;
@@ -294,6 +414,22 @@
     display: none;
   }
   .explanation-box.show { display: block; }
+
+  .diagnostics-box {
+    display: none;
+    margin-top: 12px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: "Cascadia Code", "Fira Code", "Menlo", monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    color: #a9b9d0;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .diagnostics-box.show { display: block; }
 
   /* ── Multi-image slots ── */
   .image-slots-container {
@@ -586,6 +722,17 @@
       <div class="card-label">How to use</div>
 
       <div class="guide-section">
+        <h3>Learning database</h3>
+        <p>Use this when a generation does not appear in Supabase or the memory weights are not changing.</p>
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="checkLearningDiagnostics()">Check Database</button>
+        </div>
+        <div id="learning-diagnostics" class="diagnostics-box"></div>
+      </div>
+
+      <hr class="guide-divider">
+
+      <div class="guide-section">
         <h3>Step 1 — Generate FeatureScript</h3>
         <p>Type a description of your part in the Generate tab. Include shape, dimensions, holes, and any fillets. Click Generate or press Ctrl+Enter. The AI Reasoning box shows exactly what the AI understood before generating code.</p>
       </div>
@@ -635,6 +782,49 @@
 
 <!-- Copy toast notification -->
 <div id="copy-toast">✓ Copied to clipboard</div>
+
+<div id="run-modal-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+  <div class="run-modal">
+    <div class="modal-head">
+      <div>
+        <div id="run-modal-title" class="modal-title">Generation complete</div>
+        <div id="run-modal-time" class="modal-time"></div>
+      </div>
+      <button type="button" class="modal-close" onclick="closeRunModal()" aria-label="Close">x</button>
+    </div>
+
+    <div id="run-modal-summary" class="modal-summary"></div>
+
+    <div class="modal-grid">
+      <div class="modal-stat">
+        <span>Database</span>
+        <strong id="run-modal-db">Not reported</strong>
+      </div>
+      <div class="modal-stat">
+        <span>Generation ID</span>
+        <strong id="run-modal-id">None</strong>
+      </div>
+      <div class="modal-stat">
+        <span>Memory Used</span>
+        <strong id="run-modal-memory">0</strong>
+      </div>
+      <div class="modal-stat">
+        <span>Examples Used</span>
+        <strong id="run-modal-examples">0</strong>
+      </div>
+    </div>
+
+    <div id="run-feedback-panel" class="feedback-panel">
+      <div class="card-label">Was this result good?</div>
+      <textarea id="run-feedback-notes" rows="3" placeholder="Optional: what was wrong, what compiled, what should improve next time"></textarea>
+      <div class="feedback-actions">
+        <button class="btn btn-success" onclick="submitRunFeedback('good', 5)">Good Result</button>
+        <button class="btn btn-danger" onclick="submitRunFeedback('bad', 1)">Needs Work</button>
+      </div>
+      <div id="run-learning-result" class="learning-result"></div>
+    </div>
+  </div>
+</div>
 
 <script src="script.js"></script>
 </body>

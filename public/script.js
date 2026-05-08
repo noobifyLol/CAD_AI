@@ -15,6 +15,144 @@ function setStatus(id, msg, type) {
 
 const outputGenerationIds = {};
 let debugSourceGenerationId = null;
+let runModalContext = null;
+
+function formatTimestamp(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toLocaleString();
+  return date.toLocaleString();
+}
+
+function databaseStatusText(database) {
+  if (!database) return 'No database status returned';
+  if (database.ok) return 'Saved';
+  if (database.skipped) return database.error ? `Skipped: ${database.error}` : 'Skipped';
+  return database.error ? `Not saved: ${database.error}` : 'Not saved';
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function showRunModal({ title, ok, message, createdAt, database, generationId, prompt, learning, outputKind, errorMessages }) {
+  const backdrop = document.getElementById('run-modal-backdrop');
+  const summary = document.getElementById('run-modal-summary');
+  const feedbackPanel = document.getElementById('run-feedback-panel');
+  const learningResult = document.getElementById('run-learning-result');
+  const notes = document.getElementById('run-feedback-notes');
+  if (!backdrop || !summary || !feedbackPanel || !learningResult || !notes) return;
+
+  runModalContext = {
+    generationId: generationId || null,
+    prompt: prompt || '',
+    outputKind: outputKind || 'generation',
+    errorMessages: errorMessages || '',
+  };
+
+  setText('run-modal-title', title);
+  setText('run-modal-time', `Timestamp: ${formatTimestamp(createdAt)}`);
+  setText('run-modal-db', databaseStatusText(database));
+  setText('run-modal-id', generationId || 'None');
+  setText('run-modal-memory', String(learning?.memories ?? 0));
+  setText('run-modal-examples', String(learning?.examples ?? 0));
+
+  summary.textContent = message;
+  summary.className = `modal-summary ${ok ? 'ok' : 'error'}`;
+  notes.value = '';
+  learningResult.textContent = '';
+  learningResult.classList.remove('show');
+  feedbackPanel.classList.toggle('show', Boolean(generationId || prompt));
+  backdrop.classList.add('show');
+}
+
+function closeRunModal() {
+  const backdrop = document.getElementById('run-modal-backdrop');
+  if (backdrop) backdrop.classList.remove('show');
+}
+
+async function submitRunFeedback(signal, rating) {
+  if (!runModalContext) return;
+
+  const resultEl = document.getElementById('run-learning-result');
+  const notesEl = document.getElementById('run-feedback-notes');
+  const feedback = notesEl?.value.trim() || '';
+  if (!resultEl) return;
+
+  resultEl.textContent = 'Analyzing this outcome against the learning database...';
+  resultEl.classList.add('show');
+
+  try {
+    const r = await fetch('/learning/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        generationId: runModalContext.generationId,
+        prompt: runModalContext.prompt,
+        signal,
+        rating,
+        feedback,
+        errorMessages: runModalContext.errorMessages,
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Learning analysis failed');
+
+    const memoryText = data.memory?.ok
+      ? 'Saved a new weighted memory row.'
+      : data.memory?.error
+        ? `Memory not saved: ${data.memory.error}`
+        : 'Memory save skipped.';
+
+    resultEl.textContent = [
+      data.analysis?.summary,
+      data.analysis?.whatWentWrong ? `What was wrong: ${data.analysis.whatWentWrong}` : '',
+      data.analysis?.weightAdvice ? `Weights: ${data.analysis.weightAdvice}` : '',
+      memoryText,
+    ].filter(Boolean).join('\n');
+  } catch (e) {
+    resultEl.textContent = `Learning analysis failed: ${e.message}`;
+  }
+}
+
+async function checkLearningDiagnostics() {
+  const box = document.getElementById('learning-diagnostics');
+  if (!box) return;
+  box.textContent = 'Checking database...';
+  box.classList.add('show');
+
+  try {
+    const r = await fetch('/learning/diagnostics');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Diagnostics failed');
+
+    const tableLines = (data.tables || []).map(table => {
+      const status = table.available ? `${table.count} rows` : `missing/unavailable: ${table.error}`;
+      return `${table.table}: ${status}`;
+    });
+    const recent = (data.recentGenerations || []).map(row => {
+      return `- ${row.created_at} | ${row.shape_type || 'UNKNOWN'} | ${String(row.prompt || '').slice(0, 90)}`;
+    });
+    const memory = (data.topMemory || []).map(row => {
+      return `- q=${row.quality_score} uses=${row.usage_count} ok=${row.success_count} fail=${row.failure_count} | ${row.title}`;
+    });
+
+    box.textContent = [
+      `Supabase enabled: ${data.supabaseEnabled}`,
+      '',
+      'Tables:',
+      ...tableLines,
+      '',
+      'Recent generations:',
+      ...(recent.length ? recent : ['No generation rows visible.']),
+      '',
+      'Top memory:',
+      ...(memory.length ? memory : ['No memory rows visible. Run the migration, then npm run seed:knowledge.']),
+    ].join('\n');
+  } catch (e) {
+    box.textContent = `Diagnostics failed: ${e.message}`;
+  }
+}
 
 function setOutput(id, code, copyBtnId, generationId = null) {
   const el = document.getElementById(id);
@@ -111,10 +249,29 @@ async function generate() {
     if (!r.ok) throw new Error(data.error || 'Generation failed');
     setOutput('gen-output', data.code, 'copy-btn', data.generationId);
     setThinking('gen', data.thinking || '');
-    setStatus('gen-status', `Generated "${data.featureLabel}"`, 'ok');
+    setStatus('gen-status', `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`, 'ok');
+    showRunModal({
+      title: 'Generation complete',
+      ok: true,
+      message: `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
+      createdAt: data.createdAt,
+      database: data.database,
+      generationId: data.generationId,
+      prompt,
+      learning: data.learning,
+      outputKind: 'generation',
+    });
   } catch (e) {
     setThinking('gen', '');
     setStatus('gen-status', `Error: ${e.message}`, 'error');
+    showRunModal({
+      title: 'Generation failed',
+      ok: false,
+      message: e.message,
+      createdAt: new Date().toISOString(),
+      prompt,
+      outputKind: 'generation',
+    });
   } finally {
     btn.textContent = 'Generate FeatureScript';
     btn.disabled = false;
@@ -143,9 +300,29 @@ async function debugCode() {
     expEl.classList.add('show');
 
     setOutput('debug-output', data.fixed, 'debug-copy-btn');
-    setStatus('debug-status', 'Fixed', 'ok');
+    setStatus('debug-status', `Fixed - ${databaseStatusText(data.database)}`, 'ok');
+    showRunModal({
+      title: 'Debug complete',
+      ok: true,
+      message: data.explanation || 'FeatureScript was analyzed and fixed.',
+      createdAt: data.createdAt,
+      database: data.database,
+      generationId: debugSourceGenerationId,
+      prompt: code.slice(0, 400),
+      outputKind: 'debug',
+      errorMessages: errors,
+    });
   } catch (e) {
     setStatus('debug-status', `Error: ${e.message}`, 'error');
+    showRunModal({
+      title: 'Debug failed',
+      ok: false,
+      message: e.message,
+      createdAt: new Date().toISOString(),
+      prompt: code.slice(0, 400),
+      outputKind: 'debug',
+      errorMessages: errors,
+    });
   }
 }
 
@@ -324,11 +501,30 @@ async function analyzeMultiImg() {
     updateAnalyzeDescription(data.description);
     setOutput('analyze-output', data.code, 'analyze-copy-btn', data.generationId);
     setThinking('analyze', data.thinking || '');
-    setStatus('analyze-status', `Generated "${data.featureLabel}"`, 'ok');
+    setStatus('analyze-status', `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`, 'ok');
+    showRunModal({
+      title: 'Image generation complete',
+      ok: true,
+      message: `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
+      createdAt: data.createdAt,
+      database: data.database,
+      generationId: data.generationId,
+      prompt: globalPrompt,
+      learning: data.learning,
+      outputKind: 'image',
+    });
   } catch (e) {
     setStatus('analyze-status', `Error: ${e.message}`, 'error');
     updateAnalyzeDescription('Analysis failed.', true);
     setThinking('analyze', '');
+    showRunModal({
+      title: 'Image generation failed',
+      ok: false,
+      message: e.message,
+      createdAt: new Date().toISOString(),
+      prompt: globalPrompt,
+      outputKind: 'image',
+    });
   }
 }
 

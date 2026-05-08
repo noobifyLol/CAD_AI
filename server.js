@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
-import { analyzeImage, analyzeImages, debugFeatureScript, generateFeatureScript } from "./ai.js";
+import { analyzeImage, analyzeImages, analyzeLearningOutcome, debugFeatureScript, generateFeatureScript } from "./ai.js";
 import { createLearningService } from "./learning.js";
 
 const app = express();
@@ -27,7 +27,15 @@ if (!supabase) {
   console.warn("[DB] Supabase is disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY to enable adaptive memory.");
 }
 
-function generationResponse(result, generationId, learningContext) {
+function normalizeDbLog(log) {
+  if (typeof log === "string") {
+    return { id: log, ok: true, createdAt: new Date().toISOString() };
+  }
+  return log || { id: null, ok: false, skipped: true, createdAt: new Date().toISOString() };
+}
+
+function generationResponse(result, generationLog, learningContext) {
+  const dbLog = normalizeDbLog(generationLog);
   return {
     code: result.code,
     featureName: result.featureName,
@@ -35,7 +43,16 @@ function generationResponse(result, generationId, learningContext) {
     description: result.description,
     thinking: result.thinking,
     generationMode: result.generationMode,
-    generationId,
+    generationId: dbLog.id || null,
+    createdAt: dbLog.createdAt,
+    database: {
+      ok: Boolean(dbLog.ok),
+      skipped: Boolean(dbLog.skipped),
+      table: dbLog.table || "generations",
+      action: dbLog.action || "insert",
+      error: dbLog.error || null,
+      code: dbLog.code || null,
+    },
     learning: {
       examples: learningContext.examples.length,
       memories: learningContext.memoryMatches.length,
@@ -67,8 +84,8 @@ app.post("/generate", async (req, res) => {
   try {
     const learningContext = await learning.fetchLearningContext(prompt);
     const result = await generateFeatureScript(prompt, { learningContext });
-    const generationId = await learning.logGeneration(prompt, result, { learningContext });
-    res.json(generationResponse(result, generationId, learningContext));
+    const generationLog = await learning.logGeneration(prompt, result, { learningContext });
+    res.json(generationResponse(result, generationLog, learningContext));
   } catch (err) {
     console.error("[/generate]", err.message);
     res.status(500).json({ error: err.message });
@@ -85,7 +102,7 @@ app.post("/debug", async (req, res) => {
     const learningContext = await learning.fetchLearningContext(`${errors}\n${code.slice(0, 400)}`);
     const { fixed, explanation } = await debugFeatureScript(code, errors, { learningContext });
 
-    await learning.logDebugSession({
+    const debugLog = await learning.logDebugSession({
       originalCode: code,
       errorMessages: errors,
       fixedCode: fixed,
@@ -100,7 +117,7 @@ app.post("/debug", async (req, res) => {
       });
     }
 
-    res.json({ fixed, explanation });
+    res.json({ fixed, explanation, createdAt: debugLog.createdAt, database: debugLog });
   } catch (err) {
     console.error("[/debug]", err.message);
     res.status(500).json({ error: err.message });
@@ -116,7 +133,8 @@ app.post("/analyze", async (req, res) => {
   try {
     const learningContext = await learning.fetchLearningContext(prompt);
     const result = await analyzeImage(imageBase64, mimeType, prompt, { learningContext });
-    const generationId = await learning.logGeneration(prompt || "Image analysis", result, { learningContext });
+    const generationLog = await learning.logGeneration(prompt || "Image analysis", result, { learningContext });
+    const generationId = normalizeDbLog(generationLog).id;
 
     await learning.logImageAnalysis({
       imageCount: 1,
@@ -126,7 +144,7 @@ app.post("/analyze", async (req, res) => {
       generationId,
     });
 
-    res.json(generationResponse(result, generationId, learningContext));
+    res.json(generationResponse(result, generationLog, learningContext));
   } catch (err) {
     console.error("[/analyze]", err.message);
     res.status(500).json({ error: err.message });
@@ -150,7 +168,8 @@ app.post("/analyze-multi", async (req, res) => {
 
     const learningContext = await learning.fetchLearningContext(contextualPrompt);
     const result = await analyzeImages(images, globalPrompt, { learningContext });
-    const generationId = await learning.logGeneration(contextualPrompt || "Multi-image analysis", result, { learningContext });
+    const generationLog = await learning.logGeneration(contextualPrompt || "Multi-image analysis", result, { learningContext });
+    const generationId = normalizeDbLog(generationLog).id;
 
     await learning.logImageAnalysis({
       imageCount: images.length,
@@ -160,7 +179,7 @@ app.post("/analyze-multi", async (req, res) => {
       generationId,
     });
 
-    res.json(generationResponse(result, generationId, learningContext));
+    res.json(generationResponse(result, generationLog, learningContext));
   } catch (err) {
     console.error("[/analyze-multi]", err.message);
     res.status(500).json({ error: err.message });
@@ -182,6 +201,62 @@ app.post("/feedback", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[/feedback]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/learning/analyze", async (req, res) => {
+  const prompt = String(req.body.prompt || "").trim();
+  const generationId = String(req.body.generationId || "").trim() || null;
+  const signal = String(req.body.signal || "feedback").trim();
+  const feedback = String(req.body.feedback || "").trim();
+  const errorMessages = String(req.body.errorMessages || "").trim();
+  const rating = req.body.rating;
+
+  if (!generationId && !prompt) {
+    return res.status(400).json({ error: "Provide generationId or prompt." });
+  }
+
+  try {
+    if (generationId) {
+      await learning.recordFeedback({
+        generationId,
+        signal,
+        rating,
+        feedback: feedback || errorMessages || undefined,
+      });
+    }
+
+    const snapshot = await learning.fetchGenerationSnapshot({ generationId, prompt });
+    const analysis = await analyzeLearningOutcome({
+      prompt: prompt || snapshot.generation?.prompt || "",
+      signal,
+      rating,
+      feedback,
+      errorMessages,
+      snapshot,
+    });
+    const memory = await learning.saveLearningAnalysis({
+      analysis,
+      prompt: prompt || snapshot.generation?.prompt || "",
+      generationId,
+      signal,
+      rating,
+      feedback: feedback || errorMessages,
+    });
+
+    res.json({
+      ok: true,
+      analyzedAt: new Date().toISOString(),
+      analysis,
+      memory,
+      database: {
+        supabaseEnabled: snapshot.supabaseEnabled,
+        generationFound: Boolean(snapshot.generation),
+      },
+    });
+  } catch (err) {
+    console.error("[/learning/analyze]", err.message);
     res.status(500).json({ error: err.message });
   }
 });

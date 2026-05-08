@@ -113,6 +113,74 @@ function tBox(d) {
   };
 }
 
+function tRobotMech(d) {
+  return {
+    precondition: [
+      preconditionPlane(),
+      preconditionLength("width",  "Overall Width",  1, d.widthInches || 12, 96),
+      preconditionLength("height", "Overall Height", 1, d.heightInches || 12, 96),
+      preconditionLength("depth",  "Block Depth",    0.1, d.depthInches || 6, 48),
+      d.filletRadiusInches > 0
+        ? preconditionLength("fillet", "Fillet Radius", 0, d.filletRadiusInches, 4)
+        : "",
+    ].filter(Boolean).join("\n"),
+    body: `${planeVar()}
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+        // Blocky mech silhouette: head, torso, arms, legs, and feet as separate cuboid regions.
+        skRectangle(sketch1, "head", {
+            "firstCorner"  : ${fsPoint("-definition.width * 0.14", "definition.height * 0.30")},
+            "secondCorner" : ${fsPoint(" definition.width * 0.14", "definition.height * 0.50")}
+        });
+        skRectangle(sketch1, "torso", {
+            "firstCorner"  : ${fsPoint("-definition.width * 0.22", "-definition.height * 0.08")},
+            "secondCorner" : ${fsPoint(" definition.width * 0.22", " definition.height * 0.28")}
+        });
+        skRectangle(sketch1, "leftUpperArm", {
+            "firstCorner"  : ${fsPoint("-definition.width * 0.44", " definition.height * 0.04")},
+            "secondCorner" : ${fsPoint("-definition.width * 0.26", " definition.height * 0.24")}
+        });
+        skRectangle(sketch1, "rightUpperArm", {
+            "firstCorner"  : ${fsPoint("definition.width * 0.26", " definition.height * 0.04")},
+            "secondCorner" : ${fsPoint("definition.width * 0.44", " definition.height * 0.24")}
+        });
+        skRectangle(sketch1, "leftForearm", {
+            "firstCorner"  : ${fsPoint("-definition.width * 0.50", "-definition.height * 0.18")},
+            "secondCorner" : ${fsPoint("-definition.width * 0.32", " definition.height * 0.02")}
+        });
+        skRectangle(sketch1, "rightForearm", {
+            "firstCorner"  : ${fsPoint("definition.width * 0.32", "-definition.height * 0.18")},
+            "secondCorner" : ${fsPoint("definition.width * 0.50", " definition.height * 0.02")}
+        });
+        skRectangle(sketch1, "leftLeg", {
+            "firstCorner"  : ${fsPoint("-definition.width * 0.18", "-definition.height * 0.44")},
+            "secondCorner" : ${fsPoint("-definition.width * 0.04", "-definition.height * 0.10")}
+        });
+        skRectangle(sketch1, "rightLeg", {
+            "firstCorner"  : ${fsPoint("definition.width * 0.04", "-definition.height * 0.44")},
+            "secondCorner" : ${fsPoint("definition.width * 0.18", "-definition.height * 0.10")}
+        });
+        skRectangle(sketch1, "leftFoot", {
+            "firstCorner"  : ${fsPoint("-definition.width * 0.28", "-definition.height * 0.50")},
+            "secondCorner" : ${fsPoint("-definition.width * 0.02", "-definition.height * 0.42")}
+        });
+        skRectangle(sketch1, "rightFoot", {
+            "firstCorner"  : ${fsPoint("definition.width * 0.02", "-definition.height * 0.50")},
+            "secondCorner" : ${fsPoint("definition.width * 0.28", "-definition.height * 0.42")}
+        });
+        skSolve(sketch1);
+        opExtrude(context, id + "extrudeBlocks", {
+            "entities"  : qSketchRegion(id + "sketch1"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.depth
+        });${d.filletRadiusInches > 0 ? `
+        opFillet(context, id + "filletBlocks", {
+            "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "extrudeBlocks", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+            "radius"   : definition.fillet
+        });` : ""}`,
+  };
+}
+
 function tCylinder(d) {
   return {
     precondition: [
@@ -461,6 +529,7 @@ ${lines.join('\n')}${bore}
 function buildFeatureScript(d) {
   let template;
   switch (d.shape) {
+    case "ROBOT_MECH":  template = tRobotMech(d);  break;
     case "CYLINDER":    template = tCylinder(d);    break;
     case "PLATE":       template = tBox(d);         break;
     case "POLYGON":     template = tPolygon(d);     break;
@@ -653,13 +722,14 @@ function promptLooksComplex(prompt) {
 
 function shouldUseTemplate(prompt, dims) {
   const simpleShapes = new Set([
-    "BOX", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
+    "BOX", "ROBOT_MECH", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
     "L_BRACKET", "T_BRACKET", "FLANGE", "HEX_NUT", "WASHER", "BUSHING",
     "HITCH_PEG", "GEAR_SPUR"
   ]);
 
   if (dims.parseFailed) return false;
   if (!simpleShapes.has(dims.shape)) return false;
+  if (dims.shape === "ROBOT_MECH") return true;
   if (dims.confidence === "LOW") return false;
   if (promptLooksComplex(prompt)) return false;
   return true;
@@ -733,10 +803,12 @@ Schema (ALL fields required, use sensible defaults for anything not stated):
 }
 
 SHAPE LIST (choose the closest match — never output "UNKNOWN"):
-BOX, CYLINDER, PLATE, POLYGON, LINKAGE, PLATE_HOLES, L_BRACKET, T_BRACKET,
+BOX, ROBOT_MECH, CYLINDER, PLATE, POLYGON, LINKAGE, PLATE_HOLES, L_BRACKET, T_BRACKET,
 FLANGE, HEX_NUT, WASHER, BUSHING, HITCH_PEG, GEAR_SPUR
 
 Shape classification:
+ROBOT_MECH   — robotic mech, mecha, blocky robot, android, humanoid robot,
+               robot made with cubes or cuboids; choose this over BOX if robot/mech appears
 BOX          — cube, block, rectangular solid, billet, slab (no holes)
 CYLINDER     — cylinder, rod, shaft, tube, dowel, pin, post, standoff, barrel, peg, boss
 PLATE        — flat plate, sheet, panel (no holes; use PLATE_HOLES if holes present)
@@ -763,6 +835,7 @@ GEARS — pressure angle 20deg standard; "8:1 ratio" → numTeeth=40, radiusInch
 BOLTS — M3=0.118in, M4=0.157in, M5=0.197in, M6=0.236in, M8=0.315in, M10=0.394in;
         #6=0.138in, #8=0.164in, #10=0.190in, 1/4=0.25in, 3/8=0.375in
 HITCH PEG — shaft diameter from widthInches, head radius from radiusInches, shaft height from depthInches
+ROBOT MECH — default widthInches=12, heightInches=12, depthInches=6; expose all as editable parameters
 
 Unit rules:
 - All output in INCHES. Divide mm by 25.4.
@@ -837,6 +910,9 @@ function buildThinkingTrace(prompt, d, meta = {}) {
     const hR = d.holeRadiusInches > 0 ? d.holeRadiusInches : d.widthInches * 0.18;
     lines.push(`  Length: ${d.shaftLengthInches} in  Width: ${d.widthInches} in  Thickness: ${d.depthInches} in`);
     lines.push(`  Pin hole radius: ${hR.toFixed(3)} in (offset ${(d.shaftLengthInches/2 - hR*2.5).toFixed(3)} in from centre)`);
+  } else if (d.shape === "ROBOT_MECH") {
+    lines.push(`Blocky mech template: separate cuboid head, torso, arms, legs, and feet`);
+    lines.push(`  Overall: ${d.widthInches} x ${d.heightInches} x ${d.depthInches} in`);
   } else {
     const parts = [];
     if (["BOX","PLATE"].includes(d.shape)) parts.push(`${d.widthInches} x ${d.heightInches} x ${d.depthInches} in`);
@@ -1051,6 +1127,126 @@ export async function debugFeatureScript(code, errors, options = {}) {
     return { fixed, explanation: parsed.explanation || "Fixed." };
   } catch {
     return { fixed: sanitizedInput, explanation: "Could not parse the AI response. The sanitized original code is returned unchanged." };
+  }
+}
+
+// ─── Public: Learning analysis ───────────────────────────────────────────────
+
+const LEARNING_OUTCOME_SYSTEM = `You are the learning auditor for a CAD FeatureScript generator.
+Return ONLY valid JSON with this schema:
+{
+  "summary": "one sentence about what happened",
+  "whatWentWrong": "specific issue, or 'No issue reported'",
+  "weightAdvice": "how the feedback should affect future retrieval weights",
+  "nextPromptGuidance": "short guidance the generator should use next time",
+  "memoryCandidate": {
+    "title": "short unique CAD lesson title",
+    "summary": "compact reusable lesson",
+    "shapeType": "BOX | CYLINDER | PLATE | POLYGON | LINKAGE | PLATE_HOLES | L_BRACKET | T_BRACKET | FLANGE | HEX_NUT | WASHER | BUSHING | HITCH_PEG | GEAR_SPUR | CUSTOM",
+    "tags": ["feedback"],
+    "keywords": ["cad"],
+    "parameterHints": [],
+    "modelingNotes": [],
+    "failureModes": [],
+    "validationRules": [],
+    "qualityScore": 0.55
+  }
+}
+
+Judge the database snapshot, user feedback, compile/debug outcome, and prior memory matches.
+Do not claim the base LLM weights changed. The app learns by saving memory rows and updating quality scores used for retrieval.
+For bad outcomes, create a memoryCandidate that helps avoid the failure. For good outcomes, create a memoryCandidate that reinforces the successful modeling pattern.`;
+
+function compactLearningSnapshot(snapshot = {}) {
+  const diagnostics = snapshot.diagnostics || {};
+  const tables = Array.isArray(diagnostics.tables)
+    ? diagnostics.tables.map(table => ({
+        table: table.table,
+        available: table.available,
+        count: table.count,
+        error: table.error,
+      }))
+    : [];
+
+  const generation = snapshot.generation
+    ? {
+        id: snapshot.generation.id,
+        created_at: snapshot.generation.created_at,
+        prompt: snapshot.generation.prompt,
+        shape_type: snapshot.generation.shape_type,
+        confidence: snapshot.generation.confidence,
+        dims: snapshot.generation.dims,
+        user_rating: snapshot.generation.user_rating,
+        user_feedback: snapshot.generation.user_feedback,
+        thinking: normalizeText(snapshot.generation.thinking || "").slice(0, 500),
+      }
+    : null;
+
+  const memoryMatches = Array.isArray(snapshot.memoryMatches)
+    ? snapshot.memoryMatches.slice(0, 5).map(match => ({
+        score_rank: match.score_rank,
+        score_snapshot: match.score_snapshot,
+        memory: match.cad_memory
+          ? {
+              title: match.cad_memory.title,
+              shape_type: match.cad_memory.shape_type,
+              quality_score: match.cad_memory.quality_score,
+              usage_count: match.cad_memory.usage_count,
+              success_count: match.cad_memory.success_count,
+              failure_count: match.cad_memory.failure_count,
+            }
+          : null,
+      }))
+    : [];
+
+  return {
+    generation,
+    memoryMatches,
+    feedbackEvents: Array.isArray(snapshot.feedbackEvents) ? snapshot.feedbackEvents.slice(0, 8) : [],
+    tables,
+  };
+}
+
+export async function analyzeLearningOutcome({ prompt, signal, rating, feedback, errorMessages, snapshot } = {}) {
+  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
+
+  const userPayload = {
+    prompt,
+    signal,
+    rating,
+    feedback,
+    errorMessages,
+    databaseSnapshot: compactLearningSnapshot(snapshot),
+  };
+
+  const raw = await chat([
+    { role: "system", content: LEARNING_OUTCOME_SYSTEM },
+    { role: "user", content: JSON.stringify(userPayload).slice(0, 12000) },
+  ]);
+
+  try {
+    return JSON.parse(stripJson(raw));
+  } catch {
+    return {
+      summary: "The learning auditor returned non-JSON output, so a fallback lesson was created.",
+      whatWentWrong: errorMessages || feedback || "No issue reported",
+      weightAdvice: Number(rating) >= 4 || signal === "good"
+        ? "Positive feedback should slightly increase matching memory quality scores."
+        : "Negative feedback should decrease matching memory quality scores and save the failure as a lesson.",
+      nextPromptGuidance: "Prefer compile-safe parametric FeatureScript with editable dimensions and conservative operations.",
+      memoryCandidate: {
+        title: `Feedback lesson ${Date.now()}`,
+        summary: normalizeText(feedback || errorMessages || prompt || "CAD generation feedback"),
+        shapeType: snapshot?.generation?.shape_type || "CUSTOM",
+        tags: ["feedback", signal || "learning"],
+        keywords: extractPromptKeywords(prompt || "", 6),
+        parameterHints: [],
+        modelingNotes: ["Keep generated dimensions editable and validate FeatureScript syntax before returning code."],
+        failureModes: errorMessages ? [normalizeText(errorMessages).slice(0, 240)] : [],
+        validationRules: ["Use exactly one exported feature and compile-safe FeatureScript API calls."],
+        qualityScore: Number(rating) >= 4 || signal === "good" ? 0.68 : 0.45,
+      },
+    };
   }
 }
 
