@@ -214,22 +214,24 @@
     position: fixed;
     inset: 0;
     display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 18px;
-    background: rgba(0, 0, 0, 0.62);
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 14px;
+    background: transparent;
+    pointer-events: none;
     z-index: 10000;
   }
   .modal-backdrop.show { display: flex; }
   .run-modal {
-    width: min(560px, 100%);
-    max-height: min(760px, 92vh);
+    width: min(390px, calc(100vw - 28px));
+    max-height: min(560px, calc(100vh - 28px));
     overflow-y: auto;
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 8px;
-    box-shadow: 0 18px 60px rgba(0,0,0,0.55);
-    padding: 18px;
+    box-shadow: 0 14px 42px rgba(0,0,0,0.5);
+    padding: 14px;
+    pointer-events: auto;
   }
   .modal-head {
     display: flex;
@@ -259,14 +261,14 @@
   }
   .modal-close:hover { color: var(--text); border-color: var(--accent); }
   .modal-summary {
-    margin-top: 14px;
-    padding: 12px;
+    margin-top: 10px;
+    padding: 10px;
     border-radius: 8px;
     background: #111928;
     border: 1px solid #1e2d44;
     color: #a9b9d0;
-    font-size: 0.88rem;
-    line-height: 1.6;
+    font-size: 0.82rem;
+    line-height: 1.45;
   }
   .modal-summary.ok {
     background: #081e18;
@@ -280,55 +282,68 @@
   }
   .modal-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 6px;
+    margin-top: 10px;
   }
   .modal-stat {
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 9px 10px;
+    padding: 7px 8px;
     background: rgba(255,255,255,0.02);
     min-width: 0;
   }
   .modal-stat span {
     display: block;
     color: var(--muted);
-    font-size: 0.7rem;
+    font-size: 0.62rem;
     text-transform: uppercase;
     letter-spacing: 0.7px;
   }
   .modal-stat strong {
     display: block;
     color: var(--text);
-    font-size: 0.86rem;
+    font-size: 0.78rem;
     word-break: break-word;
   }
   .feedback-panel {
     display: none;
-    margin-top: 14px;
-    padding-top: 14px;
+    margin-top: 10px;
+    padding-top: 10px;
     border-top: 1px solid var(--border);
   }
   .feedback-panel.show { display: block; }
+  .feedback-panel .card-label { margin-bottom: 8px; }
+  .feedback-panel textarea {
+    min-height: 58px;
+    padding: 9px 10px;
+    font-size: 0.82rem;
+  }
   .feedback-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    margin-top: 10px;
+    margin-top: 8px;
   }
   .learning-result {
     display: none;
-    margin-top: 12px;
+    margin-top: 10px;
     border-radius: 8px;
     border: 1px solid var(--think-border);
     background: var(--think);
     color: var(--think-text);
-    padding: 11px;
-    font-size: 0.84rem;
-    line-height: 1.6;
+    padding: 10px;
+    font-size: 0.8rem;
+    line-height: 1.5;
   }
   .learning-result.show { display: block; }
+
+  @media (max-width: 560px) {
+    .modal-backdrop {
+      align-items: flex-end;
+      justify-content: center;
+    }
+  }
 
   .status {
     padding: 9px 13px;
@@ -783,7 +798,7 @@
 <!-- Copy toast notification -->
 <div id="copy-toast">✓ Copied to clipboard</div>
 
-<div id="run-modal-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+<div id="run-modal-backdrop" class="modal-backdrop" role="dialog" aria-modal="false" aria-labelledby="run-modal-title">
   <div class="run-modal">
     <div class="modal-head">
       <div>
@@ -809,6 +824,10 @@
         <strong id="run-modal-memory">0</strong>
       </div>
       <div class="modal-stat">
+        <span>Docs Used</span>
+        <strong id="run-modal-docs">0</strong>
+      </div>
+      <div class="modal-stat">
         <span>Examples Used</span>
         <strong id="run-modal-examples">0</strong>
       </div>
@@ -816,7 +835,7 @@
 
     <div id="run-feedback-panel" class="feedback-panel">
       <div class="card-label">Was this result good?</div>
-      <textarea id="run-feedback-notes" rows="3" placeholder="Optional: what was wrong, what compiled, what should improve next time"></textarea>
+      <textarea id="run-feedback-notes" rows="2" placeholder="Optional: what was wrong, what compiled, what should improve next time"></textarea>
       <div class="feedback-actions">
         <button class="btn btn-success" onclick="submitRunFeedback('good', 5)">Good Result</button>
         <button class="btn btn-danger" onclick="submitRunFeedback('bad', 1)">Needs Work</button>

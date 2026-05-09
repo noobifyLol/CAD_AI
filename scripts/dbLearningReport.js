@@ -16,12 +16,17 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 const learning = createLearningService({
   supabase,
   cadKnowledgePath: new URL("../data/cadKnowledge.json", import.meta.url),
+  fsDocsPath: new URL("../old_and_docs/docs/FS doc/", import.meta.url),
 });
 
 const report = await learning.diagnostics();
 
 console.log("\nCAD learning database report");
 console.log("============================");
+console.log(`Connection: ${report.supabaseEnabled ? "connected" : "disabled"}`);
+console.log(`Adaptive schema: ${report.schemaReady ? "ready" : `missing ${report.missingAdaptiveTables.join(", ")}`}`);
+console.log(`FeatureScript docs: ${report.featureScriptDocs.enabled ? `${report.featureScriptDocs.chunks} indexed chunk(s)` : "not found"}`);
+console.log("");
 
 for (const table of report.tables) {
   const status = table.available ? `${table.count} row(s)` : `missing/unavailable: ${table.error}`;

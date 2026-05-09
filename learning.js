@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { basename, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const STOP_WORDS = new Set([
   "the", "and", "for", "with", "that", "this", "make", "build", "create",
@@ -8,6 +10,13 @@ const STOP_WORDS = new Set([
 ]);
 
 const MISSING_DB_CODES = new Set(["42P01", "PGRST116", "PGRST202", "PGRST205", "42883"]);
+const REQUIRED_ADAPTIVE_TABLES = [
+  "cad_knowledge",
+  "cad_memory",
+  "cad_generation_memory_matches",
+  "cad_feedback_events",
+  "cad_memory_pruning_events",
+];
 
 function normalizeText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -206,9 +215,216 @@ function isMissingDbObject(error) {
   return MISSING_DB_CODES.has(error?.code);
 }
 
-export function createLearningService({ supabase, cadKnowledgePath }) {
+function toFsPath(value) {
+  if (!value) return null;
+  return value instanceof URL ? fileURLToPath(value) : String(value);
+}
+
+function listMarkdownFiles(rootPath) {
+  if (!rootPath || !existsSync(rootPath)) return [];
+
+  const found = [];
+  const visit = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const next = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(next);
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+        found.push(next);
+      }
+    }
+  };
+
+  visit(rootPath);
+  return found;
+}
+
+function firstMeaningfulLine(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map(line => normalizeText(line.replace(/^#+\s*/, "")))
+    .find(line => line && !line.startsWith("[text](")) || "";
+}
+
+function isReadableDocTitle(line) {
+  return /^[A-Z][A-Za-z0-9 /(),._-]{4,90}$/.test(line) && !/[{}":;=]/.test(line);
+}
+
+function chunkDocument(text, maxChars = 1800, overlapChars = 0) {
+  const normalized = String(text || "")
+    .replace(/\r/g, "")
+    .replace(/\t/g, "  ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!normalized) return [];
+
+  const chunks = [];
+  let start = 0;
+  while (start < normalized.length) {
+    let end = Math.min(start + maxChars, normalized.length);
+    if (end < normalized.length) {
+      const paragraphBreak = normalized.lastIndexOf("\n\n", end);
+      const lineBreak = normalized.lastIndexOf("\n", end);
+      const splitAt = paragraphBreak > start + 600 ? paragraphBreak : lineBreak > start + 600 ? lineBreak : end;
+      end = splitAt;
+    }
+
+    const chunk = normalized.slice(start, end).trim();
+    if (chunk) chunks.push(chunk);
+    if (end >= normalized.length) break;
+    start = Math.max(0, end - overlapChars);
+  }
+
+  return chunks;
+}
+
+function buildFeatureScriptDocIndex(fsDocsPath) {
+  const rootPath = toFsPath(fsDocsPath);
+  if (!rootPath || !existsSync(rootPath) || !statSync(rootPath).isDirectory()) {
+    return { rootPath, chunks: [] };
+  }
+
+  const chunks = [];
+  for (const filePath of listMarkdownFiles(rootPath)) {
+    const source = relative(rootPath, filePath).replace(/\\/g, "/");
+    const fileTitle = basename(filePath, ".md").replace(/[-_]/g, " ");
+    const text = readFileSync(filePath, "utf8");
+
+    chunkDocument(text).forEach((chunk, index) => {
+      const lead = firstMeaningfulLine(chunk);
+      const title = isReadableDocTitle(lead) ? `${fileTitle}: ${lead}` : `${fileTitle} ${index + 1}`;
+      chunks.push({
+        title,
+        source,
+        text: normalizeText(chunk).slice(0, 1800),
+        keywords: extractKeywords(`${title} ${source} ${chunk}`, 28),
+      });
+    });
+  }
+
+  return { rootPath, chunks };
+}
+
+function expandedDocKeywords(prompt, keywords, shapeHint) {
+  const text = normalizeText(prompt).toLowerCase();
+  const expanded = new Set([
+    ...keywords,
+    "featurescript",
+    "definefeature",
+    "precondition",
+    "islength",
+    "sketch",
+    "sksolve",
+    "qsketchregion",
+    "opextrude",
+  ]);
+
+  if (shapeHint) expanded.add(shapeHint.toLowerCase());
+  if (/\b(round|cylinder|shaft|rod|pin|bore|hole|circle|washer|bushing|flange)\b/.test(text)) {
+    ["opCylinder", "skCircle", "evAxis", "qCreatedBy"].forEach(term => expanded.add(term.toLowerCase()));
+  }
+  if (/\b(curve|curved|organic|freeform|smooth|handle|bowl|scoop|spoon|loft|sweep|spline)\b/.test(text)) {
+    ["opLoft", "opSweep", "skFitSpline", "opRevolve", "opFillet", "opThicken"].forEach(term => expanded.add(term.toLowerCase()));
+  }
+  if (/\b(gear|teeth|tooth|pattern|array|repeat)\b/.test(text)) {
+    ["for", "opPattern", "transform", "cos", "sin"].forEach(term => expanded.add(term.toLowerCase()));
+  }
+  if (/\b(debug|error|compile|enum|type|predicate|operator|syntax)\b/.test(text)) {
+    ["syntax", "semantics", "types", "annotations", "predicate"].forEach(term => expanded.add(term));
+  }
+
+  return [...expanded].filter(Boolean);
+}
+
+function scoreDocChunk(doc, docKeywords) {
+  const haystack = `${doc.title} ${doc.source} ${doc.text}`.toLowerCase();
+  const titleHaystack = `${doc.title} ${doc.source}`.toLowerCase();
+  const operationTerms = new Set([
+    "oploft",
+    "opsweep",
+    "oprevolve",
+    "opfillet",
+    "opthicken",
+    "opextrude",
+    "skfitspline",
+    "skcircle",
+    "sksolve",
+    "qsketchregion",
+    "definefeature",
+    "islength",
+  ]);
+
+  const keywordScore = docKeywords.reduce((score, keyword) => {
+    const needle = String(keyword || "").toLowerCase();
+    if (!needle) return score;
+    if (titleHaystack.includes(needle)) score += 3;
+    if (haystack.includes(needle)) score += operationTerms.has(needle) ? 5 : 1;
+    return score;
+  }, 0);
+
+  const source = doc.source.toLowerCase();
+  const sourceBoost = source === "fs doc.md"
+    ? 3
+    : source.includes("fs guide/modeling") || source.includes("language reference/syntax")
+      ? 2
+      : source.includes("language reference/toplevel") || source.includes("language reference/types") || source.includes("fs guide/ui")
+        ? 1
+        : 0;
+  const sourcePenalty = source.includes("customtables") || source.includes("partproerties") ? 3 : 0;
+
+  return keywordScore + sourceBoost - sourcePenalty;
+}
+
+function foundationalDocBoost(doc) {
+  const haystack = `${doc.title} ${doc.source} ${doc.text}`.toLowerCase();
+  const anchors = [
+    "defines a custom feature",
+    "precondition",
+    "operations are standard library functions",
+    "sketches can be created",
+    "sksolve",
+    "qsketchregion",
+    "oploft",
+    "opsweep",
+    "oprevolve",
+  ];
+  return anchors.some(anchor => haystack.includes(anchor)) ? 1 : 0;
+}
+
+function priorityDocTerms(prompt) {
+  const text = normalizeText(prompt).toLowerCase();
+  if (/\b(curve|curved|organic|freeform|smooth|handle|bowl|scoop|spoon|loft|sweep|spline)\b/.test(text)) {
+    return ["oploft", "opsweep", "skfitspline", "oprevolve"];
+  }
+  if (/\b(debug|error|compile|enum|type|predicate|operator|syntax)\b/.test(text)) {
+    return ["syntax", "types", "predicate", "annotation"];
+  }
+  if (/\b(round|cylinder|shaft|rod|pin|bore|hole|circle|washer|bushing|flange)\b/.test(text)) {
+    return ["skcircle", "opcylinder", "qcreatedby"];
+  }
+  return [];
+}
+
+function excerptAroundTerms(text, terms, maxChars = 1400) {
+  const normalized = normalizeText(text);
+  const lower = normalized.toLowerCase();
+  const term = terms.find(item => lower.includes(item));
+  if (!term || normalized.length <= maxChars) return normalized.slice(0, maxChars);
+
+  const index = lower.indexOf(term);
+  const start = Math.max(0, index - 280);
+  return normalized.slice(start, start + maxChars).trim();
+}
+
+export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }) {
   const warned = new Set();
   const localCadKnowledge = JSON.parse(readFileSync(cadKnowledgePath, "utf8"));
+  const featureScriptDocIndex = buildFeatureScriptDocIndex(fsDocsPath);
+
+  if (fsDocsPath && !featureScriptDocIndex.chunks.length) {
+    warnOnce(warned, "fs_docs", `[Docs] FeatureScript docs were not found at ${toFsPath(fsDocsPath)}.`);
+  }
 
   function getLocalKnowledge(prompt, limit = 4) {
     if (!prompt) return [];
@@ -218,6 +434,56 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
       .filter(entry => entry._score > 0)
       .sort((a, b) => b._score - a._score)
       .slice(0, limit);
+  }
+
+  function getFeatureScriptDocs(prompt, keywords, shapeHint, limit = 4) {
+    if (!featureScriptDocIndex.chunks.length) return [];
+
+    const docKeywords = expandedDocKeywords(prompt, keywords, shapeHint);
+    const priorityTerms = priorityDocTerms(prompt);
+    const selected = [];
+    const seen = new Set();
+    const addDoc = doc => {
+      const key = `${doc.source}:${doc.title}:${doc.text.slice(0, 40)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      selected.push(doc);
+      return true;
+    };
+
+    for (const term of priorityTerms) {
+      const priorityDoc = featureScriptDocIndex.chunks
+        .filter(doc => `${doc.title} ${doc.text}`.toLowerCase().includes(term))
+        .map(doc => ({
+          ...doc,
+          text: excerptAroundTerms(doc.text, [term]),
+          _score: scoreDocChunk(doc, docKeywords) + foundationalDocBoost(doc) + 8,
+        }))
+        .sort((a, b) => b._score - a._score)[0];
+      if (priorityDoc) addDoc(priorityDoc);
+      if (selected.length >= limit) return selected;
+    }
+
+    const ranked = featureScriptDocIndex.chunks
+      .map(doc => ({ ...doc, _score: scoreDocChunk(doc, docKeywords) + foundationalDocBoost(doc) }))
+      .filter(doc => doc._score > 0)
+      .sort((a, b) => b._score - a._score);
+
+    for (const doc of ranked) {
+      addDoc(doc);
+      if (selected.length >= limit) return selected.slice(0, limit);
+    }
+    if (selected.length >= limit) return selected.slice(0, limit);
+
+    const fallback = featureScriptDocIndex.chunks
+      .map(doc => ({ ...doc, _score: foundationalDocBoost(doc) }))
+      .filter(doc => doc._score > 0);
+
+    for (const doc of fallback) {
+      addDoc(doc);
+      if (selected.length >= limit) return selected.slice(0, limit);
+    }
+    return selected.slice(0, limit);
   }
 
   async function fetchGenerationExamples(prompt, keywords, shapeHint) {
@@ -357,6 +623,7 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
     ]);
 
     const localKnowledge = getLocalKnowledge(prompt);
+    const featureScriptDocs = getFeatureScriptDocs(prompt, keywords, shapeHint);
     const memoryMatches = cadMemory
       .filter(memory => memory.id)
       .slice(0, 8)
@@ -371,6 +638,7 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
     const notes = [];
     if (shapeHint) notes.push(`Fast shape hint from prompt: ${shapeHint}.`);
     if (cadMemory.length) notes.push(`Using ${cadMemory.length} scored CAD memory record(s). Prefer higher-scored active memories over old raw examples.`);
+    if (featureScriptDocs.length) notes.push(`Using ${featureScriptDocs.length} local FeatureScript documentation snippet(s) from old_and_docs/docs/FS doc.`);
     if (examples.length) {
       const shapes = [...new Set(examples.map(example => example.shape_type).filter(Boolean))];
       if (shapes.length) notes.push(`Related prior generation shapes: ${shapes.join(", ")}.`);
@@ -383,6 +651,7 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
       examples,
       notes,
       memoryMatches,
+      featureScriptDocs,
       knowledge: dedupeKnowledge([
         ...cadMemory,
         ...shapeKnowledge,
@@ -758,9 +1027,19 @@ export function createLearningService({ supabase, cadKnowledgePath }) {
           .order("quality_score", { ascending: false })
           .limit(8)
       : { data: [], error: null };
+    const missingAdaptiveTables = tables
+      .filter(table => REQUIRED_ADAPTIVE_TABLES.includes(table.table) && !table.available)
+      .map(table => table.table);
 
     return {
       supabaseEnabled: Boolean(supabase),
+      schemaReady: missingAdaptiveTables.length === 0,
+      missingAdaptiveTables,
+      featureScriptDocs: {
+        enabled: featureScriptDocIndex.chunks.length > 0,
+        chunks: featureScriptDocIndex.chunks.length,
+        source: featureScriptDocIndex.rootPath ? "old_and_docs/docs/FS doc" : null,
+      },
       tables,
       recentGenerations: recentGenerations.error ? [] : recentGenerations.data || [],
       topMemory: topMemory.error ? [] : topMemory.data || [],

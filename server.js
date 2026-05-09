@@ -18,6 +18,7 @@ const supabase = supabaseUrl && supabaseKey
 const learning = createLearningService({
   supabase,
   cadKnowledgePath: new URL("./data/cadKnowledge.json", import.meta.url),
+  fsDocsPath: new URL("./old_and_docs/docs/FS doc/", import.meta.url),
 });
 
 app.use(express.json({ limit: "20mb" }));
@@ -34,7 +35,7 @@ function normalizeDbLog(log) {
   return log || { id: null, ok: false, skipped: true, createdAt: new Date().toISOString() };
 }
 
-function generationResponse(result, generationLog, learningContext) {
+function generationResponse(result, generationLog, learningContext, diagnostics = null) {
   const dbLog = normalizeDbLog(generationLog);
   return {
     code: result.code,
@@ -52,10 +53,14 @@ function generationResponse(result, generationLog, learningContext) {
       action: dbLog.action || "insert",
       error: dbLog.error || null,
       code: dbLog.code || null,
+      schemaReady: diagnostics?.schemaReady ?? null,
+      missingAdaptiveTables: diagnostics?.missingAdaptiveTables || [],
     },
     learning: {
       examples: learningContext.examples.length,
       memories: learningContext.memoryMatches.length,
+      docs: learningContext.featureScriptDocs?.length || 0,
+      schemaReady: diagnostics?.schemaReady ?? null,
       shapeHint: learningContext.shapeHint,
     },
   };
@@ -85,7 +90,8 @@ app.post("/generate", async (req, res) => {
     const learningContext = await learning.fetchLearningContext(prompt);
     const result = await generateFeatureScript(prompt, { learningContext });
     const generationLog = await learning.logGeneration(prompt, result, { learningContext });
-    res.json(generationResponse(result, generationLog, learningContext));
+    const diagnostics = await learning.diagnostics();
+    res.json(generationResponse(result, generationLog, learningContext, diagnostics));
   } catch (err) {
     console.error("[/generate]", err.message);
     res.status(500).json({ error: err.message });
@@ -144,7 +150,8 @@ app.post("/analyze", async (req, res) => {
       generationId,
     });
 
-    res.json(generationResponse(result, generationLog, learningContext));
+    const diagnostics = await learning.diagnostics();
+    res.json(generationResponse(result, generationLog, learningContext, diagnostics));
   } catch (err) {
     console.error("[/analyze]", err.message);
     res.status(500).json({ error: err.message });
@@ -179,7 +186,8 @@ app.post("/analyze-multi", async (req, res) => {
       generationId,
     });
 
-    res.json(generationResponse(result, generationLog, learningContext));
+    const diagnostics = await learning.diagnostics();
+    res.json(generationResponse(result, generationLog, learningContext, diagnostics));
   } catch (err) {
     console.error("[/analyze-multi]", err.message);
     res.status(500).json({ error: err.message });

@@ -625,6 +625,7 @@ function buildLearningContextText(learningContext = {}) {
   const examples = Array.isArray(learningContext.examples) ? learningContext.examples : [];
   const notes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
   const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
+  const featureScriptDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
   const promptKeywords = extractPromptKeywords(learningContext.prompt || "");
 
   if (promptKeywords.length) {
@@ -634,6 +635,17 @@ function buildLearningContextText(learningContext = {}) {
   if (notes.length) {
     lines.push("Project-specific guidance from prior runs:");
     notes.forEach((note, index) => lines.push(`${index + 1}. ${normalizeText(note)}`));
+  }
+
+  if (featureScriptDocs.length) {
+    lines.push("FeatureScript documentation snippets to obey:");
+    featureScriptDocs.slice(0, 4).forEach((entry, index) => {
+      const title = normalizeText(entry.title || `Doc ${index + 1}`);
+      const source = normalizeText(entry.source || "local FS docs");
+      const text = normalizeText(entry.text || "").slice(0, 520);
+      lines.push(`${index + 1}. ${title} (${source})`);
+      if (text) lines.push(`   ${text}`);
+    });
   }
 
   if (examples.length) {
@@ -957,6 +969,7 @@ Hard rules from the Onshape FeatureScript docs:
 - When a definition parameter already comes from isLength(...), use definition.param directly in the body. Do not multiply it by * inch again.
 - Avoid duplicate export const blocks, markdown fences, comments about uncertainty, or placeholder TODO code.
 - Prefer robust, simple geometry over flashy but brittle code.
+- Use the supplied FeatureScript documentation snippets as the source of truth for syntax and operation map fields.
 
 Goal:
 - Match the user's requested shape as closely as possible.

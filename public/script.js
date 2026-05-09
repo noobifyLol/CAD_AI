@@ -25,7 +25,12 @@ function formatTimestamp(value) {
 
 function databaseStatusText(database) {
   if (!database) return 'No database status returned';
-  if (database.ok) return 'Saved';
+  if (database.ok) {
+    if (database.schemaReady === false && database.missingAdaptiveTables?.length) {
+      return `Saved generation; missing adaptive tables: ${database.missingAdaptiveTables.join(', ')}`;
+    }
+    return 'Saved';
+  }
   if (database.skipped) return database.error ? `Skipped: ${database.error}` : 'Skipped';
   return database.error ? `Not saved: ${database.error}` : 'Not saved';
 }
@@ -55,6 +60,7 @@ function showRunModal({ title, ok, message, createdAt, database, generationId, p
   setText('run-modal-db', databaseStatusText(database));
   setText('run-modal-id', generationId || 'None');
   setText('run-modal-memory', String(learning?.memories ?? 0));
+  setText('run-modal-docs', String(learning?.docs ?? 0));
   setText('run-modal-examples', String(learning?.examples ?? 0));
 
   summary.textContent = message;
@@ -138,7 +144,9 @@ async function checkLearningDiagnostics() {
     });
 
     box.textContent = [
-      `Supabase enabled: ${data.supabaseEnabled}`,
+      `Connection: ${data.supabaseEnabled ? 'Connected' : 'Disabled'}`,
+      `Adaptive schema: ${data.schemaReady ? 'Ready' : `Missing ${data.missingAdaptiveTables?.join(', ') || 'required tables'}`}`,
+      `FeatureScript docs: ${data.featureScriptDocs?.enabled ? `${data.featureScriptDocs.chunks} indexed chunks` : 'Not found'}`,
       '',
       'Tables:',
       ...tableLines,
