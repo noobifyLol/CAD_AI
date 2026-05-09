@@ -8,6 +8,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "seed:knowledge": "node scripts/seedCadKnowledge.js",
+    "import:cad-knowledge": "node scripts/importCadKnowledgeCsv.js",
+    "prune:cad-memory": "node scripts/pruneCadMemory.js",
     "db:learning-report": "node scripts/dbLearningReport.js"
   },
   "dependencies": {

@@ -65,6 +65,22 @@ function preconditionLength(paramName, label, min, def, max) {
         isLength(definition.${paramName}, LENGTH_BOUNDS);`;
 }
 
+function preconditionInteger(paramName, label, min, def, max) {
+  const defaultValue = Math.min(Math.max(Math.round(def || min), min), max);
+  return `        annotation { "Name" : "${label}", "Default" : "${defaultValue}" }
+        isInteger(definition.${paramName});
+        definition.${paramName} >= ${min};
+        definition.${paramName} <= ${max};`;
+}
+
+function preconditionNumber(paramName, label, min, def, max) {
+  const defaultValue = Math.min(Math.max(Number(def) || min, min), max);
+  return `        annotation { "Name" : "${label}", "Default" : "${defaultValue}" }
+        definition.${paramName} is number;
+        definition.${paramName} >= ${min};
+        definition.${paramName} <= ${max};`;
+}
+
 function planeVar() {
   return `        var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
@@ -465,62 +481,107 @@ function tHitchPeg(d) {
 
 // Spur gear with involute tooth profile
 function tGear(d) {
-  const N  = Math.max(6, Math.round(d.numTeeth || 20));
-  const pa = 20 * Math.PI / 180;
-  const rp = d.radiusInches || 1.0;
-  const m  = (2 * rp) / N;
-  const ra = rp + m;
-  const rd = Math.max(rp - 1.35 * m, rp * 0.5);
-  const rb = rp * Math.cos(pa);
-  const hR = d.holeRadiusInches > 0 ? d.holeRadiusInches : Math.min(rd * 0.45, rp * 0.25);
-  const T  = d.depthInches || 0.5;
-  const invPA = Math.tan(pa) - pa;
-  const halfT = Math.PI / N;
-  const tRoot = rb >= rd ? 0 : Math.sqrt(Math.max(0, (rd / rb) ** 2 - 1));
-  const tTip  = Math.sqrt(Math.max(0, (ra / rb) ** 2 - 1));
-  const rot0  = halfT - invPA;
-  function inv(t) { return { x: rb*(Math.cos(t)+t*Math.sin(t)), y: rb*(Math.sin(t)-t*Math.cos(t)) }; }
-  function rot(p, a) { return { x: p.x*Math.cos(a)-p.y*Math.sin(a), y: p.x*Math.sin(a)+p.y*Math.cos(a) }; }
-  function v2(p) { return `vector(${n(p.x)}, ${n(p.y)}) * inch`; }
-  const NPTS = 5;
-  const rf = [];
-  for (let i = 0; i <= NPTS; i++) {
-    const t = tRoot + (tTip - tRoot) * (i / NPTS);
-    rf.push(rot(inv(t), rot0));
-  }
-  const lf = [...rf].reverse().map(p => ({ x: p.x, y: -p.y }));
-  const lines = [];
-  for (let k = 0; k < N; k++) {
-    const a = (2*Math.PI*k)/N;
-    const R = p => rot(p, a);
-    const rfK = rf.map(R), lfK = lf.map(R);
-    const tipMid = { x: ra*Math.cos(a), y: ra*Math.sin(a) };
-    const lfRoot = lfK[lfK.length-1];
-    const nextA  = (2*Math.PI*(k+1))/N;
-    const nextRF0 = rot(rf[0], nextA);
-    const a1 = Math.atan2(lfRoot.y, lfRoot.x);
-    let   a2 = Math.atan2(nextRF0.y, nextRF0.x);
-    if (a2 < a1) a2 += 2*Math.PI;
-    const rootMid = { x: rd*Math.cos((a1+a2)/2), y: rd*Math.sin((a1+a2)/2) };
-    lines.push(
-      `        skSpline(sketch1, "rf${k}", { "points" : [${rfK.map(v2).join(', ')}] });`,
-      `        skArc(sketch1, "tip${k}", { "start" : ${v2(rfK[rfK.length-1])}, "mid" : ${v2(tipMid)}, "end" : ${v2(lfK[0])} });`,
-      `        skSpline(sketch1, "lf${k}", { "points" : [${lfK.map(v2).join(', ')}] });`,
-      `        skArc(sketch1, "root${k}", { "start" : ${v2(lfRoot)}, "mid" : ${v2(rootMid)}, "end" : ${v2(nextRF0)} });`
-    );
-  }
-  const bore = hR > 0 ? `\n        skCircle(sketch1, "bore", { "center" : vector(0, 0) * inch, "radius" : ${n(hR)} * inch });` : "";
+  const radiusDefault = d.radiusInches || 1.0;
+  const toothCountDefault = Math.max(6, Math.round(d.numTeeth || 20));
+  const holeRadiusDefault = d.holeRadiusInches > 0 ? d.holeRadiusInches : Math.min(Math.max(radiusDefault * 0.15, 0.05), radiusDefault * 0.25);
+  const faceWidthDefault = d.depthInches || 0.5;
+  const pressureAngleDefault = typeof d.pressureAngleDegrees === "number" ? d.pressureAngleDegrees : 20;
+
   return {
     precondition: [
       preconditionPlane(),
-      preconditionLength("faceWidth", "Face Width (Depth)", 0.01, T, 12),
+      preconditionInteger("numTeeth", "Number of Teeth", 6, toothCountDefault, 200),
+      preconditionLength("radius", "Pitch Radius", 0.01, radiusDefault, 24),
+      preconditionLength("holeRadius", "Bore Radius", 0, holeRadiusDefault, 12),
+      preconditionLength("faceWidth", "Face Width (Depth)", 0.01, faceWidthDefault, 12),
+      preconditionNumber("pressureAngleDegrees", "Pressure Angle (degrees)", 10, pressureAngleDefault, 30),
     ].join("\n"),
     body: `${planeVar()}
-        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
-${lines.join('\n')}${bore}
+        function invPoint(t is number, rb is number) returns vector
+        {
+            return vector((rb * (cos(t) + t * sin(t))) * inch,
+                          (rb * (sin(t) - t * cos(t))) * inch);
+        }
+
+        function rotPoint(p is vector, a is number) returns vector
+        {
+            return vector(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));
+        }
+
+        function mirrorPoint(p is vector) returns vector
+        {
+            return vector(p.x, -p.y);
+        }
+
+        const N = definition.numTeeth;
+        const rp = definition.radius / inch;
+        const pa = definition.pressureAngleDegrees * PI / 180;
+        const m = (2 * rp) / N;
+        const ra = rp + m;
+        const rd = max(rp - 1.35 * m, rp * 0.5);
+        const rb = rp * cos(pa);
+        const invPA = tan(pa) - pa;
+        const halfT = PI / N;
+        const tRoot = rb >= rd ? 0 : sqrt(max(0, (rd / rb) * (rd / rb) - 1));
+        const tTip  = sqrt(max(0, (ra / rb) * (ra / rb) - 1));
+
+        const rf = [
+            invPoint(tRoot, rb),
+            invPoint(tRoot + (tTip - tRoot) * 1/5, rb),
+            invPoint(tRoot + (tTip - tRoot) * 2/5, rb),
+            invPoint(tRoot + (tTip - tRoot) * 3/5, rb),
+            invPoint(tRoot + (tTip - tRoot) * 4/5, rb),
+            invPoint(tTip, rb)
+        ];
+
+        const lf = [
+            mirrorPoint(invPoint(tTip, rb)),
+            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 4/5, rb)),
+            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 3/5, rb)),
+            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 2/5, rb)),
+            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 1/5, rb)),
+            mirrorPoint(invPoint(tRoot, rb))
+        ];
+
+        for (var k = 0; k < N; k += 1)
+        {
+            const a = (2 * PI * k) / N;
+            const rfK = [
+                rotPoint(rf[0], a),
+                rotPoint(rf[1], a),
+                rotPoint(rf[2], a),
+                rotPoint(rf[3], a),
+                rotPoint(rf[4], a),
+                rotPoint(rf[5], a)
+            ];
+            const lfK = [
+                rotPoint(lf[0], a),
+                rotPoint(lf[1], a),
+                rotPoint(lf[2], a),
+                rotPoint(lf[3], a),
+                rotPoint(lf[4], a),
+                rotPoint(lf[5], a)
+            ];
+            const tipMid = vector(ra * cos(a) * inch, ra * sin(a) * inch);
+            const lfRoot = lfK[lfK.length - 1];
+            const nextA = (2 * PI * (k + 1)) / N;
+            const nextRF0 = rotPoint(rf[0], nextA);
+            const a1 = atan2(lfRoot.y, lfRoot.x);
+            var a2 = atan2(nextRF0.y, nextRF0.x);
+            if (a2 < a1) a2 += 2 * PI;
+            const rootMid = vector(rd * cos((a1 + a2) / 2) * inch, rd * sin((a1 + a2) / 2) * inch);
+            skSpline(sketch1, id + "rf" + k, { "points" : rfK });
+            skArc(sketch1, id + "tip" + k, { "start" : rfK[rfK.length - 1], "mid" : tipMid, "end" : lfK[0] });
+            skSpline(sketch1, id + "lf" + k, { "points" : lfK });
+            skArc(sketch1, id + "root" + k, { "start" : lfRoot, "mid" : rootMid, "end" : nextRF0 });
+        }
+        if (definition.holeRadius > 0)
+        {
+            skCircle(sketch1, "bore", { "center" : vector(0, 0) * inch, "radius" : definition.holeRadius });
+        }
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
-            "entities"  : qSketchRegion(id + "sketch1"${hR > 0 ? ', true' : ''}),
+            "entities"  : qSketchRegion(id + "sketch1", definition.holeRadius > 0),
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
             "endDepth"  : definition.faceWidth
@@ -604,6 +665,7 @@ function summarizeDimsForPrompt(dims) {
     radiusInches: dims.radiusInches,
     holeRadiusInches: dims.holeRadiusInches,
     filletRadiusInches: dims.filletRadiusInches,
+    pressureAngleDegrees: dims.pressureAngleDegrees,
     sides: dims.sides,
     wallThicknessInches: dims.wallThicknessInches,
     shaftLengthInches: dims.shaftLengthInches,
@@ -716,6 +778,7 @@ function normalizeDims(dims) {
     radiusInches: clampNumber(dims.radiusInches, 1, 0.01, 120),
     holeRadiusInches: clampNumber(dims.holeRadiusInches, 0, 0, 120),
     filletRadiusInches: clampNumber(dims.filletRadiusInches, 0, 0, 24),
+    pressureAngleDegrees: clampNumber(dims.pressureAngleDegrees, 20, 10, 30),
     sides: Math.max(3, Math.min(16, Math.round(Number(dims.sides) || 6))),
     wallThicknessInches: clampNumber(dims.wallThicknessInches, 0.25, 0.01, 24),
     shaftLengthInches: clampNumber(dims.shaftLengthInches, 4, 0.05, 240),
@@ -812,6 +875,7 @@ Schema (ALL fields required, use sensible defaults for anything not stated):
   "radiusInches":         1,
   "holeRadiusInches":     0,
   "filletRadiusInches":   0,
+  "pressureAngleDegrees": 20,
   "sides":                6,
   "wallThicknessInches":  0.25,
   "shaftLengthInches":    4,
@@ -852,6 +916,7 @@ GEARS — pressure angle 20deg standard; "8:1 ratio" → numTeeth=40, radiusInch
         default face width = 0.5 * pitch_diameter; bore = 0.3 * pitch_radius
 BOLTS — M3=0.118in, M4=0.157in, M5=0.197in, M6=0.236in, M8=0.315in, M10=0.394in;
         #6=0.138in, #8=0.164in, #10=0.190in, 1/4=0.25in, 3/8=0.375in
+GEARS — pressure angle is normally 20°, use 14.5° for older gears and 25° for stronger teeth; expose pressure angle when user requests specific tooth form.
 HITCH PEG — shaft diameter from widthInches, head radius from radiusInches, shaft height from depthInches
 ROBOT MECH — default widthInches=12, heightInches=12, depthInches=6; expose all as editable parameters
 
@@ -888,6 +953,7 @@ async function extractDims(prompt, learningContext = {}) {
       holeSpacingInches:   Number(parsed.holeSpacingInches)  || 1.5,
       numHoles:            Number(parsed.numHoles)           || 4,
       numTeeth:            Number(parsed.numTeeth)           || 20,
+      pressureAngleDegrees: Number(parsed.pressureAngleDegrees) || 20,
       parseFailed: false,
     });
     return d;

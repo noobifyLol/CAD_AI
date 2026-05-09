@@ -284,6 +284,45 @@
     "example_prompt": "20 tooth spur gear with 2 inch pitch diameter and 0.5 inch face width"
   },
   {
+    "title": "Spur Gear Parameterization",
+    "summary": "Expose gear pitch radius, tooth count, face width, bore radius, and pressure angle so the generated feature stays editable.",
+    "tags": [
+      "gear",
+      "spur",
+      "parameterization"
+    ],
+    "keywords": [
+      "gear",
+      "spurs",
+      "pressure angle",
+      "numTeeth",
+      "pitch diameter",
+      "radius"
+    ],
+    "parameterHints": [
+      "Expose number of teeth as an integer parameter.",
+      "Expose pitch radius as a length parameter and compute tooth geometry from it.",
+      "Expose pressure angle so the user can adjust tooth form for 14.5°, 20°, or 25° profiles."
+    ],
+    "modelingNotes": [
+      "Compute the involute profile using runtime math from the feature definition.",
+      "Avoid baking fixed tooth geometry into the generated FeatureScript code.",
+      "Use a default face width equal to roughly half the pitch diameter."
+    ],
+    "featurePattern": "Parameterize numTeeth, radius, pressureAngleDegrees, faceWidth, and holeRadius; build each tooth profile in a loop and extrude the resulting sketch.",
+    "failureModes": [
+      "Do not hardcode the number of teeth or pitch radius into the feature body.",
+      "Do not omit a user-editable pressure angle when the gear is described as a standard gear.",
+      "Do not expose only face width without allowing the user to change the gear size."
+    ],
+    "validationRules": [
+      "numTeeth must be an integer and at least 6.",
+      "pressureAngleDegrees should be between 10 and 30.",
+      "Bore radius must be smaller than pitch radius."
+    ],
+    "example_prompt": "Generate a 24 tooth spur gear with 2.5 inch pitch radius, 20° pressure angle, 0.5 inch face width, and 0.25 inch bore radius"
+  },
+  {
     "title": "Slotted Mounting Plate",
     "summary": "For adjustable mounts, use a plate profile with one or more slots instead of only round holes.",
     "tags": [
