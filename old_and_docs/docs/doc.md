@@ -1093,3 +1093,6 @@ node --check server.js
 
 
 You should be able to redeploy to Render now.
+
+**5/9/26**
+After the APUSH exam, I successfully connected the backend and frontend to a database that the AI can access and learn from

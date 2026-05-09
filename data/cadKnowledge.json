@@ -2,8 +2,20 @@
   {
     "title": "FeatureScript Compile Safety",
     "summary": "Use conservative FeatureScript APIs and parameter preconditions so generated code is more likely to compile on the first paste.",
-    "tags": ["featurescript", "compile", "safety", "precondition"],
-    "keywords": ["featurescript", "compile", "precondition", "isLength", "skSolve", "opExtrude"],
+    "tags": [
+      "featurescript",
+      "compile",
+      "safety",
+      "precondition"
+    ],
+    "keywords": [
+      "featurescript",
+      "compile",
+      "precondition",
+      "isLength",
+      "skSolve",
+      "opExtrude"
+    ],
     "parameterHints": [
       "Expose dimensions with annotation defaults plus isLength(definition.name, LENGTH_BOUNDS).",
       "Use isInteger for counts such as teeth, holes, and pattern instances."
@@ -26,8 +38,21 @@
   {
     "title": "Parametric Box Body",
     "summary": "Use a centered rectangle sketch and blind extrude for robot bodies, housings, and simple block geometry.",
-    "tags": ["box", "plate", "body", "chassis", "robot"],
-    "keywords": ["box", "body", "robot", "chassis", "housing", "plate"],
+    "tags": [
+      "box",
+      "plate",
+      "body",
+      "chassis",
+      "robot"
+    ],
+    "keywords": [
+      "box",
+      "body",
+      "robot",
+      "chassis",
+      "housing",
+      "plate"
+    ],
     "parameterHints": [
       "Expose width, height, and depth as editable length parameters.",
       "Use a fillet radius parameter only if a rounded edge is explicitly requested."
@@ -50,8 +75,19 @@
   {
     "title": "Bushing Or Sleeve",
     "summary": "Model bushings and spacers as concentric circles extruded to length.",
-    "tags": ["bushing", "washer", "sleeve", "spacer"],
-    "keywords": ["bushing", "sleeve", "spacer", "bearing", "liner"],
+    "tags": [
+      "bushing",
+      "washer",
+      "sleeve",
+      "spacer"
+    ],
+    "keywords": [
+      "bushing",
+      "sleeve",
+      "spacer",
+      "bearing",
+      "liner"
+    ],
     "parameterHints": [
       "Expose outer radius, inner radius, and length.",
       "Validate that inner radius stays smaller than outer radius."
@@ -74,8 +110,20 @@
   {
     "title": "Linkage Arm",
     "summary": "Use a centered bar sketch with end holes for train linkages, couplers, and lever arms.",
-    "tags": ["linkage", "arm", "lever", "coupler"],
-    "keywords": ["linkage", "arm", "lever", "coupler", "connecting rod", "clevis"],
+    "tags": [
+      "linkage",
+      "arm",
+      "lever",
+      "coupler"
+    ],
+    "keywords": [
+      "linkage",
+      "arm",
+      "lever",
+      "coupler",
+      "connecting rod",
+      "clevis"
+    ],
     "parameterHints": [
       "Expose total length, bar width, thickness, and pin hole radius.",
       "Compute hole offset from total length and hole size to preserve end material."
@@ -98,8 +146,18 @@
   {
     "title": "Flange With Bolt Circle",
     "summary": "Model circular flanges with a bore and evenly patterned bolt holes.",
-    "tags": ["flange", "bolt circle", "mount"],
-    "keywords": ["flange", "bolt", "bolt circle", "mount", "hub"],
+    "tags": [
+      "flange",
+      "bolt circle",
+      "mount"
+    ],
+    "keywords": [
+      "flange",
+      "bolt",
+      "bolt circle",
+      "mount",
+      "hub"
+    ],
     "parameterHints": [
       "Expose outer radius, bore radius, hole radius, hole count, and thickness.",
       "If bolt circle diameter is not given, use a derived radius around 70 to 80 percent of outer radius."
@@ -122,8 +180,18 @@
   {
     "title": "L Bracket",
     "summary": "Use a simple 2D L profile extruded to length for angle brackets and corner supports.",
-    "tags": ["bracket", "angle", "support"],
-    "keywords": ["bracket", "angle", "corner", "support", "l bracket"],
+    "tags": [
+      "bracket",
+      "angle",
+      "support"
+    ],
+    "keywords": [
+      "bracket",
+      "angle",
+      "corner",
+      "support",
+      "l bracket"
+    ],
     "parameterHints": [
       "Expose arm width, arm height, wall thickness, and extrusion length.",
       "Keep wall thickness smaller than both arm dimensions."
@@ -146,8 +214,20 @@
   {
     "title": "Hitch Peg Or Mushroom Pin",
     "summary": "Model a pin with a cylindrical shaft and domed or revolved head.",
-    "tags": ["peg", "pin", "hitch", "axle"],
-    "keywords": ["peg", "pin", "hitch", "axle", "mushroom", "shaft"],
+    "tags": [
+      "peg",
+      "pin",
+      "hitch",
+      "axle"
+    ],
+    "keywords": [
+      "peg",
+      "pin",
+      "hitch",
+      "axle",
+      "mushroom",
+      "shaft"
+    ],
     "parameterHints": [
       "Expose shaft radius, shaft height, and head radius.",
       "If head height is not provided, approximate a rounded cap from the head radius."
@@ -170,8 +250,20 @@
   {
     "title": "Spur Gear",
     "summary": "Use an involute-inspired 2D tooth profile and extrude it to face width for train gears and pinions.",
-    "tags": ["gear", "spur gear", "pinion"],
-    "keywords": ["gear", "spur", "pinion", "tooth", "teeth", "diametral pitch", "module"],
+    "tags": [
+      "gear",
+      "spur gear",
+      "pinion"
+    ],
+    "keywords": [
+      "gear",
+      "spur",
+      "pinion",
+      "tooth",
+      "teeth",
+      "diametral pitch",
+      "module"
+    ],
     "parameterHints": [
       "Expose tooth count and face width; derive pitch geometry from pitch radius or diametral pitch.",
       "Add a bore radius parameter when the gear must mount to a shaft."
@@ -194,8 +286,19 @@
   {
     "title": "Slotted Mounting Plate",
     "summary": "For adjustable mounts, use a plate profile with one or more slots instead of only round holes.",
-    "tags": ["slot", "mounting plate", "adjustable"],
-    "keywords": ["slot", "slotted", "mount", "adjustable", "plate", "bracket"],
+    "tags": [
+      "slot",
+      "mounting plate",
+      "adjustable"
+    ],
+    "keywords": [
+      "slot",
+      "slotted",
+      "mount",
+      "adjustable",
+      "plate",
+      "bracket"
+    ],
     "parameterHints": [
       "Expose plate width, plate height, thickness, slot length, slot width, and slot spacing.",
       "If the prompt is ambiguous, use centered slots with enough margin to the outer edge."
@@ -218,8 +321,20 @@
   {
     "title": "Ribbed Bracket Or Gusset",
     "summary": "Add triangular ribs or gussets to brackets when stiffness or load support is requested.",
-    "tags": ["rib", "gusset", "bracket", "stiffener"],
-    "keywords": ["rib", "gusset", "stiffener", "reinforced", "support", "load"],
+    "tags": [
+      "rib",
+      "gusset",
+      "bracket",
+      "stiffener"
+    ],
+    "keywords": [
+      "rib",
+      "gusset",
+      "stiffener",
+      "reinforced",
+      "support",
+      "load"
+    ],
     "parameterHints": [
       "Expose rib thickness, rib height, and rib count when the prompt requests reinforcement.",
       "Default rib thickness can be close to wall thickness."
@@ -242,8 +357,20 @@
   {
     "title": "Shell Or Enclosure",
     "summary": "For cases and housings, model an outer block with editable wall thickness and an open side.",
-    "tags": ["enclosure", "shell", "case", "housing"],
-    "keywords": ["enclosure", "shell", "case", "housing", "box", "wall thickness"],
+    "tags": [
+      "enclosure",
+      "shell",
+      "case",
+      "housing"
+    ],
+    "keywords": [
+      "enclosure",
+      "shell",
+      "case",
+      "housing",
+      "box",
+      "wall thickness"
+    ],
     "parameterHints": [
       "Expose width, height, depth, wall thickness, and optional lid clearance.",
       "Keep wall thickness below one third of the smallest outer dimension."
@@ -266,8 +393,20 @@
   {
     "title": "Image Based CAD Interpretation",
     "summary": "When generating from images, prioritize explicit dimensions and simple manufacturable geometry over visual decoration.",
-    "tags": ["image", "vision", "dimensions", "cad interpretation"],
-    "keywords": ["image", "photo", "drawing", "dimension", "reference", "analyze"],
+    "tags": [
+      "image",
+      "vision",
+      "dimensions",
+      "cad interpretation"
+    ],
+    "keywords": [
+      "image",
+      "photo",
+      "drawing",
+      "dimension",
+      "reference",
+      "analyze"
+    ],
     "parameterHints": [
       "If a dimension is visible, use it directly.",
       "If a dimension is missing, infer conservatively and expose it as an editable parameter."
@@ -286,5 +425,270 @@
       "If confidence is low, the reasoning should say which dimensions were inferred."
     ],
     "example_prompt": "Use this dimensioned drawing to generate the mounting bracket"
+  },
+  {
+    "title": "Spur Gear Involute Tooth Math",
+    "summary": "For spur gears, derive all geometry from pitch radius and tooth count. Pressure angle 20deg is standard. Tip radius = pitch + module. Root radius = pitch - 1.35*module. Base circle = pitch * cos(20deg). Generate tooth profile as an involute curve parametrized by t.",
+    "tags": [
+      "gear",
+      "spur",
+      "involute",
+      "teeth",
+      "diametral pitch",
+      "module",
+      "FRC"
+    ],
+    "keywords": [
+      "gear",
+      "spur",
+      "pinion",
+      "teeth",
+      "tooth",
+      "involute",
+      "diametral",
+      "pitch",
+      "module",
+      "pressure angle",
+      "FRC",
+      "robot",
+      "driven",
+      "drive"
+    ],
+    "parameterHints": [
+      "numTeeth: integer, minimum 6. For gear ratios, driven gear teeth = ratio * driver teeth.",
+      "radiusInches: pitch radius = numTeeth / (2 * diametralPitch). For 20DP 32T gear: 32/(2*20)=0.8in.",
+      "depthInches: face width = 0.4 to 0.8 * pitch diameter. Default 0.5 * pitchDiameter.",
+      "holeRadiusInches: bore hole for shaft, typically 0.25 * pitch radius. Set 0 for solid gear."
+    ],
+    "modelingNotes": [
+      "The tGear template in AI.js computes involute points directly in JavaScript and writes them as skSpline calls \u2014 do NOT ask Llama to compute involute math.",
+      "GEAR_SPUR shape type triggers the tGear template which produces working tooth geometry without LLM hallucination.",
+      "8:1 gear ratio means one gear has 8x as many teeth as the other. For an 8:1 set at 20DP: pinion=8 teeth (r=0.2in), driven=64 teeth (r=1.6in).",
+      "Module (metric) = 25.4 / diametral_pitch. 1mm module = ~25.4 DP. Convert module to inches: pitchRadius = (numTeeth * module_mm) / (2 * 25.4)."
+    ],
+    "featurePattern": "extractDims classifies as GEAR_SPUR \u2192 tGear template runs in JS: computes rb,rd,ra from numTeeth+radiusInches \u2192 generates N tooth outlines as skSpline+skArc calls \u2192 skSolve \u2192 opExtrude to depthInches.",
+    "failureModes": [
+      "Do NOT let Llama write involute gear math \u2014 it will hallucinate wrong formulas. Always route to tGear template.",
+      "Do NOT use opCylinder for gears \u2014 the tooth profile requires a sketch-based approach.",
+      "A gear with fewer than 6 teeth will have undercut problems; enforce minimum 6."
+    ],
+    "validationRules": [
+      "tipRadius > pitchRadius > rootRadius > 0 always.",
+      "Face width (depthInches) should be 0.2 to 1.5 * pitch diameter.",
+      "Bore hole radius must be less than root radius * 0.85."
+    ],
+    "example_prompt": "spur gear 32 teeth 20 diametral pitch 0.5 inch face width with 0.25 inch bore"
+  },
+  {
+    "title": "FRC Robot Gear Train Sizing",
+    "summary": "FRC robots commonly use 20DP or 32DP spur gears for drivetrains. Ratio is driven/driver teeth. Small pinions (8-12T) mesh with large gears (40-64T) for speed reduction. Belt + pulley and chain + sprocket are alternatives but this app generates spur gears.",
+    "tags": [
+      "FRC",
+      "robot",
+      "gear train",
+      "drivetrain",
+      "reduction",
+      "pinion"
+    ],
+    "keywords": [
+      "FRC",
+      "robot",
+      "drivetrain",
+      "reduction",
+      "pinion",
+      "ratio",
+      "20DP",
+      "32DP",
+      "train",
+      "sprocket",
+      "belt",
+      "chain"
+    ],
+    "parameterHints": [
+      "For 8:1 ratio at 20DP: pinion=8T r=0.2in, driven=64T r=1.6in.",
+      "For 4:1 ratio at 20DP: pinion=12T r=0.3in, driven=48T r=1.2in.",
+      "Standard FRC gear pitches: 20DP (strong, drivetrain), 32DP (lighter, mechanisms).",
+      "Center distance between two meshing gears = pitchRadius1 + pitchRadius2."
+    ],
+    "modelingNotes": [
+      "When user says 'gear ratio X:1', generate the driven (larger) gear \u2014 it's the useful output shaft gear.",
+      "When user says 'pinion', generate the smaller driver gear.",
+      "Face width for FRC drivetrain gears is typically 0.375 to 0.75 inches."
+    ],
+    "featurePattern": "Parse ratio \u2192 compute numTeeth = ratio * pinion_teeth (default pinion=8) \u2192 compute pitchRadius = numTeeth / (2 * diametralPitch) \u2192 route to GEAR_SPUR \u2192 tGear template.",
+    "failureModes": [
+      "Do not confuse gear ratio with number of teeth \u2014 ratio 8:1 means 8x as many teeth, not 8 teeth.",
+      "Do not make bore holes larger than the root circle."
+    ],
+    "validationRules": [
+      "Always produce at least numTeeth=6.",
+      "Diametral pitch defaults to 20 for FRC unless stated otherwise."
+    ],
+    "example_prompt": "8:1 ratio spur gear for FRC drivetrain at 20 diametral pitch"
+  },
+  {
+    "title": "Stepped Shaft Or Shoulder Shaft",
+    "summary": "A shaft with multiple diameters \u2014 a smaller section for bearing/bushing seating and a larger section for torque transfer. Build as two coaxial cylinders unioned together.",
+    "tags": [
+      "shaft",
+      "stepped",
+      "shoulder",
+      "axle",
+      "motor shaft"
+    ],
+    "keywords": [
+      "shaft",
+      "stepped",
+      "shoulder",
+      "axle",
+      "spindle",
+      "motor",
+      "hex",
+      "keyed"
+    ],
+    "parameterHints": [
+      "Expose mainRadius, stepRadius (smaller), mainLength, stepLength.",
+      "stepRadius < mainRadius always.",
+      "For hex shafts, use a hexagonal polygon cross-section instead of circle."
+    ],
+    "modelingNotes": [
+      "Use two opCylinder calls \u2014 one for main body, one for stepped end \u2014 then opBoolean union.",
+      "Stepped shafts in FRC are commonly 0.5 inch hex or round with snap ring grooves.",
+      "If user says 'hex shaft', use POLYGON shape with sides=6 instead of CYLINDER."
+    ],
+    "featurePattern": "opCylinder main body \u2192 opCylinder step end (smaller radius, positioned at top of main) \u2192 opBoolean UNION.",
+    "failureModes": [
+      "Do not use opCylinder with startAngle/endAngle \u2014 those params don't exist.",
+      "Do not forget to union the two bodies."
+    ],
+    "validationRules": [
+      "stepRadius must be less than mainRadius.",
+      "Both lengths must be positive."
+    ],
+    "example_prompt": "stepped shaft 0.5 inch diameter main section 3 inches long, 0.375 inch step 1 inch long"
+  },
+  {
+    "title": "U-Channel Or C-Channel Profile",
+    "summary": "Structural channel used in FRC robots. A U or C cross-section extruded to length. Sketch the open profile as a closed U polygon, then extrude.",
+    "tags": [
+      "channel",
+      "u-channel",
+      "c-channel",
+      "structural",
+      "FRC",
+      "extrusion"
+    ],
+    "keywords": [
+      "channel",
+      "u-channel",
+      "c-channel",
+      "aluminum",
+      "structural",
+      "extrusion",
+      "rail",
+      "box tube"
+    ],
+    "parameterHints": [
+      "Expose channelWidth, channelHeight, wallThickness, and length.",
+      "Keep wall thickness 0.05 to 0.25 inches for aluminum extrusions.",
+      "MaxTube (FRC common): 2x1x0.1 or 1x1x0.1 inch cross-section."
+    ],
+    "modelingNotes": [
+      "Sketch the U profile as 6 line segments forming the open channel cross-section, solve, then extrude along length.",
+      "Avoid opShell \u2014 sketch the profile directly for reliability.",
+      "For box tube (closed), use two concentric rectangles and extrude the ring region."
+    ],
+    "featurePattern": "Sketch closed U polygon (outer W x H, subtract inner cavity based on wall thickness), skSolve, opExtrude to length.",
+    "failureModes": [
+      "Open sketch profiles will fail skSolve \u2014 ensure the U is closed at the bottom.",
+      "Do not use opShell \u2014 it requires a solid body first and often fails on thin walls."
+    ],
+    "validationRules": [
+      "Wall thickness must be less than half of both width and height.",
+      "Inner cavity must remain positive (width - 2*wall > 0)."
+    ],
+    "example_prompt": "2x1 inch aluminum U-channel 12 inches long 0.1 inch wall thickness"
+  },
+  {
+    "title": "Pulley Or Belt Wheel",
+    "summary": "Timing belt pulleys have a specific tooth profile. For FeatureScript generation, approximate as a cylinder with the pitch diameter as the main dimension and expose tooth count and belt pitch.",
+    "tags": [
+      "pulley",
+      "belt",
+      "GT2",
+      "timing",
+      "drivetrain",
+      "FRC"
+    ],
+    "keywords": [
+      "pulley",
+      "belt",
+      "timing",
+      "GT2",
+      "HTD",
+      "tooth",
+      "flange",
+      "idler"
+    ],
+    "parameterHints": [
+      "GT2 belt: pitch = 2mm = 0.0787 inch. pitchDiameter = numTeeth * 2mm / pi.",
+      "HTD 5mm belt: pitch = 5mm = 0.1969 inch.",
+      "Expose numTeeth, beltPitch, faceWidth, flangeDiameter, boreRadius."
+    ],
+    "modelingNotes": [
+      "A simplified pulley is a cylinder with pitch diameter. For FeatureScript, use CYLINDER or BUSHING shape.",
+      "Use tCylinder or tBushing template with radius = pitchDiameter/2.",
+      "Tooth profile detail is typically not needed for FRC part studios \u2014 use simplified cylinder."
+    ],
+    "featurePattern": "For GT2 20T pulley: pitchDiameter = 20 * 2mm / pi = 12.73mm = 0.501in \u2192 tCylinder with radiusInches=0.25.",
+    "failureModes": [
+      "Do not confuse pitch diameter with outer diameter \u2014 pulley OD is slightly larger than pitch diameter.",
+      "Do not try to generate individual belt teeth in FeatureScript \u2014 too complex and not needed for most uses."
+    ],
+    "validationRules": [
+      "Pitch diameter = numTeeth * beltPitch / pi.",
+      "Bore must be less than pitch radius."
+    ],
+    "example_prompt": "GT2 20 tooth timing pulley 5mm wide with 8mm bore"
+  },
+  {
+    "title": "Bearing Block Or Pillow Block",
+    "summary": "A block with a circular bore for press-fitting a bearing. Typically a rectangular block with a centered circular cutout sized to the bearing OD.",
+    "tags": [
+      "bearing",
+      "block",
+      "pillow block",
+      "bore",
+      "press fit"
+    ],
+    "keywords": [
+      "bearing",
+      "pillow block",
+      "bore",
+      "press fit",
+      "mount",
+      "support",
+      "flanged"
+    ],
+    "parameterHints": [
+      "Common FRC bearings: 0.5in bore (OD 1.125in), 0.375in bore (OD 0.875in), R8 (0.5in bore OD 1.125in).",
+      "Press fit bore: bearing OD + 0 to -0.001in interference.",
+      "Expose blockWidth, blockHeight, blockDepth, boreRadius."
+    ],
+    "modelingNotes": [
+      "Use PLATE_HOLES with numHoles=1 and holeRadius=bearingOD/2, or BOX with centered bore.",
+      "Add mounting holes using FLANGE or PLATE_HOLES pattern around the bore.",
+      "Keep block thickness equal to or slightly less than bearing width."
+    ],
+    "featurePattern": "Rectangle plate sketch + centered circle for bore, skSolve with true (subtract), opExtrude BLIND to blockDepth.",
+    "failureModes": [
+      "Bore diameter must match the bearing OD precisely \u2014 wrong size means the bearing won't seat.",
+      "Block depth should not be less than bearing width."
+    ],
+    "validationRules": [
+      "boreRadius = bearingOD / 2.",
+      "Block must be wide enough to leave wall material around the bore (blockWidth > boreRadius * 2.5)."
+    ],
+    "example_prompt": "bearing block for 1.125 inch OD bearing 1.5 inches square and 0.75 inches thick"
   }
 ]

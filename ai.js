@@ -4,7 +4,8 @@ const groq           = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const TEXT_MODEL     = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
 const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "llama-3.1-8b-instant";
 const VISION_MODEL   = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
-const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES === "true";
+// Templates are ON by default. Set USE_VALIDATED_TEMPLATES=false to force raw AI generation.
+const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
 
 function stripJson(text) {
   const m = text?.match(/```json?\s*([\s\S]*?)```/i);
@@ -83,36 +84,7 @@ function fsPoint(xExpr, yExpr, zExpr = null) {
 // The body goes inside the second { } block.
 // definition.paramName values already carry Length — never multiply by * inch.
 
-function tBox(d) {
-  return {
-    precondition: [
-      preconditionPlane(),
-      preconditionLength("width",  "Width",    0.01, d.widthInches,   48),
-      preconditionLength("height", "Height",   0.01, d.heightInches,  48),
-      preconditionLength("depth",  "Depth",    0.01, d.depthInches,   48),
-      d.filletRadiusInches > 0
-        ? preconditionLength("fillet", "Fillet Radius", 0, d.filletRadiusInches, 4)
-        : "",
-    ].filter(Boolean).join("\n"),
-    body: `${planeVar()}
-        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
-        skRectangle(sketch1, "rect1", {
-            "firstCorner"  : ${fsPoint("-definition.width / 2", "-definition.height / 2")},
-            "secondCorner" : ${fsPoint("definition.width / 2", "definition.height / 2")}
-        });
-        skSolve(sketch1);
-        opExtrude(context, id + "extrude1", {
-            "entities"  : qSketchRegion(id + "sketch1"),
-            "direction" : skPlane.normal,
-            "endBound"  : BoundingType.BLIND,
-            "endDepth"  : definition.depth
-        });${d.filletRadiusInches > 0 ? `
-        opFillet(context, id + "fillet1", {
-            "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "extrude1", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
-            "radius"   : definition.fillet
-        });` : ""}`,
-  };
-}
+
 
 function tRobotMech(d) {
   return {
@@ -182,6 +154,37 @@ function tRobotMech(d) {
   };
 }
 
+function tBox(d) {
+  return {
+    precondition: [
+      preconditionPlane(),
+      preconditionLength("width",  "Width",    0.01, d.widthInches,   48),
+      preconditionLength("height", "Height",   0.01, d.heightInches,  48),
+      preconditionLength("depth",  "Depth",    0.01, d.depthInches,   48),
+      d.filletRadiusInches > 0
+        ? preconditionLength("fillet", "Fillet Radius", 0, d.filletRadiusInches, 4)
+        : "",
+    ].filter(Boolean).join("\n"),
+    body: `${planeVar()}
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+        skRectangle(sketch1, "rect1", {
+            "firstCorner"  : vector(-definition.width / (2 * inch), -definition.height / (2 * inch)) * inch,
+            "secondCorner" : vector( definition.width / (2 * inch),  definition.height / (2 * inch)) * inch
+        });
+        skSolve(sketch1);
+        opExtrude(context, id + "extrude1", {
+            "entities"  : qSketchRegion(id + "sketch1"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.depth
+        });${d.filletRadiusInches > 0 ? `
+        opFillet(context, id + "fillet1", {
+            "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "extrude1", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+            "radius"   : definition.fillet
+        });` : ""}`,
+  };
+}
+
 function tCylinder(d) {
   return {
     precondition: [
@@ -240,8 +243,8 @@ function tLinkage(d) {
         var holeOffset = definition.length * 0.5 - definition.holeRadius * 2.5;
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "body", {
-            "firstCorner"  : ${fsPoint("-definition.length / 2", "-definition.width / 2")},
-            "secondCorner" : ${fsPoint("definition.length / 2", "definition.width / 2")}
+            "firstCorner"  : vector(-0.5, -0.5) * definition.length,
+            "secondCorner" : vector( 0.5,  0.5) * definition.width
         });
         skCircle(sketch1, "holeL", { "center" : vector(-1, 0) * holeOffset, "radius" : definition.holeRadius });
         skCircle(sketch1, "holeR", { "center" : vector( 1, 0) * holeOffset, "radius" : definition.holeRadius });
@@ -275,8 +278,8 @@ function tPlateHoles(d) {
     body: `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "plate", {
-            "firstCorner"  : ${fsPoint("-definition.width / 2", "-definition.height / 2")},
-            "secondCorner" : ${fsPoint("definition.width / 2", "definition.height / 2")}
+            "firstCorner"  : vector(-0.5, -0.5) * definition.width,
+            "secondCorner" : vector( 0.5,  0.5) * definition.height
         });${circles}
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
