@@ -663,7 +663,7 @@
 
             <!-- Slot-specific label -->
             <p class="card-label" style="margin-top:10px; font-size: 0.85rem;">Image Label / Specifics</p>
-            <input type="text" class="slot-prompt" placeholder="e.g. Top view dimensions, or 'Make this 3 inches long'">
+            <textarea type="text" rows = "1" class="slot-prompt" placeholder="e.g. Top view dimensions, or 'Make this 3 inches long'"> </textarea>
           </div>
           <!-- END INITIAL SLOT -->
 
@@ -678,7 +678,7 @@
         </div>
 
         <p class="card-label" style="margin-top:20px">Overall Goal / Instructions</p>
-        <input type="text" id="global-prompt" placeholder="What should be generated? e.g. 'Create this gear using the dimensions in image 2'">
+        <textarea type="text" rows = "5" id="global-prompt" placeholder="What should be generated? e.g. 'Create this gear using the dimensions in image 2'"></textarea>
 
         <div class="btn-row" style="margin-top: 16px;">
           <button class="btn btn-primary" id="analyze-btn" onclick="analyzeMultiImg()">Analyze & Generate</button>
