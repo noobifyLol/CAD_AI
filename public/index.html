@@ -306,6 +306,7 @@
     font-size: 0.78rem;
     word-break: break-word;
   }
+  .modal-stat.wide { grid-column: 1 / -1; }
   .feedback-panel {
     display: none;
     margin-top: 10px;
@@ -397,25 +398,6 @@
     border-top-color: var(--think-border);
     overflow-y: auto;
   }
-
-  .recents {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-  }
-  .recent-chip {
-    padding: 4px 11px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--muted);
-    font-size: 0.76rem;
-    cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
-    font-family: inherit;
-  }
-  .recent-chip:hover { border-color: var(--accent); color: var(--text); }
 
   .explanation-box {
     background: #111928;
@@ -566,18 +548,8 @@
         <div class="card">
           <div class="card-label">Describe your part</div>
           <textarea id="gen-prompt" rows="5"
-            placeholder="Describe the part — shape, dimensions, holes, fillets. Example: a spur gear with 8:1 ratio, 2mm module, 0.5 inch bore"></textarea>
+            placeholder="Describe the part: shape, dimensions, holes, fillets, materials, and how it should be adjustable."></textarea>
           <div class="hint">Ctrl + Enter to generate. Inches by default; mm is understood.</div>
-          <div class="recents" id="recents">
-            <button class="recent-chip" onclick="setPrompt('Spur gear 8:1 ratio, 2mm module, 0.5 inch bore')">8:1 Spur Gear</button>
-            <button class="recent-chip" onclick="setPrompt('Spur gear 20 teeth, 3mm module, 0.375 inch bore')">20-tooth Gear</button>
-            <button class="recent-chip" onclick="setPrompt('Mounting plate 4x3 inches, 0.25 thick, four 0.2 inch holes in the corners')">Mounting plate</button>
-            <button class="recent-chip" onclick="setPrompt('Hex nut 0.75 inch across flats, 0.25 inch thick')">Hex nut</button>
-            <button class="recent-chip" onclick="setPrompt('Linkage arm 8 inches long, 1 inch wide, 0.25 thick with 0.2 inch pin holes')">Linkage arm</button>
-            <button class="recent-chip" onclick="setPrompt('Pipe flange 3 inch radius, 0.4 inch thick, 4 bolt holes')">Pipe flange</button>
-            <button class="recent-chip" onclick="setPrompt('L-bracket 3 inches wide, 3 inches tall, 4 inches long, 0.25 wall')">L-bracket</button>
-            <button class="recent-chip" onclick="setPrompt('Bushing 0.75 inch OD, 0.5 inch ID, 1 inch long')">Bushing</button>
-          </div>
           <div class="btn-row">
             <button class="btn btn-primary" id="gen-btn" onclick="generate()">Generate FeatureScript</button>
           </div>
@@ -811,7 +783,7 @@
     <div id="run-modal-summary" class="modal-summary"></div>
 
     <div class="modal-grid">
-      <div class="modal-stat">
+      <div class="modal-stat wide">
         <span>Database</span>
         <strong id="run-modal-db">Not reported</strong>
       </div>

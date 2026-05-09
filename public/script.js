@@ -27,7 +27,7 @@ function databaseStatusText(database) {
   if (!database) return 'No database status returned';
   if (database.ok) {
     if (database.schemaReady === false && database.missingAdaptiveTables?.length) {
-      return `Saved generation; missing adaptive tables: ${database.missingAdaptiveTables.join(', ')}`;
+      return `Saved generation; adaptive schema missing ${database.missingAdaptiveTables.length} table(s)`;
     }
     return 'Saved';
   }
@@ -147,6 +147,7 @@ async function checkLearningDiagnostics() {
       `Connection: ${data.supabaseEnabled ? 'Connected' : 'Disabled'}`,
       `Adaptive schema: ${data.schemaReady ? 'Ready' : `Missing ${data.missingAdaptiveTables?.join(', ') || 'required tables'}`}`,
       `FeatureScript docs: ${data.featureScriptDocs?.enabled ? `${data.featureScriptDocs.chunks} indexed chunks` : 'Not found'}`,
+      `Neural reranker: ${data.adaptiveNetwork ? `${data.adaptiveNetwork.hiddenLayers?.join('x') || 'configured'} hidden layers, ${data.adaptiveNetwork.trainedSteps || 0} training steps, source=${data.adaptiveNetwork.source}` : 'Not available'}`,
       '',
       'Tables:',
       ...tableLines,
@@ -221,11 +222,6 @@ async function copyCode(outputId) {
       body: JSON.stringify({ generationId, signal: 'copied' })
     }).catch(() => {});
   }
-}
-
-function setPrompt(text) {
-  document.getElementById('gen-prompt').value = text;
-  document.getElementById('gen-prompt').focus();
 }
 
 function sendToDebug() {

@@ -26,6 +26,7 @@ console.log("============================");
 console.log(`Connection: ${report.supabaseEnabled ? "connected" : "disabled"}`);
 console.log(`Adaptive schema: ${report.schemaReady ? "ready" : `missing ${report.missingAdaptiveTables.join(", ")}`}`);
 console.log(`FeatureScript docs: ${report.featureScriptDocs.enabled ? `${report.featureScriptDocs.chunks} indexed chunk(s)` : "not found"}`);
+console.log(`Neural reranker: ${report.adaptiveNetwork.hiddenLayers.join("x")} hidden layers, ${report.adaptiveNetwork.trainedSteps} training step(s), source=${report.adaptiveNetwork.source}`);
 console.log("");
 
 for (const table of report.tables) {

@@ -4,6 +4,7 @@ const groq           = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const TEXT_MODEL     = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
 const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "llama-3.1-8b-instant";
 const VISION_MODEL   = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES === "true";
 
 function stripJson(text) {
   const m = text?.match(/```json?\s*([\s\S]*?)```/i);
@@ -733,6 +734,8 @@ function promptLooksComplex(prompt) {
 }
 
 function shouldUseTemplate(prompt, dims) {
+  if (!USE_VALIDATED_TEMPLATES) return false;
+
   const simpleShapes = new Set([
     "BOX", "ROBOT_MECH", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
     "L_BRACKET", "T_BRACKET", "FLANGE", "HEX_NUT", "WASHER", "BUSHING",

@@ -6,6 +6,42 @@
 
 create extension if not exists pgcrypto;
 
+-- Repair helper for tables that may have been created by an older draft schema.
+-- It is intentionally inline in the migration so the app can recover from
+-- partial Supabase setup instead of requiring manual table deletion.
+create or replace function public.ensure_uuid_id_primary_key(target_table text)
+returns void
+language plpgsql
+as $$
+begin
+  if to_regclass('public.' || target_table) is null then
+    return;
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = target_table
+      and column_name = 'id'
+  ) then
+    execute format('alter table public.%I add column id uuid default gen_random_uuid()', target_table);
+  end if;
+
+  execute format('update public.%I set id = gen_random_uuid() where id is null', target_table);
+  execute format('alter table public.%I alter column id set not null', target_table);
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = ('public.' || target_table)::regclass
+      and contype = 'p'
+  ) then
+    execute format('alter table public.%I add primary key (id)', target_table);
+  end if;
+end;
+$$;
+
 -- 0. Base tables used by the app. These are included here so a fresh Supabase
 -- project can be set up from one SQL file instead of needing docs/schema first.
 create table if not exists generations (
@@ -25,6 +61,8 @@ create index if not exists generations_created_at_idx
 create index if not exists generations_shape_type_idx
   on generations (shape_type);
 
+select public.ensure_uuid_id_primary_key('generations');
+
 create table if not exists cad_knowledge (
   id              uuid primary key default gen_random_uuid(),
   created_at      timestamptz not null default now(),
@@ -43,6 +81,21 @@ create index if not exists cad_knowledge_keywords_idx
 create index if not exists cad_knowledge_tags_idx
   on cad_knowledge using gin (tags);
 
+alter table if exists cad_knowledge
+  add column if not exists created_at      timestamptz not null default now(),
+  add column if not exists title           text,
+  add column if not exists summary         text,
+  add column if not exists tags            text[] not null default '{}',
+  add column if not exists keywords        text[] not null default '{}',
+  add column if not exists parameter_hints text[] not null default '{}',
+  add column if not exists modeling_notes  text[] not null default '{}',
+  add column if not exists example_prompt  text;
+
+select public.ensure_uuid_id_primary_key('cad_knowledge');
+
+create unique index if not exists cad_knowledge_title_unique_idx
+  on cad_knowledge (title);
+
 create table if not exists shape_knowledge (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
@@ -52,6 +105,8 @@ create table if not exists shape_knowledge (
   default_dims jsonb not null default '{}'::jsonb,
   notes        text
 );
+
+select public.ensure_uuid_id_primary_key('shape_knowledge');
 
 create table if not exists image_analyses (
   id             uuid primary key default gen_random_uuid(),
@@ -63,6 +118,8 @@ create table if not exists image_analyses (
   generation_id  uuid references generations (id) on delete set null
 );
 
+select public.ensure_uuid_id_primary_key('image_analyses');
+
 create table if not exists debug_sessions (
   id             uuid primary key default gen_random_uuid(),
   created_at     timestamptz not null default now(),
@@ -71,6 +128,8 @@ create table if not exists debug_sessions (
   fixed_code     text not null default '',
   explanation    text not null default ''
 );
+
+select public.ensure_uuid_id_primary_key('debug_sessions');
 
 -- 1. Add missing columns to existing generations table
 alter table if exists generations
@@ -116,6 +175,32 @@ create table if not exists cad_memory (
   constraint cad_memory_title_unique unique (title)
 );
 
+alter table if exists cad_memory
+  add column if not exists memory_type      text not null default 'skill',
+  add column if not exists title            text,
+  add column if not exists summary          text,
+  add column if not exists shape_type       text,
+  add column if not exists tags             text[]   not null default '{}',
+  add column if not exists keywords         text[]   not null default '{}',
+  add column if not exists parameter_hints  text[]   not null default '{}',
+  add column if not exists modeling_notes   text[]   not null default '{}',
+  add column if not exists feature_pattern  text,
+  add column if not exists failure_modes    text[]   not null default '{}',
+  add column if not exists validation_rules text[]   not null default '{}',
+  add column if not exists quality_score    float8   not null default 0.5,
+  add column if not exists usage_count      int4     not null default 0,
+  add column if not exists success_count    int4     not null default 0,
+  add column if not exists failure_count    int4     not null default 0,
+  add column if not exists is_active        boolean  not null default true,
+  add column if not exists source_table     text,
+  add column if not exists created_at       timestamptz not null default now(),
+  add column if not exists updated_at       timestamptz not null default now();
+
+select public.ensure_uuid_id_primary_key('cad_memory');
+
+create unique index if not exists cad_memory_title_unique_idx
+  on cad_memory (title);
+
 create index if not exists cad_memory_shape_idx     on cad_memory (shape_type);
 create index if not exists cad_memory_quality_idx   on cad_memory (quality_score desc);
 create index if not exists cad_memory_is_active_idx on cad_memory (is_active);
@@ -127,11 +212,26 @@ create table if not exists cad_generation_memory_matches (
   memory_id       uuid references cad_memory (id)  on delete cascade,
   score_rank      int4    not null default 0,
   score_snapshot  float8  not null default 0,
+  neural_score    float8,
+  feature_vector  jsonb   not null default '[]'::jsonb,
+  source_kind     text    not null default 'memory',
   created_at      timestamptz not null default now()
 );
 
 create index if not exists cgmm_generation_idx on cad_generation_memory_matches (generation_id);
 create index if not exists cgmm_memory_idx     on cad_generation_memory_matches (memory_id);
+
+alter table if exists cad_generation_memory_matches
+  add column if not exists generation_id   uuid,
+  add column if not exists memory_id       uuid,
+  add column if not exists score_rank      int4    not null default 0,
+  add column if not exists score_snapshot  float8  not null default 0,
+  add column if not exists neural_score   float8,
+  add column if not exists feature_vector jsonb not null default '[]'::jsonb,
+  add column if not exists source_kind    text  not null default 'memory',
+  add column if not exists created_at     timestamptz not null default now();
+
+select public.ensure_uuid_id_primary_key('cad_generation_memory_matches');
 
 -- 4. cad_feedback_events — raw feedback signals
 create table if not exists cad_feedback_events (
@@ -146,6 +246,16 @@ create table if not exists cad_feedback_events (
 
 create index if not exists cfe_generation_idx on cad_feedback_events (generation_id);
 
+alter table if exists cad_feedback_events
+  add column if not exists generation_id uuid,
+  add column if not exists signal        text    not null default 'feedback',
+  add column if not exists rating        int2,
+  add column if not exists weight        float8  not null default 0,
+  add column if not exists notes         text,
+  add column if not exists created_at    timestamptz not null default now();
+
+select public.ensure_uuid_id_primary_key('cad_feedback_events');
+
 -- 5. cad_memory_pruning_events — audit trail for deactivated memories
 create table if not exists cad_memory_pruning_events (
   id                   uuid primary key default gen_random_uuid(),
@@ -155,9 +265,37 @@ create table if not exists cad_memory_pruning_events (
   created_at           timestamptz not null default now()
 );
 
+alter table if exists cad_memory_pruning_events
+  add column if not exists memory_id            uuid,
+  add column if not exists reason               text,
+  add column if not exists quality_score_before float8,
+  add column if not exists created_at           timestamptz not null default now();
+
+select public.ensure_uuid_id_primary_key('cad_memory_pruning_events');
+
+-- 6. cad_learning_state — trainable neural reranker weights/state
+create table if not exists cad_learning_state (
+  id          uuid primary key default gen_random_uuid(),
+  state_key   text not null unique,
+  state       jsonb not null default '{}'::jsonb,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+alter table if exists cad_learning_state
+  add column if not exists state_key   text,
+  add column if not exists state       jsonb not null default '{}'::jsonb,
+  add column if not exists created_at  timestamptz not null default now(),
+  add column if not exists updated_at  timestamptz not null default now();
+
+select public.ensure_uuid_id_primary_key('cad_learning_state');
+
+create unique index if not exists cad_learning_state_key_unique_idx
+  on cad_learning_state (state_key);
+
 -- ─── RPCs ────────────────────────────────────────────────────────────────────
 
--- 6. search_cad_memory — scored keyword + shape search
+-- 7. search_cad_memory — scored keyword + shape search
 create or replace function search_cad_memory(
   query_text     text    default '',
   query_keywords text[]  default '{}',
@@ -221,7 +359,7 @@ as $$
   limit match_limit;
 $$;
 
--- 7. mark_cad_memory_used — increment usage_count for retrieved memories
+-- 8. mark_cad_memory_used — increment usage_count for retrieved memories
 create or replace function mark_cad_memory_used(memory_ids uuid[])
 returns void
 language sql
@@ -233,7 +371,7 @@ as $$
   where id = any(memory_ids);
 $$;
 
--- 8. record_cad_feedback — apply a feedback signal to linked memory quality scores
+-- 9. record_cad_feedback — apply a feedback signal to linked memory quality scores
 create or replace function record_cad_feedback(
   p_generation_id uuid,
   p_signal        text    default 'feedback',
@@ -277,7 +415,7 @@ begin
 end;
 $$;
 
--- 9. prune_cad_memory — deactivate repeatedly failing memories
+-- 10. prune_cad_memory — deactivate repeatedly failing memories
 create or replace function prune_cad_memory()
 returns int
 language plpgsql
@@ -317,6 +455,7 @@ alter table cad_memory                      enable row level security;
 alter table cad_generation_memory_matches   enable row level security;
 alter table cad_feedback_events             enable row level security;
 alter table cad_memory_pruning_events       enable row level security;
+alter table cad_learning_state              enable row level security;
 
 -- Public read + anon insert/update. This app currently uses the anon key from
 -- the server only; tighten these policies before exposing direct browser DB writes.
@@ -394,3 +533,15 @@ create policy "anon read pruning_events"
 drop policy if exists "anon insert pruning_events" on cad_memory_pruning_events;
 create policy "anon insert pruning_events"
   on cad_memory_pruning_events for insert with check (true);
+
+drop policy if exists "anon read learning_state" on cad_learning_state;
+create policy "anon read learning_state"
+  on cad_learning_state for select using (true);
+drop policy if exists "anon insert learning_state" on cad_learning_state;
+create policy "anon insert learning_state"
+  on cad_learning_state for insert with check (true);
+drop policy if exists "anon update learning_state" on cad_learning_state;
+create policy "anon update learning_state"
+  on cad_learning_state for update using (true);
+
+drop function if exists public.ensure_uuid_id_primary_key(text);

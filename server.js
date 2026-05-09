@@ -61,6 +61,7 @@ function generationResponse(result, generationLog, learningContext, diagnostics 
       memories: learningContext.memoryMatches.length,
       docs: learningContext.featureScriptDocs?.length || 0,
       schemaReady: diagnostics?.schemaReady ?? null,
+      adaptiveNetwork: learningContext.adaptiveNetwork || null,
       shapeHint: learningContext.shapeHint,
     },
   };

@@ -1,6 +1,14 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ADAPTIVE_NETWORK_KEY,
+  createInitialAdaptiveState,
+  feedbackStrength,
+  feedbackTarget,
+  rerankCandidates,
+  trainAdaptiveState,
+} from "./adaptiveNetwork.js";
 
 const STOP_WORDS = new Set([
   "the", "and", "for", "with", "that", "this", "make", "build", "create",
@@ -16,6 +24,7 @@ const REQUIRED_ADAPTIVE_TABLES = [
   "cad_generation_memory_matches",
   "cad_feedback_events",
   "cad_memory_pruning_events",
+  "cad_learning_state",
 ];
 
 function normalizeText(value) {
@@ -421,9 +430,83 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
   const warned = new Set();
   const localCadKnowledge = JSON.parse(readFileSync(cadKnowledgePath, "utf8"));
   const featureScriptDocIndex = buildFeatureScriptDocIndex(fsDocsPath);
+  let adaptiveStateCache = null;
+  let adaptiveStateSource = "default";
+  let adaptiveStateLoadedAt = 0;
 
   if (fsDocsPath && !featureScriptDocIndex.chunks.length) {
     warnOnce(warned, "fs_docs", `[Docs] FeatureScript docs were not found at ${toFsPath(fsDocsPath)}.`);
+  }
+
+  async function loadAdaptiveState({ force = false } = {}) {
+    const now = Date.now();
+    if (!force && adaptiveStateCache && now - adaptiveStateLoadedAt < 60000) {
+      return adaptiveStateCache;
+    }
+
+    if (!supabase) {
+      adaptiveStateSource = "default";
+      adaptiveStateCache = createInitialAdaptiveState();
+      adaptiveStateLoadedAt = now;
+      return adaptiveStateCache;
+    }
+
+    const { data, error } = await supabase
+      .from("cad_learning_state")
+      .select("state")
+      .eq("state_key", ADAPTIVE_NETWORK_KEY)
+      .maybeSingle();
+
+    if (error) {
+      if (!isMissingDbObject(error)) warnOnce(warned, "cad_learning_state", `[DB] Could not load adaptive neural state: ${error.message}`);
+      adaptiveStateSource = "default";
+      adaptiveStateCache = createInitialAdaptiveState();
+      adaptiveStateLoadedAt = now;
+      return adaptiveStateCache;
+    }
+
+    adaptiveStateSource = data?.state ? "supabase" : "default";
+    adaptiveStateCache = data?.state || createInitialAdaptiveState();
+    adaptiveStateLoadedAt = now;
+    return adaptiveStateCache;
+  }
+
+  async function saveAdaptiveState(state) {
+    adaptiveStateCache = state || createInitialAdaptiveState();
+    adaptiveStateSource = supabase ? "supabase" : "default";
+    adaptiveStateLoadedAt = Date.now();
+
+    if (!supabase) {
+      return dbLogResult({
+        skipped: true,
+        table: "cad_learning_state",
+        action: "upsert",
+        error: "Supabase is disabled.",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("cad_learning_state")
+      .upsert([{
+        state_key: ADAPTIVE_NETWORK_KEY,
+        state: adaptiveStateCache,
+        updated_at: new Date().toISOString(),
+      }], { onConflict: "state_key" })
+      .select("id,updated_at")
+      .single();
+
+    if (error) {
+      if (!isMissingDbObject(error)) warnOnce(warned, "save_cad_learning_state", `[DB] Could not save adaptive neural state: ${error.message}`);
+      return dbErrorResult("cad_learning_state", "upsert", error);
+    }
+
+    return dbLogResult({
+      id: data?.id || null,
+      ok: Boolean(data?.id),
+      table: "cad_learning_state",
+      action: "upsert",
+      createdAt: data?.updated_at || new Date().toISOString(),
+    });
   }
 
   function getLocalKnowledge(prompt, limit = 4) {
@@ -615,6 +698,8 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
   async function fetchLearningContext(prompt) {
     const keywords = extractKeywords(prompt);
     const shapeHint = inferShapeFromPrompt(prompt);
+    const adaptiveState = await loadAdaptiveState();
+    const rankContext = { prompt, keywords, shapeHint };
     const [examples, cadMemory, cadKnowledge, shapeKnowledge] = await Promise.all([
       fetchGenerationExamples(prompt, keywords, shapeHint),
       fetchCadMemory(prompt, keywords, shapeHint),
@@ -622,25 +707,33 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
       fetchShapeKnowledge(shapeHint, keywords),
     ]);
 
-    const localKnowledge = getLocalKnowledge(prompt);
-    const featureScriptDocs = getFeatureScriptDocs(prompt, keywords, shapeHint);
-    const memoryMatches = cadMemory
+    const rankedExamples = rerankCandidates(adaptiveState, examples, rankContext, "example", 4);
+    const rankedCadMemory = rerankCandidates(adaptiveState, cadMemory, rankContext, "memory", 8);
+    const rankedCadKnowledge = rerankCandidates(adaptiveState, cadKnowledge, rankContext, "knowledge", 8);
+    const rankedShapeKnowledge = rerankCandidates(adaptiveState, shapeKnowledge, rankContext, "shape", 4);
+    const localKnowledge = rerankCandidates(adaptiveState, getLocalKnowledge(prompt), rankContext, "local", 4);
+    const featureScriptDocs = rerankCandidates(adaptiveState, getFeatureScriptDocs(prompt, keywords, shapeHint), rankContext, "docs", 4);
+    const memoryMatches = rankedCadMemory
       .filter(memory => memory.id)
       .slice(0, 8)
       .map((memory, index) => ({
         memory_id: memory.id,
         score_rank: index + 1,
-        score_snapshot: Number(memory._score || 0),
+        score_snapshot: Number(memory._combinedScore ?? memory._score ?? 0),
+        neural_score: Number(memory._neuralScore ?? 0),
+        feature_vector: memory._featureVector || [],
+        source_kind: memory._sourceKind || "memory",
       }));
 
     await markMemoryUsed(memoryMatches.map(match => match.memory_id));
 
     const notes = [];
     if (shapeHint) notes.push(`Fast shape hint from prompt: ${shapeHint}.`);
-    if (cadMemory.length) notes.push(`Using ${cadMemory.length} scored CAD memory record(s). Prefer higher-scored active memories over old raw examples.`);
+    notes.push(`Adaptive neural reranker: ${adaptiveState.hiddenLayers.length} hidden layer(s), ${adaptiveState.trainedSteps || 0} feedback training step(s), source=${adaptiveStateSource}.`);
+    if (rankedCadMemory.length) notes.push(`Using ${rankedCadMemory.length} scored CAD memory record(s). Prefer higher-scored active memories over old raw examples.`);
     if (featureScriptDocs.length) notes.push(`Using ${featureScriptDocs.length} local FeatureScript documentation snippet(s) from old_and_docs/docs/FS doc.`);
-    if (examples.length) {
-      const shapes = [...new Set(examples.map(example => example.shape_type).filter(Boolean))];
+    if (rankedExamples.length) {
+      const shapes = [...new Set(rankedExamples.map(example => example.shape_type).filter(Boolean))];
       if (shapes.length) notes.push(`Related prior generation shapes: ${shapes.join(", ")}.`);
     }
 
@@ -648,16 +741,21 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
       prompt,
       keywords,
       shapeHint,
-      examples,
+      examples: rankedExamples,
       notes,
       memoryMatches,
       featureScriptDocs,
       knowledge: dedupeKnowledge([
-        ...cadMemory,
-        ...shapeKnowledge,
-        ...cadKnowledge,
+        ...rankedCadMemory,
+        ...rankedShapeKnowledge,
+        ...rankedCadKnowledge,
         ...localKnowledge,
       ], 8),
+      adaptiveNetwork: {
+        source: adaptiveStateSource,
+        hiddenLayers: adaptiveState.hiddenLayers,
+        trainedSteps: adaptiveState.trainedSteps || 0,
+      },
     };
   }
 
@@ -669,6 +767,9 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
       memory_id: match.memory_id,
       score_rank: match.score_rank,
       score_snapshot: match.score_snapshot,
+      neural_score: match.neural_score,
+      feature_vector: jsonSafe(match.feature_vector || []),
+      source_kind: match.source_kind || "memory",
     }));
 
     const { error } = await supabase
@@ -795,6 +896,51 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
     }[signal] ?? 0;
   }
 
+  async function trainAdaptiveNetworkFromFeedback({ generationId, signal, rating, weight }) {
+    if (!supabase || !generationId) {
+      return dbLogResult({
+        skipped: true,
+        table: "cad_learning_state",
+        action: "train",
+        error: !supabase ? "Supabase is disabled." : "No generationId provided.",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("cad_generation_memory_matches")
+      .select("feature_vector")
+      .eq("generation_id", generationId)
+      .limit(16);
+
+    if (error) {
+      if (!isMissingDbObject(error)) warnOnce(warned, "adaptive_training_matches", `[DB] Could not load neural training vectors: ${error.message}`);
+      return dbErrorResult("cad_generation_memory_matches", "select", error);
+    }
+
+    const vectors = (Array.isArray(data) ? data : [])
+      .map(row => row.feature_vector)
+      .filter(vector => Array.isArray(vector) && vector.length > 0);
+
+    if (!vectors.length) {
+      return dbLogResult({
+        skipped: true,
+        table: "cad_learning_state",
+        action: "train",
+        error: "No linked feature vectors were available for this generation.",
+      });
+    }
+
+    const state = await loadAdaptiveState({ force: true });
+    const trained = trainAdaptiveState(
+      state,
+      vectors,
+      feedbackTarget(signal, rating),
+      feedbackStrength(weight)
+    );
+
+    return saveAdaptiveState(trained);
+  }
+
   async function recordFeedback({ generationId, signal = "feedback", rating, feedback, weight }) {
     if (!supabase || !generationId) {
       return {
@@ -821,7 +967,8 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
     });
 
     if (!rpc.error) {
-      return { ok: true, weight: safeWeight, createdAt: new Date().toISOString() };
+      const adaptiveNetwork = await trainAdaptiveNetworkFromFeedback({ generationId, signal, rating: safeRating, weight: safeWeight });
+      return { ok: true, weight: safeWeight, adaptiveNetwork, createdAt: new Date().toISOString() };
     }
     if (rpc.error && !isMissingDbObject(rpc.error)) {
       warnOnce(warned, "record_cad_feedback_rpc", `[DB] Feedback RPC failed: ${rpc.error.message}`);
@@ -851,9 +998,12 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
       if (error) warnOnce(warned, "feedback_generation_update", `[DB] Failed to update generation feedback: ${error.message}`);
     }
 
+    const adaptiveNetwork = await trainAdaptiveNetworkFromFeedback({ generationId, signal, rating: safeRating, weight: safeWeight });
+
     return {
       ok: !event.error || isMissingDbObject(event.error),
       weight: safeWeight,
+      adaptiveNetwork,
       createdAt: new Date().toISOString(),
       error: event.error && !isMissingDbObject(event.error) ? event.error.message : null,
     };
@@ -1008,6 +1158,7 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
       "cad_generation_memory_matches",
       "cad_feedback_events",
       "cad_memory_pruning_events",
+      "cad_learning_state",
       "image_analyses",
       "debug_sessions",
     ].map(countTable));
@@ -1030,6 +1181,7 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
     const missingAdaptiveTables = tables
       .filter(table => REQUIRED_ADAPTIVE_TABLES.includes(table.table) && !table.available)
       .map(table => table.table);
+    const adaptiveState = await loadAdaptiveState();
 
     return {
       supabaseEnabled: Boolean(supabase),
@@ -1040,6 +1192,13 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
         chunks: featureScriptDocIndex.chunks.length,
         source: featureScriptDocIndex.rootPath ? "old_and_docs/docs/FS doc" : null,
       },
+      adaptiveNetwork: {
+        key: ADAPTIVE_NETWORK_KEY,
+        source: adaptiveStateSource,
+        hiddenLayers: adaptiveState.hiddenLayers,
+        trainedSteps: adaptiveState.trainedSteps || 0,
+        inputSize: adaptiveState.inputSize,
+      },
       tables,
       recentGenerations: recentGenerations.error ? [] : recentGenerations.data || [],
       topMemory: topMemory.error ? [] : topMemory.data || [],
@@ -1048,7 +1207,8 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
         "cad_memory stores scored CAD skill records used for retrieval, promotion, demotion, and pruning.",
         "cad_generation_memory_matches links each generated result to the exact memories that influenced it.",
         "cad_feedback_events turns copy/helpful/debug signals into quality-score updates for those memories.",
-        "If cad_memory or cad_feedback_events are missing, run supabase/migrations/20260505213000_adaptive_cad_memory.sql, then npm run seed:knowledge.",
+        "cad_learning_state stores the trainable neural reranker weights.",
+        "If adaptive tables are missing, run supabase/migrations/20260505213000_adaptive_cad_memory.sql, then npm run seed:knowledge.",
       ],
     };
   }
