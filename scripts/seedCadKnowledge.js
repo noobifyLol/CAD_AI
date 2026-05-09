@@ -1,6 +1,12 @@
 import "dotenv/config";
-import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import {
+  dedupeSeedEntries,
+  loadSeedEntriesFromCsv,
+  loadSeedEntriesFromJson,
+  toCadKnowledgeRecord,
+  toCadMemoryRecord,
+} from "./lib/cadSeedData.js";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
@@ -24,35 +30,41 @@ const shapeByTitle = new Map([
   ["Slotted Mounting Plate", "PLATE_HOLES"],
 ]);
 
-const rawRecords = JSON.parse(
-  readFileSync(new URL("../data/cadKnowledge.json", import.meta.url), "utf8")
-);
-
-const cadKnowledgeRecords = rawRecords.map(entry => ({
-  title: entry.title,
-  summary: entry.summary,
-  tags: entry.tags || [],
-  keywords: entry.keywords || [],
-  parameter_hints: entry.parameterHints || [],
-  modeling_notes: entry.modelingNotes || [],
-  example_prompt: entry.example_prompt || null,
+const jsonSeedEntries = loadSeedEntriesFromJson(new URL("../data/cadKnowledge.json", import.meta.url), {
+  memoryType: "seed",
+  qualityScore: 0.7,
+  sourceTable: "cad_knowledge",
+}).map(entry => ({
+  ...entry,
+  shapeType: entry.shapeType || shapeByTitle.get(entry.title) || null,
 }));
 
-const memoryRecords = rawRecords.map(entry => ({
-  memory_type: "seed",
-  title: entry.title,
-  summary: entry.summary,
-  shape_type: shapeByTitle.get(entry.title) || null,
-  tags: entry.tags || [],
-  keywords: entry.keywords || [],
-  parameter_hints: entry.parameterHints || [],
-  modeling_notes: entry.modelingNotes || [],
-  feature_pattern: entry.featurePattern || null,
-  failure_modes: entry.failureModes || [],
-  validation_rules: entry.validationRules || [],
-  quality_score: 0.7,
-  source_table: "cad_knowledge",
-}));
+const csvSeedEntries = loadSeedEntriesFromCsv(new URL("../data/cadKnowledge.csv", import.meta.url), {
+  memoryType: "seed",
+  qualityScore: 0.75,
+  sourceTable: "cad_knowledge",
+});
+
+const pruningEntries = loadSeedEntriesFromCsv(new URL("../data/cadPruningTable.csv", import.meta.url), {
+  memoryType: "pruning_rule",
+  qualityScore: 0.82,
+  sourceTable: "pruning_table",
+  memoryOnly: true,
+});
+
+const allEntries = dedupeSeedEntries([
+  ...jsonSeedEntries,
+  ...csvSeedEntries,
+  ...pruningEntries,
+]);
+
+const cadKnowledgeRecords = allEntries
+  .map(toCadKnowledgeRecord)
+  .filter(Boolean);
+
+const memoryRecords = allEntries
+  .map(toCadMemoryRecord)
+  .filter(Boolean);
 
 async function upsert(table, records, options) {
   const { error } = await supabase.from(table).upsert(records, options);

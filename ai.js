@@ -492,11 +492,14 @@ function tGear(d) {
       preconditionPlane(),
       preconditionInteger("numTeeth", "Number of Teeth", 6, toothCountDefault, 200),
       preconditionLength("radius", "Pitch Radius", 0.01, radiusDefault, 24),
-      preconditionLength("holeRadius", "Bore Radius", 0, holeRadiusDefault, 12),
+      `        annotation { "Name" : "Bore Radius", "Default" : "${n(Math.max(0, holeRadiusDefault))} * inch" }
+        isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);`,
       preconditionLength("faceWidth", "Face Width (Depth)", 0.01, faceWidthDefault, 12),
       preconditionNumber("pressureAngleDegrees", "Pressure Angle (degrees)", 10, pressureAngleDefault, 30),
     ].join("\n"),
     body: `${planeVar()}
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+
         function invPoint(t is number, rb is number) returns vector
         {
             return vector((rb * (cos(t) + t * sin(t))) * inch,
@@ -520,10 +523,9 @@ function tGear(d) {
         const ra = rp + m;
         const rd = max(rp - 1.35 * m, rp * 0.5);
         const rb = rp * cos(pa);
-        const invPA = tan(pa) - pa;
-        const halfT = PI / N;
         const tRoot = rb >= rd ? 0 : sqrt(max(0, (rd / rb) * (rd / rb) - 1));
         const tTip  = sqrt(max(0, (ra / rb) * (ra / rb) - 1));
+        const hasBore = definition.holeRadius > 0 * inch;
 
         const rf = [
             invPoint(tRoot, rb),
@@ -570,18 +572,18 @@ function tGear(d) {
             var a2 = atan2(nextRF0.y, nextRF0.x);
             if (a2 < a1) a2 += 2 * PI;
             const rootMid = vector(rd * cos((a1 + a2) / 2) * inch, rd * sin((a1 + a2) / 2) * inch);
-            skSpline(sketch1, id + "rf" + k, { "points" : rfK });
-            skArc(sketch1, id + "tip" + k, { "start" : rfK[rfK.length - 1], "mid" : tipMid, "end" : lfK[0] });
-            skSpline(sketch1, id + "lf" + k, { "points" : lfK });
-            skArc(sketch1, id + "root" + k, { "start" : lfRoot, "mid" : rootMid, "end" : nextRF0 });
+            skFitSpline(sketch1, "rf" ~ k, { "points" : rfK });
+            skArc(sketch1, "tip" ~ k, { "start" : rfK[rfK.length - 1], "mid" : tipMid, "end" : lfK[0] });
+            skFitSpline(sketch1, "lf" ~ k, { "points" : lfK });
+            skArc(sketch1, "root" ~ k, { "start" : lfRoot, "mid" : rootMid, "end" : nextRF0 });
         }
-        if (definition.holeRadius > 0)
+        if (hasBore)
         {
             skCircle(sketch1, "bore", { "center" : vector(0, 0) * inch, "radius" : definition.holeRadius });
         }
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
-            "entities"  : qSketchRegion(id + "sketch1", definition.holeRadius > 0),
+            "entities"  : qSketchRegion(id + "sketch1", hasBore),
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
             "endDepth"  : definition.faceWidth
@@ -810,9 +812,9 @@ function shouldUseTemplate(prompt, dims) {
 
   if (dims.parseFailed) return false;
   if (!simpleShapes.has(dims.shape)) return false;
-  if (dims.shape === "ROBOT_MECH") return true;
   if (dims.confidence === "LOW") return false;
-  if (promptLooksComplex(prompt)) return false;
+  // SIMPLIFIED: Use template if shape is recognized, even if prompt mentions complex words.
+  // Templates are pre-validated and safe; AI will add complexity via parameters.
   return true;
 }
 
@@ -832,6 +834,7 @@ function sanitizeFeatureScript(code) {
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*return\s+[^;]*;\s*$/gm, "")
+    .replace(/\bskSpline\s*\(/g, "skFitSpline(")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
     .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);');
 
@@ -1176,6 +1179,10 @@ opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperation
 skRegularPolygon: { "center": Vector, "firstVertex": Vector, "sides": integer }
   (not skPolygon — that function does not exist)
 
+skFitSpline: valid sketch spline API
+  skFitSpline(sketch, "spline1", { "points": [...] })
+  "skSpline" is not a valid sketch API name.
+
 FIX RULES:
 1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
 2. startAngle / endAngle on opCylinder → remove those lines entirely
@@ -1183,8 +1190,9 @@ FIX RULES:
 4. Raw number without units in geometry (e.g. "endDepth" : 2) → add * inch or use a definition param
 5. newSketch used with evPlane result → change to newSketchOnPlane
 6. skPolygon → skRegularPolygon
-7. Multiple export const → keep only the last block
-8. return statement in body (other than bare "return;") → delete`;
+7. skSpline → skFitSpline
+8. Multiple export const → keep only the last block
+9. return statement in body (other than bare "return;") → delete`;
 
 function hasFatalFeatureScriptPatterns(code) {
   const text = String(code || "");

@@ -9,6 +9,11 @@ import {
   rerankCandidates,
   trainAdaptiveState,
 } from "./adaptiveNetwork.js";
+import {
+  dedupeSeedEntries,
+  loadSeedEntriesFromCsv,
+  loadSeedEntriesFromJson,
+} from "./scripts/lib/cadSeedData.js";
 
 const STOP_WORDS = new Set([
   "the", "and", "for", "with", "that", "this", "make", "build", "create",
@@ -80,18 +85,19 @@ function inferShapeFromPrompt(prompt) {
   const text = normalizeText(prompt).toLowerCase();
   const shapeHints = [
     ["ROBOT_MECH", /\b(robot|robotic|mech|mecha|android|humanoid)\b/],
-    ["GEAR_SPUR", /\b(gear|spur|pinion|teeth|tooth|diametral pitch|module)\b/],
-    ["FLANGE", /\b(flange|bolt circle|bore)\b/],
-    ["L_BRACKET", /\b(l bracket|angle bracket|corner bracket)\b/],
-    ["T_BRACKET", /\b(t bracket|tee bracket|t-plate)\b/],
-    ["LINKAGE", /\b(linkage|connecting rod|coupler|lever arm)\b/],
-    ["PLATE_HOLES", /\b(plate|mounting plate).*\b(hole|holes|bolt)\b/],
-    ["BUSHING", /\b(bushing|sleeve|liner|journal bearing)\b/],
+    ["GEAR_SPUR", /\b(gear|spur|pinion|teeth|tooth|diametral|module|pressure angle|involute)\b/],
+    ["GEAR_SPUR", /\b(gear ratio|8:1|4:1|transmission|drive wheel|driven gear)\b/],
+    ["FLANGE", /\b(flange|bolt circle|bolt hole|hub|mount|weld flange|coupling flange)\b/],
+    ["PLATE_HOLES", /\b(mounting plate|hole pattern|pcb mount|fastener pattern)\b/],
+    ["BUSHING", /\b(bushing|sleeve|bearing|spacer|journal|hollow tube|liner)\b/],
+    ["LINKAGE", /\b(linkage|connecting rod|coupler|arm|lever|clevis|tie rod|crank arm)\b/],
     ["WASHER", /\b(washer|shim|spacer disk|flat ring)\b/],
-    ["HITCH_PEG", /\b(hitch peg|mushroom pin|domed pin|peg)\b/],
-    ["CYLINDER", /\b(cylinder|rod|shaft|tube)\b/],
-    ["BOX", /\b(box|block|body|housing|chassis|enclosure)\b/],
-    ["POLYGON", /\b(hex|hexagon|triangle|polygon|octagon)\b/],
+    ["HITCH_PEG", /\b(peg|mushroom pin|hitch peg|thumb pin|domed head)\b/],
+    ["CYLINDER", /\b(shaft|rod|cylinder|pipe|tube|dowel|pin|post|standoff|barrel)\b/],
+    ["BOX", /\b(box|block|cube|solid|rectangular|brick|body|housing|chassis)\b/],
+    ["POLYGON", /\b(hex|hexagon|triangle|polygon|octagon|pentagon|n-sided)\b/],
+    ["L_BRACKET", /\b(l bracket|angle bracket|corner bracket|l-shaped)\b/],
+    ["T_BRACKET", /\b(t bracket|t-bracket|t-shaped bracket)\b/],
   ];
 
   return shapeHints.find(([, pattern]) => pattern.test(text))?.[0] || null;
@@ -113,6 +119,9 @@ function scoreKnowledgeEntry(prompt, entry) {
     ...(entry.keywords || []),
     ...(entry.parameterHints || entry.parameter_hints || []),
     ...(entry.modelingNotes || entry.modeling_notes || []),
+    ...(entry.failureModes || entry.failure_modes || []),
+    ...(entry.validationRules || entry.validation_rules || []),
+    entry.featurePattern || entry.feature_pattern || "",
   ]);
 }
 
@@ -143,15 +152,19 @@ function scoreMemory(promptKeywords, shapeHint, row) {
 
 function mapLocalKnowledge(entry) {
   return {
-    memory_type: "local_seed",
+    memory_type: entry.memoryType || entry.memory_type || "local_seed",
     title: entry.title,
     summary: entry.summary,
+    shape_type: entry.shapeType || entry.shape_type || null,
     tags: entry.tags || [],
     keywords: entry.keywords || [],
-    parameter_hints: entry.parameterHints || [],
-    modeling_notes: entry.modelingNotes || [],
-    example_prompt: entry.example_prompt || null,
-    quality_score: 0.65,
+    parameter_hints: entry.parameterHints || entry.parameter_hints || [],
+    modeling_notes: entry.modelingNotes || entry.modeling_notes || [],
+    feature_pattern: entry.featurePattern || entry.feature_pattern || "",
+    failure_modes: entry.failureModes || entry.failure_modes || [],
+    validation_rules: entry.validationRules || entry.validation_rules || [],
+    example_prompt: entry.examplePrompt || entry.example_prompt || null,
+    quality_score: Number(entry.qualityScore ?? entry.quality_score ?? 0.65),
   };
 }
 
@@ -426,9 +439,32 @@ function excerptAroundTerms(text, terms, maxChars = 1400) {
   return normalized.slice(start, start + maxChars).trim();
 }
 
-export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }) {
+export function createLearningService({
+  supabase,
+  cadKnowledgePath,
+  cadKnowledgeCsvPath,
+  cadPruningPath,
+  fsDocsPath,
+}) {
   const warned = new Set();
-  const localCadKnowledge = JSON.parse(readFileSync(cadKnowledgePath, "utf8"));
+  const localCadKnowledge = dedupeSeedEntries([
+    ...loadSeedEntriesFromJson(cadKnowledgePath, {
+      memoryType: "local_seed",
+      qualityScore: 0.65,
+      sourceTable: "cad_knowledge",
+    }),
+    ...loadSeedEntriesFromCsv(cadKnowledgeCsvPath, {
+      memoryType: "local_seed",
+      qualityScore: 0.72,
+      sourceTable: "cad_knowledge",
+    }),
+    ...loadSeedEntriesFromCsv(cadPruningPath, {
+      memoryType: "local_pruning_rule",
+      qualityScore: 0.82,
+      sourceTable: "pruning_table",
+      memoryOnly: true,
+    }),
+  ]);
   const featureScriptDocIndex = buildFeatureScriptDocIndex(fsDocsPath);
   let adaptiveStateCache = null;
   let adaptiveStateSource = "default";
@@ -509,12 +545,22 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
     });
   }
 
-  function getLocalKnowledge(prompt, limit = 4) {
+  function getLocalKnowledge(prompt, shapeHint, limit = 4) {
     if (!prompt) return [];
 
     return [...localCadKnowledge]
-      .map(entry => ({ ...mapLocalKnowledge(entry), _score: scoreKnowledgeEntry(prompt, entry) }))
-      .filter(entry => entry._score > 0)
+      .map(entry => {
+        const mapped = mapLocalKnowledge(entry);
+        const textScore = scoreKnowledgeEntry(prompt, entry);
+        const shapeBoost = shapeHint && mapped.shape_type === shapeHint ? 3 : 0;
+        const qualityBoost = Number(mapped.quality_score || 0.65) * 2;
+        return {
+          ...mapped,
+          _textScore: textScore,
+          _score: textScore + shapeBoost + qualityBoost,
+        };
+      })
+      .filter(entry => entry._textScore > 0 || (shapeHint && entry.shape_type === shapeHint))
       .sort((a, b) => b._score - a._score)
       .slice(0, limit);
   }
@@ -711,7 +757,7 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
     const rankedCadMemory = rerankCandidates(adaptiveState, cadMemory, rankContext, "memory", 8);
     const rankedCadKnowledge = rerankCandidates(adaptiveState, cadKnowledge, rankContext, "knowledge", 8);
     const rankedShapeKnowledge = rerankCandidates(adaptiveState, shapeKnowledge, rankContext, "shape", 4);
-    const localKnowledge = rerankCandidates(adaptiveState, getLocalKnowledge(prompt), rankContext, "local", 4);
+    const localKnowledge = rerankCandidates(adaptiveState, getLocalKnowledge(prompt, shapeHint), rankContext, "local", 6);
     const featureScriptDocs = rerankCandidates(adaptiveState, getFeatureScriptDocs(prompt, keywords, shapeHint), rankContext, "docs", 4);
     const memoryMatches = rankedCadMemory
       .filter(memory => memory.id)
@@ -731,6 +777,9 @@ export function createLearningService({ supabase, cadKnowledgePath, fsDocsPath }
     if (shapeHint) notes.push(`Fast shape hint from prompt: ${shapeHint}.`);
     notes.push(`Adaptive neural reranker: ${adaptiveState.hiddenLayers.length} hidden layer(s), ${adaptiveState.trainedSteps || 0} feedback training step(s), source=${adaptiveStateSource}.`);
     if (rankedCadMemory.length) notes.push(`Using ${rankedCadMemory.length} scored CAD memory record(s). Prefer higher-scored active memories over old raw examples.`);
+    if (localKnowledge.some(entry => String(entry.memory_type || "").includes("pruning"))) {
+      notes.push("Using local pruning rules to keep generation on editable, compile-safe modeling paths.");
+    }
     if (featureScriptDocs.length) notes.push(`Using ${featureScriptDocs.length} local FeatureScript documentation snippet(s) from old_and_docs/docs/FS doc.`);
     if (rankedExamples.length) {
       const shapes = [...new Set(rankedExamples.map(example => example.shape_type).filter(Boolean))];

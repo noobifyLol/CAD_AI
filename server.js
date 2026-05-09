@@ -18,6 +18,8 @@ const supabase = supabaseUrl && supabaseKey
 const learning = createLearningService({
   supabase,
   cadKnowledgePath: new URL("./data/cadKnowledge.json", import.meta.url),
+  cadKnowledgeCsvPath: new URL("./data/cadKnowledge.csv", import.meta.url),
+  cadPruningPath: new URL("./data/cadPruningTable.csv", import.meta.url),
   fsDocsPath: new URL("./old_and_docs/docs/FS doc/", import.meta.url),
 });
 

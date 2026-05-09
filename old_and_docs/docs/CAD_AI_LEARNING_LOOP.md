@@ -125,6 +125,17 @@ You can also open the app, go to `Guide`, and click `Check Database`.
 2. Generate one simple known part, such as `box 2 x 2 x 1 inch`, then verify a row appears in `generations` and the popup reports local docs used.
 3. Click `Good Result`; verify `cad_feedback_events` gets a row and `cad_memory` has quality scores.
 4. Paste an Onshape compile error into Debug; verify `debug_sessions` gets a row and the original generation receives negative feedback.
-5. Add more seed memories for advanced categories: robot mech assemblies, scissors, frames, vacuum cleaner bodies, computer/speaker housings, rocks/freeform shapes, and artwork reliefs.
-6. Expand the validated template set. `ROBOT_MECH` now exists for blocky cuboid mechs; the next best templates are ball/sphere, football ellipsoid, picture frame, hinged scissors, lined-paper relief, tabletop vacuum shell, computer tower, and speaker enclosure.
-7. Add a FeatureScript validation step before returning code. The best next implementation is a static checker that rejects known invalid APIs, duplicate exports, missing `skSolve`, invalid `isLength`, bad query regions, and unsafe fillet radii.
+5. Seed the new advanced knowledge pack: `data/cadKnowledge.csv` now adds gear standards, pulley sizing, bearing envelopes, structural tube guidance, frame profiles, scissor simplification, enclosure shells, and freeform-relief guidance. `data/cadPruningTable.csv` adds routing rules that keep prompts on safer editable paths.
+6. Import only the new pruning rules when needed with `npm run import:cad-pruning`, or import the knowledge CSV alone with `npm run import:cad-knowledge`.
+7. Expand the validated template set. `ROBOT_MECH` now exists for blocky cuboid mechs; the next best templates are picture frame, hinged scissors, lined-paper relief, tabletop vacuum shell, computer tower, speaker enclosure, and a dedicated timing pulley.
+8. Add a FeatureScript validation step before returning code. The best next implementation is a static checker that rejects known invalid APIs, duplicate exports, missing `skSolve`, invalid `isLength`, bad query regions, and unsafe fillet radii.
+
+## Seed Pack Update
+
+- `seed:knowledge` now merges `data/cadKnowledge.json`, `data/cadKnowledge.csv`, and `data/cadPruningTable.csv`.
+- Local retrieval also reads the new CSV files even before Supabase is fully seeded, so the app can use those rules as prompt context right away.
+- The validated spur gear template was repaired to create its sketch correctly and keep tooth count, pitch radius, bore radius, face width, and pressure angle user-editable.
+
+See also:
+
+- `old_and_docs/docs/CAD_SEED_DATA_SOURCES.md`
