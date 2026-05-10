@@ -687,7 +687,7 @@ function summarizeFeatureScript(code, maxLines = 12) {
       .join(" ")
   );
 }
-
+// Thinking 
 function buildLearningContextText(learningContext = {}) {
   const lines = [];
   const examples = Array.isArray(learningContext.examples) ? learningContext.examples : [];
@@ -797,6 +797,86 @@ function normalizeDims(dims) {
   return normalized;
 }
 
+/**
+ * Geometric Reasoning — linear algebra + engineering heuristics on extracted dims.
+ * The output is added to DATABASE CONTEXT so the model understands spatial
+ * properties without having to guess from raw numbers alone.
+ */
+function performGeometricReasoning(dims) {
+  const hints = [];
+  const w = dims.widthInches  || 2;
+  const h = dims.heightInches || 2;
+  const d = dims.depthInches  || 0.25;
+  const r = dims.radiusInches || 0;
+
+  // ── 1. Bounding-box diagonal (3D Euclidean magnitude) ──────────────────────
+  const diag = Math.sqrt(w * w + h * h + d * d);
+  hints.push(`bbox_diag=${diag.toFixed(3)}in`);
+
+  // ── 2. Dominant axis + aspect classification ──────────────────────────────
+  const maxDim = Math.max(w, h, d);
+  const minDim = Math.min(w, h, d);
+  const slenderness = maxDim / Math.max(minDim, 0.001);
+  const profile =
+    slenderness > 8  ? "highly_slender_rod" :
+    slenderness > 4  ? "slender_extrusion" :
+    slenderness > 2  ? "moderate_extrusion" :
+    d < 0.5 && slenderness > 1.5 ? "thin_plate" :
+                       "equi_block";
+  hints.push(`profile=${profile} slenderness=${slenderness.toFixed(2)}`);
+
+  // ── 3. Volume and surface-area estimates for wall-thickness guidance ───────
+  let volume = w * h * d;
+  let surfaceArea = 2 * (w * h + w * d + h * d);
+
+  if (["CYLINDER", "BUSHING", "WASHER", "HITCH_PEG"].includes(dims.shape) && r > 0) {
+    volume = Math.PI * r * r * d;
+    surfaceArea = 2 * Math.PI * r * (r + d);
+  }
+  const compactness = volume / Math.max(surfaceArea, 0.001); // lower = thinner walls
+  hints.push(`vol=${volume.toFixed(3)}in³ sa=${surfaceArea.toFixed(3)}in² compact=${compactness.toFixed(3)}`);
+
+  // ── 4. Topological genus (hole count → number of through-loops) ───────────
+  const genus = dims.numHoles > 0 ? dims.numHoles : (dims.holeRadiusInches > 0 ? 1 : 0);
+  if (genus > 0) hints.push(`genus=${genus}_through_holes`);
+
+  // ── 5. Wall-thickness safety ratio ────────────────────────────────────────
+  const wt = dims.wallThicknessInches || 0;
+  if (wt > 0) {
+    const minSpan = Math.min(w, h);
+    const wtRatio = wt / Math.max(minSpan, 0.001);
+    const wtClass =
+      wtRatio < 0.05  ? "dangerously_thin" :
+      wtRatio < 0.10  ? "thin_walled" :
+      wtRatio < 0.25  ? "standard_shell" :
+                        "solid_section";
+    hints.push(`wall_ratio=${wtRatio.toFixed(3)} class=${wtClass}`);
+  }
+
+  // ── 6. Gear-specific derived geometry ─────────────────────────────────────
+  if (dims.shape === "GEAR_SPUR" && dims.numTeeth > 0 && r > 0) {
+    const m = (2 * r) / dims.numTeeth;            // module in inches
+    const pa = (dims.pressureAngleDegrees || 20) * Math.PI / 180;
+    const ra = r + m;
+    const rd = Math.max(r - 1.35 * m, r * 0.5);
+    const rb = r * Math.cos(pa);
+    const faceWidth = dims.depthInches || 0.5;
+    const contactRatio = Math.sqrt(ra * ra - rb * rb) / (r * Math.sin(pa));
+    hints.push(`gear: module=${(m * 25.4).toFixed(2)}mm tipR=${ra.toFixed(3)}in rootR=${rd.toFixed(3)}in baseR=${rb.toFixed(3)}in contact_ratio~${contactRatio.toFixed(2)} faceW=${faceWidth}in`);
+  }
+
+  // ── 7. Structural guidance tag ────────────────────────────────────────────
+  const structural =
+    profile === "thin_plate"     ? "use_plate_or_sheet_template" :
+    profile.includes("slender")  ? "axial_load_dominant_consider_opCylinder_or_opExtrude" :
+    genus > 0                    ? "sketch_holes_before_extrude_not_opBoolean_subtract" :
+    wt > 0 && wt < 0.1           ? "keep_wall_thickness_editable_parameter" :
+                                   "standard_solid_body";
+  hints.push(`structural_hint=${structural}`);
+
+  return hints.join(" | ");
+}
+
 function promptLooksComplex(prompt) {
   return /assembly|hinge|joint|cam|freeform|organic|thread|helical|spring|loft|spline|enclosure|mount|slot|rib|web|pocket|boss|complex|custom|motor|gearbox|bearing block|filleted/i.test(prompt || "");
 }
@@ -817,7 +897,7 @@ function shouldUseTemplate(prompt, dims) {
   // Templates are pre-validated and safe; AI will add complexity via parameters.
   return true;
 }
-
+// Clean and trim the featureScript to prevent errors 
 function sanitizeFeatureScript(code) {
   let cleaned = String(code || "")
     .replace(/^```[\w-]*\s*/gm, "")
@@ -1091,6 +1171,10 @@ export async function generateFeatureScript(prompt, options = {}) {
 
   const dims = await extractDims(prompt, options.learningContext);
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
+
+  // Add geometric reasoning to the learning context before generation
+  const mathAnalysis = performGeometricReasoning(dims);
+  options.learningContext.notes.push(`Geometric Reasoning: ${mathAnalysis}`);
 
   const generationMode = shouldUseTemplate(prompt, dims) ? "template" : "custom";
   let code;

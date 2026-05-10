@@ -8,10 +8,13 @@ function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, n));
 }
 
-function sigmoid(x) {
-  if (x < -40) return 0;
-  if (x > 40) return 1;
-  return 1 / (1 + Math.exp(-x));
+/** 
+ * Advanced Math: LeakyReLU activation function
+ * Hidden layers use this. Final output layer uses Sigmoid for a clean 0-1 score.
+ * Backprop uses leakyReLUDeriv for hidden layers and sigmoidDeriv for output.
+ */
+function leakyReLU(x) {
+  return x > 0 ? x : x * 0.01;
 }
 
 function seededWeight(layerIndex, rowIndex, colIndex) {
@@ -155,7 +158,7 @@ export function forwardAdaptiveNetwork(rawState, input) {
   for (const layer of state.layers) {
     activation = layer.weights.map((weights, row) => {
       const z = weights.reduce((sum, weight, col) => sum + weight * activation[col], layer.biases[row] || 0);
-      return sigmoid(z);
+      return leakyReLU(z);
     });
   }
 
@@ -186,38 +189,59 @@ function cloneState(rawState) {
   return JSON.parse(JSON.stringify(state));
 }
 
+// LeakyReLU derivative — must match the activation used in forwardAdaptiveNetwork
+function leakyReLUDeriv(z) {
+  return z > 0 ? 1 : 0.01;
+}
+
+// Sigmoid is kept for the FINAL output neuron only (squashes output to 0–1)
+function sigmoid(x) {
+  if (x < -40) return 0;
+  if (x > 40) return 1;
+  return 1 / (1 + Math.exp(-x));
+}
+
+function sigmoidDeriv(activated) {
+  return activated * (1 - activated);
+}
+
 function forwardWithTrace(state, input) {
   const activations = [input.slice(0, INPUT_SIZE).map(value => clamp(value))];
   const zs = [];
 
-  for (const layer of state.layers) {
+  const lastLayerIndex = state.layers.length - 1;
+  for (let li = 0; li < state.layers.length; li++) {
+    const layer = state.layers[li];
     const prev = activations[activations.length - 1];
     const z = layer.weights.map((weights, row) =>
       weights.reduce((sum, weight, col) => sum + weight * prev[col], layer.biases[row] || 0)
     );
     zs.push(z);
-    activations.push(z.map(sigmoid));
+    // Hidden layers use LeakyReLU; output layer uses Sigmoid for bounded 0-1 score
+    const activate = li === lastLayerIndex ? sigmoid : leakyReLU;
+    activations.push(z.map(activate));
   }
 
   return { activations, zs };
 }
 
 function trainOne(state, featureVector, target, strength) {
-  const { activations } = forwardWithTrace(state, featureVector);
+  const { activations, zs } = forwardWithTrace(state, featureVector);
   const deltas = new Array(state.layers.length);
   const last = state.layers.length - 1;
   const output = activations[activations.length - 1][0];
 
-  deltas[last] = [(output - target) * output * (1 - output) * strength];
+  // Output layer: sigmoid derivative (d/dz sigmoid(z) = sigmoid(z)*(1-sigmoid(z)))
+  deltas[last] = [(output - target) * sigmoidDeriv(output) * strength];
 
   for (let layerIndex = last - 1; layerIndex >= 0; layerIndex--) {
     const nextLayer = state.layers[layerIndex + 1];
-    const currentActivation = activations[layerIndex + 1];
-    deltas[layerIndex] = currentActivation.map((activation, row) => {
+    deltas[layerIndex] = zs[layerIndex].map((z, row) => {
       const downstream = nextLayer.weights.reduce((sum, weights, nextRow) => {
         return sum + weights[row] * deltas[layerIndex + 1][nextRow];
       }, 0);
-      return downstream * activation * (1 - activation);
+      // Hidden layers: LeakyReLU derivative applied to pre-activation z
+      return downstream * leakyReLUDeriv(z);
     });
   }
 

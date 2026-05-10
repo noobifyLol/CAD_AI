@@ -80,7 +80,7 @@ function clampQualityScore(value, fallback = 0.55) {
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(0, Math.min(1, parsed));
 }
-
+// These are the template key words that the AI looks for
 function inferShapeFromPrompt(prompt) {
   const text = normalizeText(prompt).toLowerCase();
   const shapeHints = [
@@ -343,17 +343,45 @@ function expandedDocKeywords(prompt, keywords, shapeHint) {
   ]);
 
   if (shapeHint) expanded.add(shapeHint.toLowerCase());
-  if (/\b(round|cylinder|shaft|rod|pin|bore|hole|circle|washer|bushing|flange)\b/.test(text)) {
-    ["opCylinder", "skCircle", "evAxis", "qCreatedBy"].forEach(term => expanded.add(term.toLowerCase()));
+
+  // ── Circular / cylindrical geometry ──────────────────────────────────────
+  if (/\b(round|cylinder|shaft|rod|pin|bore|hole|circle|washer|bushing|flange|ring|annular)\b/.test(text)) {
+    ["opCylinder", "skCircle", "evAxis", "qCreatedBy", "opRevolve", "evLength"].forEach(t => expanded.add(t.toLowerCase()));
   }
-  if (/\b(curve|curved|organic|freeform|smooth|handle|bowl|scoop|spoon|loft|sweep|spline)\b/.test(text)) {
-    ["opLoft", "opSweep", "skFitSpline", "opRevolve", "opFillet", "opThicken"].forEach(term => expanded.add(term.toLowerCase()));
+
+  // ── Curved / organic / swept forms ────────────────────────────────────────
+  if (/\b(curve|curved|organic|freeform|smooth|handle|bowl|scoop|spoon|loft|sweep|spline|blend|fillet|chamfer|round)\b/.test(text)) {
+    ["opLoft", "opSweep", "skFitSpline", "opRevolve", "opFillet", "opChamfer", "opThicken", "wireBody"].forEach(t => expanded.add(t.toLowerCase()));
   }
-  if (/\b(gear|teeth|tooth|pattern|array|repeat)\b/.test(text)) {
-    ["for", "opPattern", "transform", "cos", "sin"].forEach(term => expanded.add(term.toLowerCase()));
+
+  // ── Gear / tooth / involute ───────────────────────────────────────────────
+  if (/\b(gear|teeth|tooth|pinion|involute|diametral|module|pressure angle|spur|helical)\b/.test(text)) {
+    ["cos", "sin", "sqrt", "atan2", "for", "skFitSpline", "skArc", "opPattern", "transform", "PI"].forEach(t => expanded.add(t.toLowerCase()));
   }
-  if (/\b(debug|error|compile|enum|type|predicate|operator|syntax)\b/.test(text)) {
-    ["syntax", "semantics", "types", "annotations", "predicate"].forEach(term => expanded.add(term));
+
+  // ── Pattern / array / repeat ──────────────────────────────────────────────
+  if (/\b(pattern|array|repeat|circular pattern|linear pattern|holes|bolts|instances)\b/.test(text)) {
+    ["opPattern", "transform", "cos", "sin", "for", "qCreatedBy"].forEach(t => expanded.add(t.toLowerCase()));
+  }
+
+  // ── Boolean operations / subtract / cut / pocket ─────────────────────────
+  if (/\b(pocket|boss|subtract|cut|remove|hollow|shell|cavity|slot|groove|rib|gusset)\b/.test(text)) {
+    ["opBoolean", "opShell", "BooleanOperationType", "SUBTRACTION", "UNION", "opRectangularPattern"].forEach(t => expanded.add(t.toLowerCase()));
+  }
+
+  // ── FRC robot / structural ────────────────────────────────────────────────
+  if (/\b(frc|robot|drivetrain|frame|tube|maxtube|channel|hex|versaframe|bearing|mount|bracket|standoff)\b/.test(text)) {
+    ["opExtrude", "opBoolean", "skRectangle", "skCircle", "isLength", "opPattern"].forEach(t => expanded.add(t.toLowerCase()));
+  }
+
+  // ── Sheet metal / plate / thin ────────────────────────────────────────────
+  if (/\b(plate|sheet|panel|thin|flat|card|tile|gusset|web|flange)\b/.test(text)) {
+    ["opExtrude", "skRectangle", "skLineSegment", "BLIND", "qSketchRegion"].forEach(t => expanded.add(t.toLowerCase()));
+  }
+
+  // ── Debug / compile errors ────────────────────────────────────────────────
+  if (/\b(debug|error|compile|enum|type|predicate|operator|syntax|resolve|sketch)\b/.test(text)) {
+    ["syntax", "semantics", "types", "annotations", "predicate", "skSolve", "qSketchRegion"].forEach(t => expanded.add(t));
   }
 
   return [...expanded].filter(Boolean);
@@ -384,6 +412,12 @@ function scoreDocChunk(doc, docKeywords) {
     if (haystack.includes(needle)) score += operationTerms.has(needle) ? 5 : 1;
     return score;
   }, 0);
+
+  // Advanced Math: Statistics-based scoring for "Engineering Quality"
+  // Boost snippets that involve vector math or transformations
+  if (/\b(vector|transform|matrix|normalize|determinant)\b/i.test(doc.text)) {
+    return keywordScore + 10; 
+  }
 
   const source = doc.source.toLowerCase();
   const sourceBoost = source === "fs doc.md"
