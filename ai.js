@@ -500,21 +500,22 @@ function tGear(d) {
     body: `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
 
-        function invPoint(t is number, rb is number) returns vector
+        // Helper lambdas — const assignments are legal inside a feature body (FS spec: lambdas are values)
+        const invPoint = function(t is number, rb is number)
         {
             return vector((rb * (cos(t) + t * sin(t))) * inch,
                           (rb * (sin(t) - t * cos(t))) * inch);
-        }
+        };
 
-        function rotPoint(p is vector, a is number) returns vector
+        const rotPoint = function(p is vector, a is number)
         {
             return vector(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));
-        }
+        };
 
-        function mirrorPoint(p is vector) returns vector
+        const mirrorPoint = function(p is vector)
         {
             return vector(p.x, -p.y);
-        }
+        };
 
         const N = definition.numTeeth;
         const rp = definition.radius / inch;
@@ -897,7 +898,15 @@ function shouldUseTemplate(prompt, dims) {
   // Templates are pre-validated and safe; AI will add complexity via parameters.
   return true;
 }
-// Clean and trim the featureScript to prevent errors 
+// Clean and trim the featureScript to prevent errors
+//
+// FeatureScript spec (toplevel.md): named typed functions like
+//   function foo(x is number) returns vector { ... }
+// are ONLY legal at module top-level. Inside a feature body (which is a lambda
+// passed to defineFeature) only const lambda assignments are allowed:
+//   const foo = function(x is number) { ... };
+// This function detects rogue named functions inside the feature body and
+// converts them to const lambda form so Onshape can parse the file.
 function sanitizeFeatureScript(code) {
   let cleaned = String(code || "")
     .replace(/^```[\w-]*\s*/gm, "")
@@ -910,14 +919,78 @@ function sanitizeFeatureScript(code) {
     cleaned = cleaned.slice(fsStart);
   }
 
+  // ── Basic token repairs ───────────────────────────────────────────────────
   cleaned = cleaned
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
-    .replace(/^\s*return\s+[^;]*;\s*$/gm, "")
+    .replace(/^\s*return\s+[^;{][^;]*;\s*$/gm, "")          // remove value-returning returns in bodies
     .replace(/\bskSpline\s*\(/g, "skFitSpline(")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
-    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);');
+    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);')
+    // Remove "* inch" multiplied onto a parameter already declared with isLength —
+    // those params already carry Length type; multiplying by inch doubles the units.
+    .replace(/\b(definition\.\w+)\s*\*\s*inch\b/g, '$1');
 
+  // ── Structural fix: named typed functions inside feature body → const lambdas ──
+  // Matches: function name(args) returns type { ... }
+  //   or:    function name(args) { ... }
+  // when they appear after the opening brace of the feature body (i.e. after
+  // the second { in defineFeature(function(...) precondition { } { <HERE> })).
+  // Strategy: find the feature body start, then within that region rewrite
+  // any top-level named function declarations to const lambda form.
+  const featureBodyStart = cleaned.search(/\bdefineFeature\s*\(/);
+  if (featureBodyStart !== -1) {
+    // Find the body block — it's the second { block after the precondition block
+    let depth = 0;
+    let inPrecondition = false;
+    let preconditionDone = false;
+    let bodyOpen = -1;
+    let i = featureBodyStart;
+
+    while (i < cleaned.length) {
+      const ch = cleaned[i];
+      if (cleaned.slice(i, i + 12) === "precondition") {
+        inPrecondition = true;
+      }
+      if (ch === '{') {
+        depth++;
+        if (inPrecondition && depth === 2) { /* entering precondition block */ }
+        else if (inPrecondition && depth === 1) { /* shouldn't happen */ }
+        else if (!inPrecondition && !preconditionDone && depth === 2) {
+          // This is the feature body opening brace
+          bodyOpen = i;
+          break;
+        }
+      }
+      if (ch === '}') {
+        depth--;
+        if (inPrecondition && depth === 1) {
+          inPrecondition = false;
+          preconditionDone = true;
+        }
+      }
+      i++;
+    }
+
+    if (bodyOpen !== -1) {
+      // Within the body region, convert named function declarations to const lambdas.
+      // Pattern: function <name>(<args>) returns <type> { or function <name>(<args>) {
+      const bodyRegion = cleaned.slice(bodyOpen);
+      const fixedBody = bodyRegion.replace(
+        /\bfunction\s+([a-zA-Z_]\w*)\s*(\([^)]*\))\s*(?:returns\s+\w+\s*)?\{/g,
+        (match, name, args) => `const ${name} = function${args}\n        {`
+      );
+      // Also fix the closing — named functions end with just `}` but lambdas need `};`
+      // We do a targeted fix: replace `}\n` that closes a `const X = function` with `};\n`
+      const withSemicolons = fixedBody.replace(
+        /(const\s+\w+\s*=\s*function[^{]*\{[\s\S]*?)\n(\s*\})\n/g,
+        (match, body, closing) => `${body}\n${closing};\n`
+      );
+      cleaned = cleaned.slice(0, bodyOpen) + withSemicolons;
+    }
+  }
+
+  // ── Duplicate feature annotation deduplication ────────────────────────────
   const featureAnnotations = [...cleaned.matchAll(/annotation\s*\{\s*"Feature Type Name"\s*:/g)];
   if (featureAnnotations.length > 1) {
     const lastIndex = featureAnnotations[featureAnnotations.length - 1].index;
@@ -1118,13 +1191,25 @@ Hard rules from the Onshape FeatureScript docs:
 - Never write "definition.someParam is Length". That is invalid FeatureScript. Use isLength(definition.someParam, LENGTH_BOUNDS); or a typed custom bound spec.
 - Prefer LENGTH_BOUNDS for all length parameters and set the initial value through annotation { "Default" : "1 * inch" }.
 - If the prompt does not provide every dimension, choose sensible defaults and expose them as parameters so the user can change them later.
-- Use newSketchOnPlane(...) or newSketch(..., { "sketchPlane" : ... }) for sketches and call skSolve(...) before opExtrude/opRevolve.
+- Use newSketchOnPlane(...) or newSketch(..., { "sketchPlane" : ... }) for sketches and ALWAYS call skSolve(...) after all sketch entities and before opExtrude/opRevolve. Omitting skSolve is a fatal error — sketch geometry will not generate.
 - Use operation definition maps such as opExtrude(context, id + "extrude1", { ... }).
 - Do not invent APIs or map fields. Do not use startAngle/endAngle on opCylinder.
-- When a definition parameter already comes from isLength(...), use definition.param directly in the body. Do not multiply it by * inch again.
+- When a definition parameter already comes from isLength(...), use definition.param directly in the body. Do not multiply it by * inch again — that doubles the units and is wrong.
 - Avoid duplicate export const blocks, markdown fences, comments about uncertainty, or placeholder TODO code.
 - Prefer robust, simple geometry over flashy but brittle code.
 - Use the supplied FeatureScript documentation snippets as the source of truth for syntax and operation map fields.
+
+CRITICAL — Function declarations inside the feature body:
+  Named typed top-level functions (e.g. "function foo(x is number) returns vector { }") are
+  ONLY legal at MODULE TOP LEVEL, OUTSIDE the defineFeature(...) call.
+  Inside a feature body (which is a lambda), you MUST use const lambda assignments instead:
+    WRONG (causes parse errors):
+      function invPoint(t is number, rb is number) returns vector { ... }
+    RIGHT (legal inside a feature body):
+      const invPoint = function(t is number, rb is number) { ... };
+  If you need helper functions for geometry (e.g. involute point math), declare them as
+  const lambda assignments at the TOP of the feature body, before any other statements.
+  Alternatively, declare them as top-level functions BEFORE the annotation block.
 
 Goal:
 - Match the user's requested shape as closely as possible.
@@ -1267,6 +1352,16 @@ skFitSpline: valid sketch spline API
   skFitSpline(sketch, "spline1", { "points": [...] })
   "skSpline" is not a valid sketch API name.
 
+FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse errors):
+  Named typed top-level functions are ONLY legal at MODULE TOP LEVEL.
+  Inside a feature body (the lambda passed to defineFeature) they are ILLEGAL.
+  WRONG — causes parse errors:
+    function invPoint(t is number, rb is number) returns vector { ... }
+  RIGHT — const lambda is legal inside a feature body:
+    const invPoint = function(t is number, rb is number) { ... };
+  If the broken code has named functions inside the feature body, move them to module
+  top level (before the annotation block) OR convert them to const lambda form.
+
 FIX RULES:
 1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
 2. startAngle / endAngle on opCylinder → remove those lines entirely
@@ -1276,16 +1371,59 @@ FIX RULES:
 6. skPolygon → skRegularPolygon
 7. skSpline → skFitSpline
 8. Multiple export const → keep only the last block
-9. return statement in body (other than bare "return;") → delete`;
+9. return statement with a value in feature body → delete it (features return undefined)
+10. Named typed function inside feature body (function foo(...) returns T { }) →
+    convert to const lambda: const foo = function(...) { }; at the top of the body,
+    OR move to module top level before the annotation block
+11. skSolve missing after sketch entities → add skSolve(sketch1); before opExtrude/opRevolve`;
 
 function hasFatalFeatureScriptPatterns(code) {
   const text = String(code || "");
-  return [
-    /\bdefinition\.\w+\s+is\s+Length\s*;/,
-    /isLength\(\s*definition\.\w+\s*,\s*\{/,
-    /"startAngle"\s*:/,
-    /"endAngle"\s*:/,
-  ].some(pattern => pattern.test(text));
+
+  // Each entry is [regex, description] — only the regex is used for the boolean check,
+  // the description aids future debugging.
+  const fatalPatterns = [
+    // FeatureScript type errors
+    [/\bdefinition\.\w+\s+is\s+Length\s*;/, "definition.x is Length (invalid type specifier)"],
+    [/isLength\(\s*definition\.\w+\s*,\s*\{/, "isLength with inline bounds map (use LENGTH_BOUNDS)"],
+
+    // Invalid opCylinder params (these map keys don't exist on opCylinder)
+    [/"startAngle"\s*:/, "startAngle on opCylinder (invalid key)"],
+    [/"endAngle"\s*:/, "endAngle on opCylinder (invalid key)"],
+
+    // Named top-level function declared INSIDE the feature body.
+    // FS spec (toplevel.md): only lambdas (const x = function(...){}) are valid inside bodies.
+    // A named typed function like: function foo(x is number) returns vector { ... }
+    // is only legal at module top level. Detecting this inside a feature body block.
+    // Heuristic: if "function" keyword is followed by an identifier and typed args inside
+    // the feature body (i.e. after defineFeature), flag it.
+    [/defineFeature[\s\S]*?\bfunction\s+[a-zA-Z_]\w*\s*\(/, "named function declaration inside feature body"],
+
+    // A sketch is created but skSolve is never called — geometry won't generate.
+    // Only flag when there's a sketch creation but no skSolve anywhere in the code.
+    // (We check as a pair: sketch present + skSolve absent = fatal)
+    // Handled separately below as a compound check.
+  ];
+
+  if (fatalPatterns.slice(0, 4).some(([pattern]) => pattern.test(text))) return true;
+
+  // Compound check: sketch created but skSolve never called
+  const hasSketch = /\bnewSketchOnPlane\s*\(|\bnewSketch\s*\(/.test(text);
+  const hasSolve  = /\bskSolve\s*\(/.test(text);
+  if (hasSketch && !hasSolve) return true;
+
+  // Nested named function check (more targeted): look for 'function <id>(' that
+  // appears AFTER the feature body opening brace and before the file ends.
+  // The defineFeature body is a lambda, so named function decls inside it are illegal.
+  const bodyMatch = text.match(/defineFeature\s*\(\s*function\s*\([^)]*\)[^{]*\{[^{]*\{/);
+  if (bodyMatch) {
+    const bodyStart = text.indexOf(bodyMatch[0]) + bodyMatch[0].length;
+    const bodyText = text.slice(bodyStart);
+    // Match: function <name>( — the presence of a named function declaration in body
+    if (/\bfunction\s+[a-zA-Z_]\w*\s*\(/.test(bodyText)) return true;
+  }
+
+  return false;
 }
 
 export async function debugFeatureScript(code, errors, options = {}) {

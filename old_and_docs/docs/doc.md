@@ -1096,3 +1096,29 @@ You should be able to redeploy to Render now.
 
 **5/9/26**
 After the APUSH exam, I successfully connected the backend and frontend to a database that the AI can access and learn from
+**5/10/26**
+FeatureScript Documentation Files — What They Reveal About Missing Rules
+Reading all the FS docs (toplevel.md, syntaxand_semantics.md, types_and_tags.md, etc.) against the current codebase reveals specific gaps between what the docs say and what the AI system currently knows/enforces:
+The Nested Function Problem (confirmed)
+toplevel.md is explicit: "Functions may be declared inside other functions or initializers of top-level constants... Unlike top-level functions, lambdas are values." The key word is lambdas — anonymous functions with function keyword or => syntax assigned to variables. Named, typed top-level functions like function invPoint(t is number, rb is number) returns vector { } are only valid at module top-level. The tGear() template puts these inside the feature body, which is a lambda passed to defineFeature — illegal.
+Lambda syntax IS valid inside feature bodies
+What IS legal inside a feature body: const invPoint = function(t, rb) { ... }; or const invPoint = (t, rb) => ...;. The fix is to either hoist to top-level OR convert to const lambda declarations inside the body.
+precondition rules the AI keeps breaking
+UI.md is very specific: annotation { "Name": ..., "Default": "1 * inch" } must appear before the isLength(...) call. The AI sometimes swaps the order or writes definition.param is Length which UI.md confirms is not valid — the correct form is isLength(definition.param, LENGTH_BOUNDS).
+isInteger behavior
+UI.md says isInteger is a valid quantity predicate. The current preconditionInteger() function in AI.js correctly uses isInteger(definition.numTeeth) — that part is fine.
+skSolve is required
+modeling.md explicitly states: "The skSolve call is still necessary to generate sketch geometry." The current templates always call skSolve — good. But when the AI generates custom code it sometimes omits it. The CUSTOM_FEATURE_SYSTEM and DEBUG_SYSTEM prompts mention it but don't flag it as a fatal error.
+Missing from hasFatalFeatureScriptPatterns()
+Cross-referencing the docs, these patterns should also be detected as fatal:
+
+Named typed functions inside a feature body (the gear bug)
+Missing skSolve before opExtrude
+return statements with values inside feature bodies (the docs say features return undefined)
+* inch applied to a param already declared with isLength
+
+imports.md — Unused capability
+The docs show that Part Studio imports, CSV/JSON data imports, and reference parameters are all possible. The current system doesn't use any of these for more advanced generation strategies, but that's fine for now.
+
+Summary of Everything Across Both Sessions
+AreaStatusKey IssueGear template (tGear)BrokenHelper functions inside feature body — illegal FShasFatalFeatureScriptPatterns()IncompleteDoesn't catch nested named functions, missing skSolveCUSTOM_FEATURE_SYSTEM promptMissing ruleDoesn't forbid nested named functionsDEBUG_SYSTEM promptMissing ruleSame gapsanitizeFeatureScript()IncompleteCan't structurally fix nested functionsserver.js import of ai.jsBugCase mismatch — "./ai.js" vs actual AI.jsAll other templates (BOX, CYLINDER, etc.)GoodCorrectly structuredadaptiveNetwork.jsGoodSolid MLP with correct backproplearning.jsGoodRobust with graceful fallbacksserver.js routesGoodClean and completescript.jsGoodSolid frontend

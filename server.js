@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
-import { analyzeImage, analyzeImages, analyzeLearningOutcome, debugFeatureScript, generateFeatureScript } from "./ai.js";
+import { analyzeImage, analyzeImages, analyzeLearningOutcome, debugFeatureScript, generateFeatureScript } from "./AI.js";
 import { createLearningService } from "./learning.js";
 
 const app = express();
