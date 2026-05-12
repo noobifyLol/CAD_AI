@@ -5,7 +5,7 @@ import {
   toCadKnowledgeRecord,
   toCadMemoryRecord,
 } from "./lib/cadSeedData.js";
-
+// THIS IS USED TO IMPORT DATA, CAN PROBABLY 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 

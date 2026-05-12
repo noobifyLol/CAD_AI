@@ -1,10 +1,12 @@
 import Groq from "groq-sdk";
 
-const groq           = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const TEXT_MODEL     = process.env.GROQ_MODEL        || "llama-3.3-70b-versatile";
-const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "llama-3.1-8b-instant";
-const VISION_MODEL   = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
-// Templates are ON by default. Set USE_VALIDATED_TEMPLATES=false to force raw AI generation.
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const TEXT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+const FAST_MODEL = process.env.GROQ_FAST_MODEL || "openai/gpt-oss-20b";
+const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "llama-3.3-70b-versatile";
+const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
+// Templates stay available as a safety net, but AI-first generation is now the default path.
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
 
 function stripJson(text) {
@@ -14,10 +16,11 @@ function stripJson(text) {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function chat(messages, model = TEXT_MODEL) {
-  const modelsToTry = model === TEXT_MODEL
-    ? [TEXT_MODEL, FALLBACK_MODEL]
-    : [model];                          // vision model — no fallback
+async function chat(messages, model = TEXT_MODEL, fallbackModels = null) {
+  const fallbackList = Array.isArray(fallbackModels)
+    ? fallbackModels
+    : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
+  const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
 
   for (const m of modelsToTry) {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -68,17 +71,11 @@ function preconditionLength(paramName, label, min, def, max) {
 function preconditionInteger(paramName, label, min, def, max) {
   const defaultValue = Math.min(Math.max(Math.round(def || min), min), max);
   return `        annotation { "Name" : "${label}", "Default" : "${defaultValue}" }
-        isInteger(definition.${paramName});
-        definition.${paramName} >= ${min};
-        definition.${paramName} <= ${max};`;
+        isInteger(definition.${paramName}, {(unitless) : [${min}, ${defaultValue}, ${max}]});`;
 }
 
-function preconditionNumber(paramName, label, min, def, max) {
-  const defaultValue = Math.min(Math.max(Number(def) || min, min), max);
-  return `        annotation { "Name" : "${label}", "Default" : "${defaultValue}" }
-        definition.${paramName} is number;
-        definition.${paramName} >= ${min};
-        definition.${paramName} <= ${max};`;
+function preconditionDegrees(paramName, label, min, def, max) {
+  return preconditionInteger(paramName, label, min, Math.round(Number(def) || min), max);
 }
 
 function planeVar() {
@@ -504,7 +501,7 @@ function tGear(d) {
       `        annotation { "Name" : "Bore Radius", "Default" : "${n(Math.max(0, holeRadiusDefault))} * inch" }
         isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);`,
       preconditionLength("faceWidth", "Face Width (Depth)", 0.01, faceWidthDefault, 12),
-      preconditionNumber("pressureAngleDegrees", "Pressure Angle (degrees)", 10, pressureAngleDefault, 30),
+      preconditionDegrees("pressureAngleDegrees", "Pressure Angle (degrees)", 10, pressureAngleDefault, 30),
     ].join("\n"),
     body: `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
@@ -516,12 +513,12 @@ function tGear(d) {
                           (rb * (sin(t) - t * cos(t))) * inch);
         };
 
-        const rotPoint = function(p is vector, a is number)
+        const rotPoint = function(p, a is number)
         {
             return vector(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));
         };
 
-        const mirrorPoint = function(p is vector)
+        const mirrorPoint = function(p)
         {
             return vector(p.x, -p.y);
         };
@@ -660,6 +657,17 @@ function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeLearningContext(learningContext = {}) {
+  return {
+    ...learningContext,
+    prompt: String(learningContext.prompt || ""),
+    notes: Array.isArray(learningContext.notes) ? [...learningContext.notes] : [],
+    examples: Array.isArray(learningContext.examples) ? [...learningContext.examples] : [],
+    knowledge: Array.isArray(learningContext.knowledge) ? [...learningContext.knowledge] : [],
+    featureScriptDocs: Array.isArray(learningContext.featureScriptDocs) ? [...learningContext.featureScriptDocs] : [],
+  };
+}
+
 function extractPromptKeywords(prompt, limit = 6) {
   const words = normalizeText(prompt)
     .toLowerCase()
@@ -729,15 +737,16 @@ function buildLearningContextText(learningContext = {}) {
     lines.push("FeatureScript core syntax reference (use these rules as ground truth):");
     lines.push(`1. Feature structure: export const name = defineFeature(function(context is Context, id is Id, definition is map) precondition { ... } { ... });`);
     lines.push(`2. Length params: annotation { "Name": "Label", "Default": "1 * inch" } isLength(definition.param, LENGTH_BOUNDS); — in the body, definition.param already carries Length; never multiply by * inch again.`);
-    lines.push(`3. Integer params: annotation { "Name": "Label", "Default": "20" } isInteger(definition.param); definition.param >= MIN; definition.param <= MAX;`);
-    lines.push(`4. Plane selection: annotation { "Name": "Plane", "Filter": GeometryType.PLANE, "MaxNumberOfPicks": 1 } definition.location is Query;`);
+    lines.push(`3. Integer params in FS 2931 require a bounds map: annotation { "Name": "Count", "Default": "20" } isInteger(definition.count, {(unitless) : [1, 20, 200]});`);
+    lines.push(`4. Degrees and other dimensionless dialog values should also use isInteger bounds. Do not write definition.x is number; or separate >= / <= lines in the precondition.`);
+    lines.push(`5. Plane selection: annotation { "Name": "Plane", "Filter": GeometryType.PLANE, "MaxNumberOfPicks": 1 } definition.location is Query;`);
     lines.push(`   In body: var skPlane = isQueryEmpty(context, definition.location) ? plane(WORLD_ORIGIN, Z_DIRECTION) : evPlane(context, { "face": definition.location });`);
-    lines.push(`5. Sketches: var sk = newSketchOnPlane(context, id + "sk1", { "sketchPlane": skPlane }); — then add entities — then ALWAYS call skSolve(sk); before any opExtrude/opRevolve.`);
-    lines.push(`6. Vector coords: vector(x, y) * inch where x and y are unitless numbers (divide a Length by inch to get a number: definition.width / inch).`);
-    lines.push(`7. opExtrude: opExtrude(context, id + "ext1", { "entities": qSketchRegion(id + "sk1"), "direction": skPlane.normal, "endBound": BoundingType.BLIND, "endDepth": definition.depth });`);
-    lines.push(`8. opCylinder: opCylinder(context, id + "cyl1", { "bottomCenter": pt, "topCenter": pt, "radius": r, "operationType": NewBodyOperationType.NEW }); — NO startAngle/endAngle.`);
-    lines.push(`9. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
-    lines.push(`10. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
+    lines.push(`6. Sketches: var sk = newSketchOnPlane(context, id + "sk1", { "sketchPlane": skPlane }); — then add entities — then ALWAYS call skSolve(sk); before any opExtrude/opRevolve.`);
+    lines.push(`7. Vector coords: vector(x, y) * inch where x and y are unitless numbers (divide a Length by inch to get a number: definition.width / inch).`);
+    lines.push(`8. opExtrude: opExtrude(context, id + "ext1", { "entities": qSketchRegion(id + "sk1"), "direction": skPlane.normal, "endBound": BoundingType.BLIND, "endDepth": definition.depth });`);
+    lines.push(`9. opCylinder: opCylinder(context, id + "cyl1", { "bottomCenter": pt, "topCenter": pt, "radius": r, "operationType": NewBodyOperationType.NEW }); — NO startAngle/endAngle.`);
+    lines.push(`10. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
+    lines.push(`11. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
   }
 
   if (examples.length) {
@@ -905,23 +914,28 @@ function performGeometricReasoning(dims) {
 
 function promptLooksComplex(prompt) {
   return /assembly|hinge|joint|cam|freeform|organic|thread|helical|spring|loft|spline|enclosure|mount|slot|rib|web|pocket|boss|complex|custom|motor|gearbox|bearing block|filleted/i.test(prompt || "");
-} // change this the CAD is compelx or not, still it all needs to be interpreted at the highest level 
+}
 
-function shouldUseTemplate(prompt, dims) {
+function canUseTemplateFallback(dims) {
   if (!USE_VALIDATED_TEMPLATES) return false;
-
-  const simpleShapes = new Set([
+  return new Set([
     "BOX", "ROBOT_MECH", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
     "L_BRACKET", "T_BRACKET", "FLANGE", "HEX_NUT", "WASHER", "BUSHING",
     "HITCH_PEG", "GEAR_SPUR"
-  ]);
+  ]).has(dims.shape);
+}
 
-  if (dims.parseFailed) return false;
-  if (!simpleShapes.has(dims.shape)) return false;
-  if (dims.confidence === "LOW") return false;
-  // SIMPLIFIED: Use template if shape is recognized, even if prompt mentions complex words.
-  // Templates are pre-validated and safe; AI will add complexity via parameters.
-  return true;
+function decideGenerationMode(prompt, dims) {
+  if (GENERATION_STRATEGY === "template_only") {
+    return canUseTemplateFallback(dims) ? "template" : "custom";
+  }
+
+  if (GENERATION_STRATEGY === "template_first") {
+    const simpleHighConfidence = canUseTemplateFallback(dims) && !dims.parseFailed && dims.confidence !== "LOW";
+    return simpleHighConfidence && !promptLooksComplex(prompt) ? "template" : "custom";
+  }
+
+  return "custom";
 }
 // Clean and trim the featureScript to prevent errors
 //
@@ -954,7 +968,28 @@ function sanitizeFeatureScript(code) {
     .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);')
     // Remove "* inch" multiplied onto a parameter already declared with isLength —
     // those params already carry Length type; multiplying by inch doubles the units.
-    .replace(/\b(definition\.\w+)\s*\*\s*inch\b/g, '$1');
+    .replace(/\b(definition\.\w+)\s*\*\s*inch\b/g, '$1')
+    // Repair legacy integer/number preconditions into FS 2931-safe isInteger bounds.
+    .replace(
+      /isInteger\((definition\.\w+)\)\s*;\s*\n(\s*)\1\s*>=\s*(\d+)\s*;\s*\n\s*\1\s*<=\s*(\d+)\s*;/g,
+      (_, param, indent, min, max) => {
+        const defaultValue = Math.round((Number(min) + Number(max)) / 2);
+        return `${indent}isInteger(${param}, {(unitless) : [${min}, ${defaultValue}, ${max}]});`;
+      }
+    )
+    .replace(
+      /definition\.(\w+)\s+is\s+number\s*;\s*\n(\s*)definition\.\1\s*>=\s*(\d+)\s*;\s*\n\s*definition\.\1\s*<=\s*(\d+)\s*;/g,
+      (_, name, indent, min, max) => {
+        const defaultValue = Math.round((Number(min) + Number(max)) / 2);
+        return `${indent}isInteger(definition.${name}, {(unitless) : [${min}, ${defaultValue}, ${max}]});`;
+      }
+    )
+    .replace(/\bisInteger\((definition\.\w+)\)\s*;/g, 'isInteger($1, {(unitless) : [1, 10, 200]});')
+    .replace(/\bfunction\s*\(([^)]*?)\bis\s+vector\b([^)]*)\)/g, (_, before, after) => {
+      const normalizedBefore = before.replace(/,\s*$/, "").trim();
+      const normalizedAfter = after.replace(/^\s*,\s*/, "").trim();
+      return `function(${[normalizedBefore, normalizedAfter].filter(Boolean).join(", ")})`;
+    });
 
   // ── Structural fix: named typed functions inside feature body → const lambdas ──
   // Matches: function name(args) returns type { ... }
@@ -1111,10 +1146,11 @@ Unit rules:
 - confidence: HIGH if all dims explicit, MEDIUM if some inferred, LOW if mostly guessed`;
 
 async function extractDims(prompt, learningContext = {}) {
+  const context = normalizeLearningContext(learningContext);
   const raw = await chat([
-    { role: "system", content: withLearningContext(DIM_SYSTEM, learningContext) },
+    { role: "system", content: withLearningContext(DIM_SYSTEM, context) },
     { role: "user",   content: prompt.trim() }
-  ]);
+  ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
   try {
     const parsed = JSON.parse(stripJson(raw));
     const d = normalizeDims({
@@ -1154,7 +1190,13 @@ async function extractDims(prompt, learningContext = {}) {
 function buildThinkingTrace(prompt, d, meta = {}) {
   const lines = [`Prompt analyzed: "${prompt}"`];
   lines.push(`Shape: ${d.shape}  |  Confidence: ${d.confidence}`);
-  lines.push(`Generation mode: ${meta.generationMode === "custom" ? "AI-authored parametric feature" : "Validated template"}`);
+  const generationLabel =
+    meta.generationMode === "template_fallback"
+      ? "AI-authored feature attempted, validated template fallback used"
+      : meta.generationMode === "custom"
+        ? "AI-authored parametric feature"
+        : "Validated template";
+  lines.push(`Generation mode: ${generationLabel}`);
 
   if (meta.learningExamples) {
     lines.push(`Database context: used ${meta.learningExamples} similar prior generation(s) as guidance.`);
@@ -1189,7 +1231,7 @@ function buildThinkingTrace(prompt, d, meta = {}) {
     if (parts.length) lines.push(`  ${parts.join("  |  ")}`);
   }
 
-  lines.push(`Template: parametric — user can adjust all dimensions in the Onshape dialog`);
+  lines.push(`Output target: parametric FeatureScript with editable dimensions in the Onshape dialog`);
   if (d.confidence === "LOW") {
     lines.push(`Note: Low confidence — dimensions were not stated explicitly and are estimated.`);
   }
@@ -1231,16 +1273,19 @@ Every file must follow this exact structure:
 - Length parameter (ALWAYS use this form — never "definition.x is Length"):
     annotation { "Name" : "Width", "Default" : "2 * inch" }
     isLength(definition.width, LENGTH_BOUNDS);
-- Integer parameter:
+- Integer parameter (FS 2931 requires the bounds map form):
     annotation { "Name" : "Count", "Default" : "4" }
+    isInteger(definition.count, {(unitless) : [1, 4, 100]});
+- Degrees and other plain dimensionless dialog values should also use isInteger:
+    annotation { "Name" : "Angle (deg)", "Default" : "20" }
+    isInteger(definition.angleDeg, {(unitless) : [10, 20, 30]});
+    // In the body convert with: definition.angleDeg * PI / 180
+- NEVER write:
     isInteger(definition.count);
     definition.count >= 1;
     definition.count <= 100;
-- Number parameter:
-    annotation { "Name" : "Angle (deg)", "Default" : "20" }
+- NEVER write:
     definition.angleDeg is number;
-    definition.angleDeg >= 10;
-    definition.angleDeg <= 30;
 - Boolean toggle:
     annotation { "Name" : "Add Bore" }
     definition.addBore is boolean;
@@ -1295,16 +1340,19 @@ Use const lambdas for ALL helper functions inside the feature body.
 7. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
 
 ═══ GOAL ═══
+- Author a fresh FeatureScript design from the request and the context below. Do not default to a canned box, plate, or gear template unless the request is extremely simple.
 - Build exactly what the user asked for, with sensible parametric defaults.
 - Every parameter must be editable in the Onshape feature dialog.
 - Prefer simple, robust geometry over clever but brittle geometry.
 - The code must compile and produce visible 3D geometry with zero errors.`;
 
 async function generateCustomFeatureScript(prompt, dims, learningContext = {}) {
-  const systemPrompt = withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext);
+  const context = normalizeLearningContext(learningContext);
+  const systemPrompt = withLearningContext(CUSTOM_FEATURE_SYSTEM, context);
   const userPrompt = [
     `User request: ${prompt.trim()}`,
     `Extracted dimensions: ${summarizeDimsForPrompt(dims)}`,
+    `Start from the user's requested design intent, not from a stock template. Build the geometry strategy yourself.`,
     `If the part is still ambiguous, prefer a flexible parametric interpretation that the user can edit in Onshape.`,
     `Return valid JSON only.`
   ].join("\n");
@@ -1312,7 +1360,7 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}) {
   const raw = await chat([
     { role: "system", content: systemPrompt },
     { role: "user", content: userPrompt }
-  ]);
+  ], TEXT_MODEL, [FALLBACK_MODEL]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));
@@ -1338,14 +1386,15 @@ export async function generateFeatureScript(prompt, options = {}) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   console.log(`[AI] Generating: "${prompt}"`);
 
-  const dims = await extractDims(prompt, options.learningContext);
+  const learningContext = normalizeLearningContext(options.learningContext);
+  const dims = await extractDims(prompt, learningContext);
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
   // Add geometric reasoning to the learning context before generation
   const mathAnalysis = performGeometricReasoning(dims);
-  options.learningContext.notes.push(`Geometric Reasoning: ${mathAnalysis}`);
+  learningContext.notes.push(`Geometric Reasoning: ${mathAnalysis}`);
 
-  const generationMode = shouldUseTemplate(prompt, dims) ? "template" : "custom";
+  let generationMode = decideGenerationMode(prompt, dims);
   let code;
   let customReasoning = "";
   let featureName = dims.featureName;
@@ -1354,29 +1403,43 @@ export async function generateFeatureScript(prompt, options = {}) {
   if (generationMode === "template") {
     code = buildFeatureScript(dims);
   } else {
-    const custom = await generateCustomFeatureScript(prompt, dims, options.learningContext);
+    const custom = await generateCustomFeatureScript(prompt, dims, learningContext);
     featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
     featureLabel = custom.featureLabel || featureLabel;
     customReasoning = custom.reasoning;
 
     const repaired = await debugFeatureScript(custom.code, "", {
-      learningContext: options.learningContext,
+      learningContext,
     });
     code = sanitizeFeatureScript(repaired.fixed);
 
-    if (hasFatalFeatureScriptPatterns(code)) {
+    const validationIssues = validateFeatureScript(code);
+    if (validationIssues.length) {
+      const issueText = validationIssues
+        .slice(0, 12)
+        .map(issue => `Line ${issue.line || "?"}: ${issue.message}${issue.text ? ` [${issue.text}]` : ""}`)
+        .join("\n");
+      const repairedAgain = await debugFeatureScript(code, issueText, {
+        learningContext,
+      });
+      code = sanitizeFeatureScript(repairedAgain.fixed);
+      customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validator triggered a second repair pass for ${validationIssues.length} issue(s).`;
+    }
+
+    if (hasFatalFeatureScriptPatterns(code) && canUseTemplateFallback(dims)) {
       console.warn("[AI] Fatal FeatureScript patterns remained after repair; falling back to validated template.");
       code = buildFeatureScript({
         ...dims,
         shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
       });
+      generationMode = "template_fallback";
       customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Fallback used because the AI-authored code still contained invalid FeatureScript type or bounds syntax.`;
     }
   }
 
   const thinking = buildThinkingTrace(prompt, dims, {
     generationMode,
-    learningExamples: Array.isArray(options.learningContext?.examples) ? options.learningContext.examples.length : 0,
+    learningExamples: learningContext.examples.length,
     customReasoning,
   });
 
@@ -1398,6 +1461,16 @@ Return ONLY a JSON object with no markdown:
   "fixed": "the complete corrected raw FeatureScript — no backticks, no markdown" }
 
 FEATURESCRIPT API FACTS (use these exactly, do not invent):
+
+PRECONDITION EXACT SYNTAX:
+  Length:   isLength(definition.width, LENGTH_BOUNDS);
+  Integer:  isInteger(definition.count, {(unitless) : [1, 10, 200]});
+  Degrees:  isInteger(definition.angleDeg, {(unitless) : [10, 20, 30]}); then use definition.angleDeg * PI / 180 in the body
+  Boolean:  definition.addBore is boolean;
+  Query:    definition.location is Query;
+  NEVER:    isInteger(definition.x);
+  NEVER:    definition.x is number;
+  NEVER:    definition.x >= N;
 
 opCylinder signature:
   opCylinder(context is Context, id is Id, definition is map)
@@ -1436,6 +1509,11 @@ skFitSpline: valid sketch spline API
   skFitSpline(sketch, "spline1", { "points": [...] })
   "skSpline" is not a valid sketch API name.
 
+LAMBDA TYPES:
+  "vector" (lowercase) is a constructor function, not a type declaration.
+  WRONG: function(p is vector, a is number)
+  RIGHT: function(p, a is number)
+
 FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse errors):
   Named typed top-level functions are ONLY legal at MODULE TOP LEVEL.
   Inside a feature body (the lambda passed to defineFeature) they are ILLEGAL.
@@ -1461,6 +1539,66 @@ FIX RULES:
     OR move to module top level before the annotation block
 11. skSolve missing after sketch entities → add skSolve(sketch1); before opExtrude/opRevolve`;
 
+export function validateFeatureScript(code) {
+  const text = String(code || "");
+  const lines = text.split(/\r?\n/);
+  const issues = [];
+  const addIssue = (line, message, snippet) => {
+    issues.push({ line, message, text: String(snippet || "").trim() });
+  };
+
+  lines.forEach((line, index) => {
+    const lineNo = index + 1;
+    if (/\bisInteger\s*\(\s*definition\.\w+\s*\)\s*;/.test(line)) {
+      addIssue(lineNo, "isInteger() is missing the required FS 2931 bounds map.", line);
+    }
+    if (/^\s*definition\.\w+\s+is\s+number\s*;/.test(line)) {
+      addIssue(lineNo, "Use isInteger(..., {(unitless) : [...]}) instead of definition.x is number.", line);
+    }
+    if (/^\s*definition\.\w+\s*(>=|<=)\s*\d/.test(line)) {
+      addIssue(lineNo, "Do not use bare >= or <= lines in preconditions; use an isInteger bounds map.", line);
+    }
+    if (/\bfunction\s*\([^)]*\bis\s+vector\b/i.test(line)) {
+      addIssue(lineNo, "Lowercase vector is not a valid lambda type declaration.", line);
+    }
+    if (/\bfunction\s*\([^)]*\)\s+returns\s+(vector|array|map)\b/i.test(line)) {
+      addIssue(lineNo, "Avoid lambda return-type annotations here; use an untyped const lambda.", line);
+    }
+  });
+
+  const isLengthParams = new Set();
+  lines.forEach(line => {
+    const match = line.match(/\bisLength\(\s*definition\.(\w+)/);
+    if (match) isLengthParams.add(match[1]);
+  });
+  lines.forEach((line, index) => {
+    for (const param of isLengthParams) {
+      if (new RegExp(`\\bdefinition\\.${param}\\s*\\*\\s*inch\\b`).test(line)) {
+        addIssue(index + 1, `definition.${param} already has Length type; remove * inch.`, line);
+      }
+    }
+  });
+
+  const hasSketch = /\bnewSketchOnPlane\s*\(|\bnewSketch\s*\(/.test(text);
+  const hasSolve = /\bskSolve\s*\(/.test(text);
+  if (hasSketch && !hasSolve) {
+    addIssue(0, "Sketch created without any skSolve() call.", "(global)");
+  }
+
+  const bodyMatch = text.match(/defineFeature\s*\(\s*function\s*\([^)]*\)[^{]*\{[\s\S]*?\n\s*\{/);
+  if (bodyMatch) {
+    const bodyStart = text.indexOf(bodyMatch[0]) + bodyMatch[0].length;
+    const bodyText = text.slice(bodyStart);
+    const nestedFunction = bodyText.match(/\bfunction\s+[a-zA-Z_]\w*\s*\(/);
+    if (nestedFunction) {
+      const before = text.slice(0, bodyStart + nestedFunction.index);
+      addIssue(before.split(/\r?\n/).length, "Named function detected inside feature body; use a const lambda instead.", nestedFunction[0]);
+    }
+  }
+
+  return issues;
+}
+
 function hasFatalFeatureScriptPatterns(code) {
   const text = String(code || "");
 
@@ -1469,7 +1607,9 @@ function hasFatalFeatureScriptPatterns(code) {
   const fatalPatterns = [
     // FeatureScript type errors
     [/\bdefinition\.\w+\s+is\s+Length\s*;/, "definition.x is Length (invalid type specifier)"],
+    [/\bdefinition\.\w+\s+is\s+number\s*;/, "definition.x is number (invalid feature precondition syntax)"],
     [/isLength\(\s*definition\.\w+\s*,\s*\{/, "isLength with inline bounds map (use LENGTH_BOUNDS)"],
+    [/\bisInteger\(\s*definition\.\w+\s*\)\s*;/, "isInteger missing required bounds map"],
 
     // Invalid opCylinder params (these map keys don't exist on opCylinder)
     [/"startAngle"\s*:/, "startAngle on opCylinder (invalid key)"],
@@ -1489,7 +1629,7 @@ function hasFatalFeatureScriptPatterns(code) {
     // Handled separately below as a compound check.
   ];
 
-  if (fatalPatterns.slice(0, 4).some(([pattern]) => pattern.test(text))) return true;
+  if (fatalPatterns.some(([pattern]) => pattern.test(text))) return true;
 
   // Compound check: sketch created but skSolve never called
   const hasSketch = /\bnewSketchOnPlane\s*\(|\bnewSketch\s*\(/.test(text);
@@ -1513,12 +1653,13 @@ function hasFatalFeatureScriptPatterns(code) {
 export async function debugFeatureScript(code, errors, options = {}) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   const sanitizedInput = sanitizeFeatureScript(code);
+  const learningContext = normalizeLearningContext(options.learningContext);
   console.log(`[AI] Debugging (${sanitizedInput.length} chars)`);
 
   const raw = await chat([
-    { role: "system", content: withLearningContext(DEBUG_SYSTEM, options.learningContext) },
+    { role: "system", content: withLearningContext(DEBUG_SYSTEM, learningContext) },
     { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
-  ]);
+  ], TEXT_MODEL, [FALLBACK_MODEL]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));

@@ -1122,3 +1122,6 @@ The docs show that Part Studio imports, CSV/JSON data imports, and reference par
 
 Summary of Everything Across Both Sessions
 AreaStatusKey IssueGear template (tGear)BrokenHelper functions inside feature body — illegal FShasFatalFeatureScriptPatterns()IncompleteDoesn't catch nested named functions, missing skSolveCUSTOM_FEATURE_SYSTEM promptMissing ruleDoesn't forbid nested named functionsDEBUG_SYSTEM promptMissing ruleSame gapsanitizeFeatureScript()IncompleteCan't structurally fix nested functionsserver.js import of ai.jsBugCase mismatch — "./ai.js" vs actual AI.jsAll other templates (BOX, CYLINDER, etc.)GoodCorrectly structuredadaptiveNetwork.jsGoodSolid MLP with correct backproplearning.jsGoodRobust with graceful fallbacksserver.js routesGoodClean and completescript.jsGoodSolid frontend
+
+**5/12/26**
+Making notes on the many of the files, removing and redesigning things since the AI was use template instead of thinking how to code the Feature itself.
