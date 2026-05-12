@@ -94,13 +94,15 @@ function fsPoint(xExpr, yExpr, zExpr = null) {
   return `vector((${xExpr}) / inch, (${yExpr}) / inch, (${zExpr}) / inch) * inch`;
 }
 
-// ─── Shape templates ──────────────────────────────────────────────────────────
-// Each template returns { precondition: string, body: string }.
-// The precondition block goes between the two { } blocks of defineFeature.
-// The body goes inside the second { } block.
-// definition.paramName values already carry Length — never multiply by * inch.
+
+/*
+
+This part is all the pre made template that is soon to be removed or jnust added to the database
 
 
+
+
+*/
 
 function tRobotMech(d) {
   return {
@@ -442,7 +444,7 @@ function tBushing(d) {
 }
 
 // Hitch Peg: cylindrical shaft + hemispherical dome on top
-// Uses opSphere approximated via a revolved semicircle on a construction plane
+// Uses opSphere approximated via a revolved semicircle on a construction plane --------------- CHange this should not be a template
 function tHitchPeg(d) {
   const shaftR = d.widthInches / 2 || 0.125;   // shaft radius
   const headR  = d.radiusInches   || 0.208;    // dome radius
@@ -486,7 +488,7 @@ function tHitchPeg(d) {
   };
 }
 
-// Spur gear with involute tooth profile
+// Spur gear with involute tooth profile-------------------- THIS SHOUODN"T BE a template
 function tGear(d) {
   const radiusDefault = d.radiusInches || 1.0;
   const toothCountDefault = Math.max(6, Math.round(d.numTeeth || 20));
@@ -599,7 +601,7 @@ function tGear(d) {
   };
 }
 
-// ─── Assemble full FeatureScript file ─────────────────────────────────────────
+// ─── Assemble full FeatureScript file ───────────────────────────────────────── CHANGE THIS, THIS CAN BE USED AS A EXAMPLE NOT THE FINAL RESULT
 
 function buildFeatureScript(d) {
   let template;
@@ -824,6 +826,8 @@ function normalizeDims(dims) {
  * The output is added to DATABASE CONTEXT so the model understands spatial
  * properties without having to guess from raw numbers alone.
  */
+
+// This should be used as a example for the AI instead of a template, we need to change from AI indefinitying the shape to actually generating the script
 function performGeometricReasoning(dims) {
   const hints = [];
   const w = dims.widthInches  || 2;
@@ -901,7 +905,7 @@ function performGeometricReasoning(dims) {
 
 function promptLooksComplex(prompt) {
   return /assembly|hinge|joint|cam|freeform|organic|thread|helical|spring|loft|spline|enclosure|mount|slot|rib|web|pocket|boss|complex|custom|motor|gearbox|bearing block|filleted/i.test(prompt || "");
-}
+} // change this the CAD is compelx or not, still it all needs to be interpreted at the highest level 
 
 function shouldUseTemplate(prompt, dims) {
   if (!USE_VALIDATED_TEMPLATES) return false;
@@ -1035,7 +1039,7 @@ function sanitizeFeatureScript(code) {
   return cleaned.trim();
 }
 
-// ─── Dimension extractor ──────────────────────────────────────────────────────
+// ─── Dimension extractor ────────────────────────────────────────────────────── CHANGE THIS
 
 const DIM_SYSTEM = `You are a mechanical CAD dimension extractor with engineering knowledge.
 Output ONLY a valid JSON object — no markdown, no explanation.
@@ -1194,7 +1198,7 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   }
   return lines.join("\n");
 }
-
+// -----------------------------------MAIN PROMPT FOR THE AI--------------------------------------------------------------
 const CUSTOM_FEATURE_SYSTEM = `You are an expert Onshape FeatureScript author. You write production-quality custom features.
 Return ONLY a JSON object — no markdown, no explanation outside the JSON:
 {
