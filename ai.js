@@ -259,8 +259,8 @@ function tLinkage(d) {
         var holeOffset = definition.length * 0.5 - definition.holeRadius * 2.5;
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "body", {
-            "firstCorner"  : vector(-0.5, -0.5) * definition.length,
-            "secondCorner" : vector( 0.5,  0.5) * definition.width
+            "firstCorner"  : vector(-definition.length / (2 * inch), -definition.width / (2 * inch)) * inch,
+            "secondCorner" : vector( definition.length / (2 * inch),  definition.width / (2 * inch)) * inch
         });
         skCircle(sketch1, "holeL", { "center" : vector(-1, 0) * holeOffset, "radius" : definition.holeRadius });
         skCircle(sketch1, "holeR", { "center" : vector( 1, 0) * holeOffset, "radius" : definition.holeRadius });
@@ -317,13 +317,20 @@ function tLBracket(d) {
       preconditionLength("wall",       "Wall Thickness", 0.01, d.wallThicknessInches, 2),
     ].join("\n"),
     body: `${planeVar()}
+        // Divide lengths by inch to get unitless scalars for vector coordinates.
+        // vector(a, b) * inch re-attaches the unit — this is the correct FS pattern.
+        var awv = definition.armWidth  / inch;
+        var ahv = definition.armHeight / inch;
+        var wtv = definition.wall      / inch;
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
-        skLineSegment(sketch1, "h1", { "start" : vector(0, 0)                       * inch, "end" : vector(1, 0)                        * definition.armWidth  });
-        skLineSegment(sketch1, "h2", { "start" : vector(1, 0)  * definition.armWidth, "end" : vector(1, 1)   * definition.wall          });
-        skLineSegment(sketch1, "h3", { "start" : vector(1, 1)  * definition.wall,     "end" : vector(1, 1)   * definition.wall          });
-        skLineSegment(sketch1, "v1", { "start" : vector(0, 0)  * definition.wall,     "end" : vector(0, 1)   * definition.armHeight     });
-        skLineSegment(sketch1, "v2", { "start" : vector(0, 1)  * definition.armHeight,"end" : vector(-1, 1)  * definition.wall          });
-        skLineSegment(sketch1, "v3", { "start" : vector(-1, 1) * definition.wall,     "end" : vector(0, 0)   * inch                     });
+        // Closed 6-segment L-profile (clockwise from origin):
+        // (0,0)→(aw,0)→(aw,wt)→(wt,wt)→(wt,ah)→(0,ah)→(0,0)
+        skLineSegment(sketch1, "s1", { "start" : vector(0,   0  ) * inch, "end" : vector(awv, 0  ) * inch });
+        skLineSegment(sketch1, "s2", { "start" : vector(awv, 0  ) * inch, "end" : vector(awv, wtv) * inch });
+        skLineSegment(sketch1, "s3", { "start" : vector(awv, wtv) * inch, "end" : vector(wtv, wtv) * inch });
+        skLineSegment(sketch1, "s4", { "start" : vector(wtv, wtv) * inch, "end" : vector(wtv, ahv) * inch });
+        skLineSegment(sketch1, "s5", { "start" : vector(wtv, ahv) * inch, "end" : vector(0,   ahv) * inch });
+        skLineSegment(sketch1, "s6", { "start" : vector(0,   ahv) * inch, "end" : vector(0,   0  ) * inch });
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
             "entities"  : qSketchRegion(id + "sketch1"),
@@ -715,6 +722,20 @@ function buildLearningContextText(learningContext = {}) {
       lines.push(`${index + 1}. ${title} (${source})`);
       if (text) lines.push(`   ${text}`);
     });
+  } else {
+    // No indexed FS docs on disk — inject core FeatureScript syntax reference inline.
+    lines.push("FeatureScript core syntax reference (use these rules as ground truth):");
+    lines.push(`1. Feature structure: export const name = defineFeature(function(context is Context, id is Id, definition is map) precondition { ... } { ... });`);
+    lines.push(`2. Length params: annotation { "Name": "Label", "Default": "1 * inch" } isLength(definition.param, LENGTH_BOUNDS); — in the body, definition.param already carries Length; never multiply by * inch again.`);
+    lines.push(`3. Integer params: annotation { "Name": "Label", "Default": "20" } isInteger(definition.param); definition.param >= MIN; definition.param <= MAX;`);
+    lines.push(`4. Plane selection: annotation { "Name": "Plane", "Filter": GeometryType.PLANE, "MaxNumberOfPicks": 1 } definition.location is Query;`);
+    lines.push(`   In body: var skPlane = isQueryEmpty(context, definition.location) ? plane(WORLD_ORIGIN, Z_DIRECTION) : evPlane(context, { "face": definition.location });`);
+    lines.push(`5. Sketches: var sk = newSketchOnPlane(context, id + "sk1", { "sketchPlane": skPlane }); — then add entities — then ALWAYS call skSolve(sk); before any opExtrude/opRevolve.`);
+    lines.push(`6. Vector coords: vector(x, y) * inch where x and y are unitless numbers (divide a Length by inch to get a number: definition.width / inch).`);
+    lines.push(`7. opExtrude: opExtrude(context, id + "ext1", { "entities": qSketchRegion(id + "sk1"), "direction": skPlane.normal, "endBound": BoundingType.BLIND, "endDepth": definition.depth });`);
+    lines.push(`8. opCylinder: opCylinder(context, id + "cyl1", { "bottomCenter": pt, "topCenter": pt, "radius": r, "operationType": NewBodyOperationType.NEW }); — NO startAngle/endAngle.`);
+    lines.push(`9. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
+    lines.push(`10. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
   }
 
   if (examples.length) {

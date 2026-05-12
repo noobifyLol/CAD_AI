@@ -141,6 +141,9 @@ function scoreGeneration(promptKeywords, shapeHint, row) {
 
 function scoreMemory(promptKeywords, shapeHint, row) {
   const quality = Number(row.quality_score ?? 0.5);
+  // Hard floor: rows the feedback system has pushed to near-zero quality cannot
+  // re-enter retrieval purely on text score.  They should be pruned, not re-served.
+  if (quality <= 0.05) return 0;
   const successCount = Number(row.success_count || row.successCount || 0);
   const failureCount = Number(row.failure_count || row.failureCount || 0);
   const usageCount = Number(row.usage_count || row.usageCount || 0);
@@ -167,8 +170,13 @@ function shouldKeepMemoryRow(row) {
   const successCount = Number(row.success_count || row.successCount || 0);
   const failureCount = Number(row.failure_count || row.failureCount || 0);
 
+  // Explicit floor: quality near-zero rows are effectively dead weight
+  if (quality <= 0.05) return false;
   if (quality <= 0.05 && failureCount >= 4 && successCount <= 1) return false;
   if (quality < 0.2 && failureCount >= successCount + 6) return false;
+  // High failure rate with no redemption (>80% failure, at least 5 attempts)
+  const total = successCount + failureCount;
+  if (total >= 5 && failureCount / total >= 0.8 && quality < 0.25) return false;
   return true;
 }
 
