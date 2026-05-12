@@ -104,17 +104,28 @@ async function submitRunFeedback(signal, rating) {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Learning analysis failed');
 
+    const knowledgeStatus = data.memory?.details?.cadKnowledge;
     const memoryText = data.memory?.ok
       ? 'Saved a new weighted memory row.'
       : data.memory?.error
         ? `Memory not saved: ${data.memory.error}`
         : 'Memory save skipped.';
+    const knowledgeText = knowledgeStatus?.ok
+      ? 'Saved or updated a cad_knowledge lesson row.'
+      : knowledgeStatus?.error
+        ? `cad_knowledge not saved: ${knowledgeStatus.error}`
+        : '';
+    const pruneText = data.feedback?.prune?.details
+      ? `Pruned memories this round: ${data.feedback.prune.details.prunedCount ?? 0}.`
+      : '';
 
     resultEl.textContent = [
       data.analysis?.summary,
       data.analysis?.whatWentWrong ? `What was wrong: ${data.analysis.whatWentWrong}` : '',
       data.analysis?.weightAdvice ? `Weights: ${data.analysis.weightAdvice}` : '',
       memoryText,
+      knowledgeText,
+      pruneText,
     ].filter(Boolean).join('\n');
   } catch (e) {
     resultEl.textContent = `Learning analysis failed: ${e.message}`;

@@ -80,6 +80,13 @@ function clampQualityScore(value, fallback = 0.55) {
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(0, Math.min(1, parsed));
 }
+
+function feedbackCountersForWeight(weight) {
+  return {
+    successDelta: weight > 0 ? 1 : 0,
+    failureDelta: weight < 0 ? 1 : 0,
+  };
+}
 // These are the template key words that the AI looks for
 function inferShapeFromPrompt(prompt) {
   const text = normalizeText(prompt).toLowerCase();
@@ -134,6 +141,9 @@ function scoreGeneration(promptKeywords, shapeHint, row) {
 
 function scoreMemory(promptKeywords, shapeHint, row) {
   const quality = Number(row.quality_score ?? 0.5);
+  const successCount = Number(row.success_count || row.successCount || 0);
+  const failureCount = Number(row.failure_count || row.failureCount || 0);
+  const usageCount = Number(row.usage_count || row.usageCount || 0);
   const shapeBoost = shapeHint && row.shape_type === shapeHint ? 3 : 0;
   const textScore = scoreText(promptKeywords, [
     row.title,
@@ -146,8 +156,20 @@ function scoreMemory(promptKeywords, shapeHint, row) {
     ...(row.failure_modes || []),
     ...(row.validation_rules || []),
   ]);
+  const successRate = usageCount > 0 ? successCount / usageCount : successCount > 0 ? 0.5 : 0;
+  const failurePenalty = Math.max(0, failureCount - successCount) * 0.2;
 
-  return quality * 2 + shapeBoost + textScore;
+  return quality * 3 + successRate * 2 + shapeBoost + textScore - failurePenalty;
+}
+
+function shouldKeepMemoryRow(row) {
+  const quality = Number(row.quality_score ?? row.qualityScore ?? 0.5);
+  const successCount = Number(row.success_count || row.successCount || 0);
+  const failureCount = Number(row.failure_count || row.failureCount || 0);
+
+  if (quality <= 0.05 && failureCount >= 4 && successCount <= 1) return false;
+  if (quality < 0.2 && failureCount >= successCount + 6) return false;
+  return true;
 }
 
 function mapLocalKnowledge(entry) {
@@ -689,7 +711,12 @@ export function createLearningService({
     });
 
     if (!rpc.error && Array.isArray(rpc.data)) {
-      return rpc.data.map(mapCadMemory);
+      return rpc.data
+        .map(mapCadMemory)
+        .filter(shouldKeepMemoryRow)
+        .map(row => ({ ...row, _score: scoreMemory(keywords, shapeHint, row) }))
+        .sort((a, b) => b._score - a._score)
+        .slice(0, 8);
     }
 
     if (rpc.error && !isMissingDbObject(rpc.error)) {
@@ -709,6 +736,7 @@ export function createLearningService({
 
     return (Array.isArray(data) ? data : [])
       .map(row => ({ ...mapCadMemory(row), _score: scoreMemory(keywords, shapeHint, row) }))
+      .filter(shouldKeepMemoryRow)
       .filter(row => row._score > 0.5)
       .sort((a, b) => b._score - a._score)
       .slice(0, 8);
@@ -1024,6 +1052,204 @@ export function createLearningService({
     return saveAdaptiveState(trained);
   }
 
+  async function fetchLinkedMemoryRows(generationId) {
+    if (!supabase || !generationId) return [];
+
+    const links = await supabase
+      .from("cad_generation_memory_matches")
+      .select("memory_id")
+      .eq("generation_id", generationId)
+      .limit(32);
+
+    if (links.error) {
+      if (!isMissingDbObject(links.error)) {
+        warnOnce(warned, "feedback_memory_links", `[DB] Could not load feedback memory links: ${links.error.message}`);
+      }
+      return [];
+    }
+
+    const memoryIds = [...new Set((links.data || []).map(row => row.memory_id).filter(Boolean))];
+    if (!memoryIds.length) return [];
+
+    const rows = await supabase
+      .from("cad_memory")
+      .select("id,title,quality_score,success_count,failure_count,is_active")
+      .in("id", memoryIds);
+
+    if (rows.error) {
+      if (!isMissingDbObject(rows.error)) {
+        warnOnce(warned, "feedback_memory_rows", `[DB] Could not load linked CAD memory rows: ${rows.error.message}`);
+      }
+      return [];
+    }
+
+    return Array.isArray(rows.data) ? rows.data : [];
+  }
+
+  function feedbackPropagationLooksApplied(beforeRows, afterRows, weight) {
+    if (!beforeRows.length || !afterRows.length || weight === 0) return true;
+
+    const { successDelta, failureDelta } = feedbackCountersForWeight(weight);
+    const afterById = new Map(afterRows.map(row => [row.id, row]));
+
+    return beforeRows.some(before => {
+      const after = afterById.get(before.id);
+      if (!after) return false;
+
+      const expectedQuality = clampQualityScore(Number(before.quality_score ?? 0.5) + weight, Number(before.quality_score ?? 0.5));
+      const qualityChanged = Math.abs(Number(after.quality_score ?? 0) - expectedQuality) < 1e-9;
+      const successChanged = Number(after.success_count || 0) === Number(before.success_count || 0) + successDelta;
+      const failureChanged = Number(after.failure_count || 0) === Number(before.failure_count || 0) + failureDelta;
+
+      return qualityChanged || successChanged || failureChanged;
+    });
+  }
+
+  async function applyManualFeedbackPropagation(memoryRows, weight) {
+    if (!supabase || !memoryRows.length) {
+      return dbLogResult({
+        skipped: true,
+        table: "cad_memory",
+        action: "manual_feedback_propagation",
+        error: !supabase ? "Supabase is disabled." : "No linked memory rows found.",
+      });
+    }
+
+    const { successDelta, failureDelta } = feedbackCountersForWeight(weight);
+    const updates = memoryRows.map(row => ({
+      id: row.id,
+      quality_score: clampQualityScore(Number(row.quality_score ?? 0.5) + weight, Number(row.quality_score ?? 0.5)),
+      success_count: Number(row.success_count || 0) + successDelta,
+      failure_count: Number(row.failure_count || 0) + failureDelta,
+      updated_at: new Date().toISOString(),
+    }));
+
+    const { error } = await supabase
+      .from("cad_memory")
+      .upsert(updates, { onConflict: "id" });
+
+    if (error) {
+      if (!isMissingDbObject(error)) {
+        warnOnce(warned, "manual_feedback_propagation", `[DB] Manual feedback propagation failed: ${error.message}`);
+      }
+      return dbErrorResult("cad_memory", "manual_feedback_propagation", error);
+    }
+
+    return dbLogResult({
+      ok: true,
+      table: "cad_memory",
+      action: "manual_feedback_propagation",
+      createdAt: new Date().toISOString(),
+      details: { affectedRows: updates.length },
+    });
+  }
+
+  async function updateGenerationFeedbackFields(generationId, rating, feedback) {
+    if (!supabase || !generationId) return;
+
+    const updatePayload = {};
+    if (rating) updatePayload.user_rating = rating;
+    if (feedback) updatePayload.user_feedback = feedback;
+    if (!Object.keys(updatePayload).length) return;
+
+    const { error } = await supabase
+      .from("generations")
+      .update(updatePayload)
+      .eq("id", generationId);
+
+    if (error && !isMissingDbObject(error)) {
+      warnOnce(warned, "feedback_generation_update", `[DB] Failed to update generation feedback: ${error.message}`);
+    }
+  }
+
+  async function runPruneCadMemory() {
+    if (!supabase) {
+      return dbLogResult({
+        skipped: true,
+        table: "cad_memory_pruning_events",
+        action: "prune",
+        error: "Supabase is disabled.",
+      });
+    }
+
+    const rpc = await supabase.rpc("prune_cad_memory");
+    if (!rpc.error) {
+      return dbLogResult({
+        ok: true,
+        table: "cad_memory_pruning_events",
+        action: "prune",
+        createdAt: new Date().toISOString(),
+        details: { prunedCount: Number(rpc.data || 0) },
+      });
+    }
+
+    if (rpc.error && !isMissingDbObject(rpc.error)) {
+      warnOnce(warned, "prune_cad_memory_rpc", `[DB] prune_cad_memory RPC failed: ${rpc.error.message}`);
+    }
+
+    const candidates = await supabase
+      .from("cad_memory")
+      .select("id,quality_score")
+      .eq("is_active", true)
+      .gt("failure_count", 3)
+      .lt("quality_score", 0.2)
+      .limit(64);
+
+    if (candidates.error) {
+      if (!isMissingDbObject(candidates.error)) {
+        warnOnce(warned, "manual_prune_candidates", `[DB] Could not load prune candidates: ${candidates.error.message}`);
+      }
+      return dbErrorResult("cad_memory", "manual_prune_candidates", candidates.error);
+    }
+
+    const rows = Array.isArray(candidates.data) ? candidates.data : [];
+    if (!rows.length) {
+      return dbLogResult({
+        ok: true,
+        table: "cad_memory_pruning_events",
+        action: "prune",
+        createdAt: new Date().toISOString(),
+        details: { prunedCount: 0 },
+      });
+    }
+
+    const deactivate = await supabase
+      .from("cad_memory")
+      .upsert(rows.map(row => ({
+        id: row.id,
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })), { onConflict: "id" });
+
+    if (deactivate.error) {
+      if (!isMissingDbObject(deactivate.error)) {
+        warnOnce(warned, "manual_prune_deactivate", `[DB] Could not deactivate prune candidates: ${deactivate.error.message}`);
+      }
+      return dbErrorResult("cad_memory", "manual_prune_deactivate", deactivate.error);
+    }
+
+    const audit = await supabase
+      .from("cad_memory_pruning_events")
+      .insert(rows.map(row => ({
+        memory_id: row.id,
+        reason: "manual fallback prune: failure_count > 3 and quality_score < 0.2",
+        quality_score_before: row.quality_score,
+      })));
+
+    if (audit.error && !isMissingDbObject(audit.error)) {
+      warnOnce(warned, "manual_prune_audit", `[DB] Could not log manual prune audit rows: ${audit.error.message}`);
+    }
+
+    return dbLogResult({
+      ok: !audit.error || isMissingDbObject(audit.error),
+      table: "cad_memory_pruning_events",
+      action: "prune",
+      createdAt: new Date().toISOString(),
+      details: { prunedCount: rows.length, fallback: true },
+      error: audit.error && !isMissingDbObject(audit.error) ? audit.error.message : null,
+    });
+  }
+
   async function recordFeedback({ generationId, signal = "feedback", rating, feedback, weight }) {
     if (!supabase || !generationId) {
       return {
@@ -1040,6 +1266,7 @@ export function createLearningService({
     const safeWeight = Number.isFinite(Number(weight))
       ? Number(weight)
       : defaultFeedbackWeight(signal, safeRating);
+    const linkedMemoryBefore = await fetchLinkedMemoryRows(generationId);
 
     const rpc = await supabase.rpc("record_cad_feedback", {
       p_generation_id: generationId,
@@ -1050,8 +1277,21 @@ export function createLearningService({
     });
 
     if (!rpc.error) {
+      const linkedMemoryAfter = await fetchLinkedMemoryRows(generationId);
+      let propagation = null;
+      if (!feedbackPropagationLooksApplied(linkedMemoryBefore, linkedMemoryAfter, safeWeight)) {
+        propagation = await applyManualFeedbackPropagation(linkedMemoryBefore, safeWeight);
+      }
+      const prune = await runPruneCadMemory();
       const adaptiveNetwork = await trainAdaptiveNetworkFromFeedback({ generationId, signal, rating: safeRating, weight: safeWeight });
-      return { ok: true, weight: safeWeight, adaptiveNetwork, createdAt: new Date().toISOString() };
+      return {
+        ok: true,
+        weight: safeWeight,
+        adaptiveNetwork,
+        prune,
+        propagation,
+        createdAt: new Date().toISOString(),
+      };
     }
     if (rpc.error && !isMissingDbObject(rpc.error)) {
       warnOnce(warned, "record_cad_feedback_rpc", `[DB] Feedback RPC failed: ${rpc.error.message}`);
@@ -1069,17 +1309,9 @@ export function createLearningService({
       warnOnce(warned, "cad_feedback_events", `[DB] Failed to log feedback event: ${event.error.message}`);
     }
 
-    const updatePayload = {};
-    if (safeRating) updatePayload.user_rating = safeRating;
-    if (feedback) updatePayload.user_feedback = feedback;
-
-    if (Object.keys(updatePayload).length) {
-      const { error } = await supabase
-        .from("generations")
-        .update(updatePayload)
-        .eq("id", generationId);
-      if (error) warnOnce(warned, "feedback_generation_update", `[DB] Failed to update generation feedback: ${error.message}`);
-    }
+    await updateGenerationFeedbackFields(generationId, safeRating, feedback);
+    const propagation = await applyManualFeedbackPropagation(linkedMemoryBefore, safeWeight);
+    const prune = await runPruneCadMemory();
 
     const adaptiveNetwork = await trainAdaptiveNetworkFromFeedback({ generationId, signal, rating: safeRating, weight: safeWeight });
 
@@ -1087,6 +1319,8 @@ export function createLearningService({
       ok: !event.error || isMissingDbObject(event.error),
       weight: safeWeight,
       adaptiveNetwork,
+      propagation,
+      prune,
       createdAt: new Date().toISOString(),
       error: event.error && !isMissingDbObject(event.error) ? event.error.message : null,
     };
@@ -1178,27 +1412,43 @@ export function createLearningService({
       rating ? `Rating: ${rating}.` : "",
       feedback ? `Feedback: ${normalizeText(feedback).slice(0, 240)}` : "",
     ].filter(Boolean);
+    const summary = summaryParts.join(" ");
+    const tags = safeTextArray(candidate.tags || ["feedback", "generated"]);
+    const keywords = safeTextArray(candidate.keywords || extractKeywords(prompt, 8));
+    const parameterHints = safeTextArray(candidate.parameterHints || candidate.parameter_hints);
+    const modelingNotes = safeTextArray(candidate.modelingNotes || candidate.modeling_notes);
+    const failureModes = safeTextArray(candidate.failureModes || candidate.failure_modes);
+    const validationRules = safeTextArray(candidate.validationRules || candidate.validation_rules);
 
-    const payload = {
+    const memoryPayload = {
       memory_type: "feedback_lesson",
       title,
-      summary: summaryParts.join(" "),
+      summary,
       shape_type: shapeHint || null,
-      tags: safeTextArray(candidate.tags || ["feedback", "generated"]),
-      keywords: safeTextArray(candidate.keywords || extractKeywords(prompt, 8)),
-      parameter_hints: safeTextArray(candidate.parameterHints || candidate.parameter_hints),
-      modeling_notes: safeTextArray(candidate.modelingNotes || candidate.modeling_notes),
+      tags,
+      keywords,
+      parameter_hints: parameterHints,
+      modeling_notes: modelingNotes,
       feature_pattern: normalizeText(candidate.featurePattern || candidate.feature_pattern || "").slice(0, 1000) || null,
-      failure_modes: safeTextArray(candidate.failureModes || candidate.failure_modes),
-      validation_rules: safeTextArray(candidate.validationRules || candidate.validation_rules),
+      failure_modes: failureModes,
+      validation_rules: validationRules,
       quality_score: clampQualityScore(candidate.qualityScore ?? candidate.quality_score, signal === "good" || Number(rating) >= 4 ? 0.68 : 0.45),
       source_table: "cad_feedback_events",
       is_active: true,
     };
+    const knowledgePayload = {
+      title,
+      summary,
+      tags,
+      keywords,
+      parameter_hints: parameterHints,
+      modeling_notes: modelingNotes,
+      example_prompt: normalizeText(candidate.examplePrompt || candidate.example_prompt || prompt).slice(0, 500) || null,
+    };
 
     const { data, error } = await supabase
       .from("cad_memory")
-      .upsert([payload], { onConflict: "title" })
+      .upsert([memoryPayload], { onConflict: "title" })
       .select("id,created_at")
       .single();
 
@@ -1207,12 +1457,35 @@ export function createLearningService({
       return dbErrorResult("cad_memory", "upsert", error);
     }
 
+    const knowledge = await supabase
+      .from("cad_knowledge")
+      .upsert([knowledgePayload], { onConflict: "title" })
+      .select("id,created_at")
+      .single();
+
+    if (knowledge.error && !isMissingDbObject(knowledge.error)) {
+      warnOnce(warned, "save_learning_analysis_knowledge", `[DB] Failed to save AI learning knowledge: ${knowledge.error.message}`);
+    }
+
     return dbLogResult({
       id: data?.id || null,
       ok: Boolean(data?.id),
       table: "cad_memory",
       action: "upsert",
       createdAt: data?.created_at || new Date().toISOString(),
+      details: {
+        cadKnowledge: knowledge.error
+          ? dbErrorResult("cad_knowledge", "upsert", knowledge.error)
+          : dbLogResult({
+              id: knowledge.data?.id || null,
+              ok: Boolean(knowledge.data?.id),
+              table: "cad_knowledge",
+              action: "upsert",
+              createdAt: knowledge.data?.created_at || new Date().toISOString(),
+            }),
+        validationRules,
+        failureModes,
+      },
     });
   }
 

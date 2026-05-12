@@ -229,8 +229,9 @@ app.post("/learning/analyze", async (req, res) => {
   }
 
   try {
+    let feedbackResult = null;
     if (generationId) {
-      await learning.recordFeedback({
+      feedbackResult = await learning.recordFeedback({
         generationId,
         signal,
         rating,
@@ -259,6 +260,7 @@ app.post("/learning/analyze", async (req, res) => {
     res.json({
       ok: true,
       analyzedAt: new Date().toISOString(),
+      feedback: feedbackResult,
       analysis,
       memory,
       database: {
