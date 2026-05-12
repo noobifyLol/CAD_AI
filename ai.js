@@ -753,9 +753,9 @@ function buildLearningContextText(learningContext = {}) {
 
   if (knowledge.length) {
     lines.push("CAD modeling knowledge to apply:");
-    knowledge.slice(0, 3).forEach((entry, index) => {
+    knowledge.slice(0, 6).forEach((entry, index) => {
       const title = normalizeText(entry.title || `Knowledge ${index + 1}`);
-      const summary = normalizeText(entry.summary || "").slice(0, 120); // cap summary
+      const summary = normalizeText(entry.summary || "").slice(0, 150);
       const hints = Array.isArray(entry.parameter_hints || entry.parameterHints) ? (entry.parameter_hints || entry.parameterHints) : [];
       const notesList = Array.isArray(entry.modeling_notes || entry.modelingNotes) ? (entry.modeling_notes || entry.modelingNotes) : [];
       const keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
@@ -763,13 +763,13 @@ function buildLearningContextText(learningContext = {}) {
       const validationRules = Array.isArray(entry.validation_rules || entry.validationRules) ? (entry.validation_rules || entry.validationRules) : [];
       const memoryType = normalizeText(entry.memory_type || entry.memoryType || "");
       const quality = Number.isFinite(Number(entry.quality_score)) ? Number(entry.quality_score).toFixed(2) : "";
-      const featurePattern = normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 180);
+      const featurePattern = normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 300);
 
       lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}${memoryType || quality ? ` (${[memoryType, quality && `q=${quality}`].filter(Boolean).join(", ")})` : ""}`);
-      if (keywords.length) lines.push(`   keywords=${keywords.slice(0, 5).join(", ")}`);
-      if (hints.length) lines.push(`   parameters=${hints.slice(0, 3).map(normalizeText).join(" | ")}`);
-      if (notesList.length) lines.push(`   modeling=${notesList.slice(0, 2).map(normalizeText).join(" | ")}`);
-      if (featurePattern) lines.push(`   pattern=${featurePattern}`);
+      if (keywords.length) lines.push(`   keywords=${keywords.slice(0, 6).join(", ")}`);
+      if (hints.length) lines.push(`   parameters=${hints.slice(0, 4).map(normalizeText).join(" | ")}`);
+      if (notesList.length) lines.push(`   modeling=${notesList.slice(0, 3).map(normalizeText).join(" | ")}`);
+      if (featurePattern) lines.push(`   confirmed_pattern=${featurePattern}`);
       if (failureModes.length) lines.push(`   avoid=${failureModes.slice(0, 2).map(normalizeText).join(" | ")}`);
       if (validationRules.length) lines.push(`   validate=${validationRules.slice(0, 2).map(normalizeText).join(" | ")}`);
     });
@@ -1195,47 +1195,106 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   return lines.join("\n");
 }
 
-const CUSTOM_FEATURE_SYSTEM = `You are an expert Onshape FeatureScript author.
-Return ONLY a JSON object:
+const CUSTOM_FEATURE_SYSTEM = `You are an expert Onshape FeatureScript author. You write production-quality custom features.
+Return ONLY a JSON object — no markdown, no explanation outside the JSON:
 {
   "featureName": "camelCaseName",
   "featureLabel": "Readable Feature Name",
-  "reasoning": "1-3 sentence summary of the modeling strategy",
-  "code": "complete raw FeatureScript file"
+  "reasoning": "2-3 sentence modeling strategy",
+  "code": "complete raw FeatureScript file — no backticks"
 }
 
-Your job is to generate flexible, editable, compile-safe FeatureScript for complex or custom 3D parts.
+═══ MANDATORY FILE STRUCTURE ═══
+Every file must follow this exact structure:
 
-Hard rules from the Onshape FeatureScript docs:
-- Define exactly one custom feature with annotation { "Feature Type Name" : ... } and export const ...
-- Use a precondition block with editable parameters. Prefer isLength(...) for dimensions, isInteger(...) for counts, and booleans for toggles.
-- Never write "definition.someParam is Length". That is invalid FeatureScript. Use isLength(definition.someParam, LENGTH_BOUNDS); or a typed custom bound spec.
-- Prefer LENGTH_BOUNDS for all length parameters and set the initial value through annotation { "Default" : "1 * inch" }.
-- If the prompt does not provide every dimension, choose sensible defaults and expose them as parameters so the user can change them later.
-- Use newSketchOnPlane(...) or newSketch(..., { "sketchPlane" : ... }) for sketches and ALWAYS call skSolve(...) after all sketch entities and before opExtrude/opRevolve. Omitting skSolve is a fatal error — sketch geometry will not generate.
-- Use operation definition maps such as opExtrude(context, id + "extrude1", { ... }).
-- Do not invent APIs or map fields. Do not use startAngle/endAngle on opCylinder.
-- When a definition parameter already comes from isLength(...), use definition.param directly in the body. Do not multiply it by * inch again — that doubles the units and is wrong.
-- Avoid duplicate export const blocks, markdown fences, comments about uncertainty, or placeholder TODO code.
-- Prefer robust, simple geometry over flashy but brittle code.
-- Use the supplied FeatureScript documentation snippets as the source of truth for syntax and operation map fields.
+  FeatureScript 2931;
+  import(path : "onshape/std/geometry.fs", version : "2931.0");
 
-CRITICAL — Function declarations inside the feature body:
-  Named typed top-level functions (e.g. "function foo(x is number) returns vector { }") are
-  ONLY legal at MODULE TOP LEVEL, OUTSIDE the defineFeature(...) call.
-  Inside a feature body (which is a lambda), you MUST use const lambda assignments instead:
-    WRONG (causes parse errors):
-      function invPoint(t is number, rb is number) returns vector { ... }
-    RIGHT (legal inside a feature body):
-      const invPoint = function(t is number, rb is number) { ... };
-  If you need helper functions for geometry (e.g. involute point math), declare them as
-  const lambda assignments at the TOP of the feature body, before any other statements.
-  Alternatively, declare them as top-level functions BEFORE the annotation block.
+  annotation { "Feature Type Name" : "My Feature" }
+  export const myFeature = defineFeature(function(context is Context, id is Id, definition is map)
+      precondition
+      {
+          // parameter declarations here
+      }
+      {
+          // feature body here
+      });
 
-Goal:
-- Match the user's requested shape as closely as possible.
-- Keep the model adjustable in the Onshape dialog.
-- Minimize the chance of FeatureScript syntax or map/type errors.`;
+═══ PRECONDITION RULES (from official FS docs) ═══
+- User-selectable plane:
+    annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
+    definition.location is Query;
+- Length parameter (ALWAYS use this form — never "definition.x is Length"):
+    annotation { "Name" : "Width", "Default" : "2 * inch" }
+    isLength(definition.width, LENGTH_BOUNDS);
+- Integer parameter:
+    annotation { "Name" : "Count", "Default" : "4" }
+    isInteger(definition.count);
+    definition.count >= 1;
+    definition.count <= 100;
+- Number parameter:
+    annotation { "Name" : "Angle (deg)", "Default" : "20" }
+    definition.angleDeg is number;
+    definition.angleDeg >= 10;
+    definition.angleDeg <= 30;
+- Boolean toggle:
+    annotation { "Name" : "Add Bore" }
+    definition.addBore is boolean;
+
+═══ FEATURE BODY RULES (from official FS docs) ═══
+- Get the sketch plane from the user-selected plane parameter:
+    var skPlane = isQueryEmpty(context, definition.location)
+        ? plane(WORLD_ORIGIN, Z_DIRECTION)
+        : evPlane(context, { "face" : definition.location });
+- Create a sketch on that plane:
+    var sk = newSketchOnPlane(context, id + "sk1", { "sketchPlane" : skPlane });
+- ALWAYS call skSolve before any opExtrude/opRevolve — omitting skSolve means NO geometry appears:
+    skSolve(sk);
+- Extrude from a solved sketch:
+    opExtrude(context, id + "ext1", {
+        "entities"  : qSketchRegion(id + "sk1"),
+        "direction" : skPlane.normal,
+        "endBound"  : BoundingType.BLIND,
+        "endDepth"  : definition.depth
+    });
+- definition.depth is already a Length value from isLength() — NEVER write definition.depth * inch.
+- opCylinder valid keys: "bottomCenter" (Vector), "topCenter" (Vector), "radius" (Length), "operationType".
+  NO startAngle, NO endAngle — those do not exist on opCylinder.
+- opRevolve: { "entities": Query, "axis": Line, "angleForward": 2 * PI * radian }
+- opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperationType.UNION }
+
+═══ FUNCTION SCOPE RULE — THE #1 CAUSE OF PARSE ERRORS ═══
+The feature body is a LAMBDA (anonymous function) passed to defineFeature.
+Named top-level functions (function foo(...) returns T { }) are ILLEGAL inside a lambda.
+WRONG — causes "missing TOP_SEMI" and "no viable alternative" parse errors:
+    function invPoint(t is number, rb is number) returns vector { ... }
+RIGHT — const lambda is a VALUE, legal inside any scope:
+    const invPoint = function(t is number, rb is number) { return ...; };
+Use const lambdas for ALL helper functions inside the feature body.
+
+═══ SKETCH API ═══
+- skLineSegment(sk, "line1", { "start": vector(0,0) * inch, "end": vector(1,0) * inch });
+- skCircle(sk, "circ1", { "center": vector(0,0) * inch, "radius": definition.radius });
+- skRectangle(sk, "rect1", { "firstCorner": vector(-w/2,-h/2) * inch, "secondCorner": vector(w/2,h/2) * inch });
+  (w and h are plain numbers here — multiply by inch to make them Length vectors)
+- skFitSpline(sk, "spline1", { "points": [vector(x1,y1) * inch, vector(x2,y2) * inch, ...] });
+- skRegularPolygon(sk, "poly1", { "center": vector(0,0) * inch, "firstVertex": vector(r,0) * inch, "sides": 6 });
+  ("skPolygon" does NOT exist — always use skRegularPolygon)
+
+═══ COMMON MISTAKES TO AVOID ═══
+1. Writing "definition.x is Length" in precondition — WRONG. Use isLength(definition.x, LENGTH_BOUNDS).
+2. Writing "definition.x * inch" in the body when x is an isLength param — doubles the units, WRONG.
+3. Using startAngle or endAngle on opCylinder — those keys DO NOT EXIST.
+4. Forgetting skSolve(sk) before opExtrude — sketch geometry will not appear without it.
+5. Named functions (function foo() {}) inside the feature body — use const lambdas instead.
+6. Using "skPolygon" — it does not exist. Use skRegularPolygon.
+7. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
+
+═══ GOAL ═══
+- Build exactly what the user asked for, with sensible parametric defaults.
+- Every parameter must be editable in the Onshape feature dialog.
+- Prefer simple, robust geometry over clever but brittle geometry.
+- The code must compile and produce visible 3D geometry with zero errors.`;
 
 async function generateCustomFeatureScript(prompt, dims, learningContext = {}) {
   const systemPrompt = withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext);

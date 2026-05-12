@@ -715,7 +715,7 @@ export function createLearningService({
       query_text: prompt,
       query_keywords: keywords,
       query_shape: shapeHint,
-      match_limit: 8,
+      match_limit: 16,
     });
 
     if (!rpc.error && Array.isArray(rpc.data)) {
@@ -735,7 +735,7 @@ export function createLearningService({
       .from("cad_memory")
       .select("id,memory_type,title,summary,shape_type,tags,keywords,parameter_hints,modeling_notes,feature_pattern,failure_modes,validation_rules,quality_score,usage_count,success_count,failure_count,is_active")
       .eq("is_active", true)
-      .limit(32);
+      .limit(64);
 
     if (error) {
       if (!isMissingDbObject(error)) warnOnce(warned, "cad_memory", `[DB] Could not load CAD memory: ${error.message}`);
@@ -745,9 +745,9 @@ export function createLearningService({
     return (Array.isArray(data) ? data : [])
       .map(row => ({ ...mapCadMemory(row), _score: scoreMemory(keywords, shapeHint, row) }))
       .filter(shouldKeepMemoryRow)
-      .filter(row => row._score > 0.5)
+      .filter(row => row._score > 0.3)
       .sort((a, b) => b._score - a._score)
-      .slice(0, 8);
+      .slice(0, 16);
   }
 
   async function fetchCadKnowledge(keywords) {
@@ -755,8 +755,8 @@ export function createLearningService({
 
     let query = supabase
       .from("cad_knowledge")
-      .select("title,summary,tags,keywords,parameter_hints,modeling_notes,example_prompt")
-      .limit(16);
+      .select("title,summary,tags,keywords,parameter_hints,modeling_notes,example_prompt,feature_pattern")
+      .limit(32);
 
     if (keywords.length) {
       const filters = keywords
@@ -823,15 +823,15 @@ export function createLearningService({
       fetchShapeKnowledge(shapeHint, keywords),
     ]);
 
-    const rankedExamples = rerankCandidates(adaptiveState, examples, rankContext, "example", 4);
-    const rankedCadMemory = rerankCandidates(adaptiveState, cadMemory, rankContext, "memory", 8);
-    const rankedCadKnowledge = rerankCandidates(adaptiveState, cadKnowledge, rankContext, "knowledge", 8);
-    const rankedShapeKnowledge = rerankCandidates(adaptiveState, shapeKnowledge, rankContext, "shape", 4);
-    const localKnowledge = rerankCandidates(adaptiveState, getLocalKnowledge(prompt, shapeHint), rankContext, "local", 6);
-    const featureScriptDocs = rerankCandidates(adaptiveState, getFeatureScriptDocs(prompt, keywords, shapeHint), rankContext, "docs", 4);
+    const rankedExamples = rerankCandidates(adaptiveState, examples, rankContext, "example", 6);
+    const rankedCadMemory = rerankCandidates(adaptiveState, cadMemory, rankContext, "memory", 16);
+    const rankedCadKnowledge = rerankCandidates(adaptiveState, cadKnowledge, rankContext, "knowledge", 16);
+    const rankedShapeKnowledge = rerankCandidates(adaptiveState, shapeKnowledge, rankContext, "shape", 6);
+    const localKnowledge = rerankCandidates(adaptiveState, getLocalKnowledge(prompt, shapeHint), rankContext, "local", 8);
+    const featureScriptDocs = rerankCandidates(adaptiveState, getFeatureScriptDocs(prompt, keywords, shapeHint, 8), rankContext, "docs", 8);
     const memoryMatches = rankedCadMemory
       .filter(memory => memory.id)
-      .slice(0, 8)
+      .slice(0, 16)
       .map((memory, index) => ({
         memory_id: memory.id,
         score_rank: index + 1,
@@ -869,7 +869,7 @@ export function createLearningService({
         ...rankedShapeKnowledge,
         ...rankedCadKnowledge,
         ...localKnowledge,
-      ], 8),
+      ], 16),
       adaptiveNetwork: {
         source: adaptiveStateSource,
         hiddenLayers: adaptiveState.hiddenLayers,
@@ -1100,17 +1100,85 @@ export function createLearningService({
     const { successDelta, failureDelta } = feedbackCountersForWeight(weight);
     const afterById = new Map(afterRows.map(row => [row.id, row]));
 
+    // The RPC applied correctly if ANY row had its quality_score actually change
     return beforeRows.some(before => {
       const after = afterById.get(before.id);
       if (!after) return false;
-
-      const expectedQuality = clampQualityScore(Number(before.quality_score ?? 0.5) + weight, Number(before.quality_score ?? 0.5));
-      const qualityChanged = Math.abs(Number(after.quality_score ?? 0) - expectedQuality) < 1e-9;
-      const successChanged = Number(after.success_count || 0) === Number(before.success_count || 0) + successDelta;
-      const failureChanged = Number(after.failure_count || 0) === Number(before.failure_count || 0) + failureDelta;
-
+      const qualityChanged = Math.abs(Number(after.quality_score ?? 0) - Number(before.quality_score ?? 0)) > 1e-6;
+      const successChanged = Number(after.success_count || 0) !== Number(before.success_count || 0);
+      const failureChanged = Number(after.failure_count || 0) !== Number(before.failure_count || 0);
       return qualityChanged || successChanged || failureChanged;
     });
+  }
+
+  /**
+   * When feedback is "good" or rating >= 4, copy the generation's confirmed FeatureScript
+   * into cad_knowledge AND cad_memory with high quality_score.
+   * This is the mechanism that makes cad_knowledge grow over time — currently it's stuck
+   * at 8 seed rows because nothing writes to it during normal operation.
+   */
+  async function promoteGenerationToKnowledge(generationId, signal, safeRating, prompt) {
+    if (!supabase || !generationId) return;
+    const isGood = ["good", "helpful", "copied"].includes(signal) || Number(safeRating) >= 4;
+    if (!isGood) return;
+
+    const { data: gen, error } = await supabase
+      .from("generations")
+      .select("id, prompt, shape_type, featurescript, thinking, dims")
+      .eq("id", generationId)
+      .maybeSingle();
+
+    if (error || !gen?.featurescript || gen.featurescript.length < 80) return;
+
+    const basePrompt = normalizeText(prompt || gen.prompt || "");
+    const title = (basePrompt.slice(0, 100) || `Good generation ${generationId.slice(0, 8)}`);
+    const shapeType = gen.shape_type || null;
+    const keywords = extractKeywords(gen.prompt || prompt || "", 10);
+    const summary = normalizeText(gen.thinking || "").slice(0, 280) || `Confirmed FeatureScript for: ${title}`;
+
+    // ── Grow cad_knowledge with the confirmed working code ─────────────────────
+    const { error: kErr } = await supabase
+      .from("cad_knowledge")
+      .upsert([{
+        title,
+        summary,
+        tags: [shapeType, "confirmed", "user_approved"].filter(Boolean),
+        keywords,
+        parameter_hints: [],
+        modeling_notes: [`User confirmed this generation works. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`],
+        example_prompt: normalizeText(gen.prompt || "").slice(0, 200),
+        feature_pattern: (gen.featurescript || "").slice(0, 1000),
+      }], { onConflict: "title" });
+
+    if (kErr && !isMissingDbObject(kErr)) {
+      warnOnce(warned, "promote_knowledge", `[DB] Could not promote to cad_knowledge: ${kErr.message}`);
+    } else if (!kErr) {
+      console.log(`[Learning] ✓ Promoted to cad_knowledge: "${title}"`);
+    }
+
+    // ── Also promote into cad_memory with high quality_score for immediate retrieval ──
+    const { error: mErr } = await supabase
+      .from("cad_memory")
+      .upsert([{
+        memory_type: "confirmed_generation",
+        title,
+        summary,
+        shape_type: shapeType,
+        tags: [shapeType, "confirmed", "user_approved"].filter(Boolean),
+        keywords,
+        parameter_hints: [],
+        modeling_notes: [`User confirmed. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`],
+        feature_pattern: (gen.featurescript || "").slice(0, 1000),
+        failure_modes: [],
+        validation_rules: ["Confirmed working by user"],
+        quality_score: 0.88,
+        source_table: "generations",
+        is_active: true,
+      }], { onConflict: "title" });
+
+    if (mErr && !isMissingDbObject(mErr)) {
+      warnOnce(warned, "promote_memory", `[DB] Could not promote to cad_memory: ${mErr.message}`);
+    }
   }
 
   async function applyManualFeedbackPropagation(memoryRows, weight) {
@@ -1290,6 +1358,7 @@ export function createLearningService({
       if (!feedbackPropagationLooksApplied(linkedMemoryBefore, linkedMemoryAfter, safeWeight)) {
         propagation = await applyManualFeedbackPropagation(linkedMemoryBefore, safeWeight);
       }
+      await promoteGenerationToKnowledge(generationId, signal, safeRating, feedback);
       const prune = await runPruneCadMemory();
       const adaptiveNetwork = await trainAdaptiveNetworkFromFeedback({ generationId, signal, rating: safeRating, weight: safeWeight });
       return {
@@ -1319,6 +1388,7 @@ export function createLearningService({
 
     await updateGenerationFeedbackFields(generationId, safeRating, feedback);
     const propagation = await applyManualFeedbackPropagation(linkedMemoryBefore, safeWeight);
+    await promoteGenerationToKnowledge(generationId, signal, safeRating, feedback);
     const prune = await runPruneCadMemory();
 
     const adaptiveNetwork = await trainAdaptiveNetworkFromFeedback({ generationId, signal, rating: safeRating, weight: safeWeight });

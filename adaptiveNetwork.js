@@ -129,25 +129,96 @@ function heuristicScore(candidate) {
   return clamp(Math.tanh(Number(candidate._score || candidate.match_score || 0) / 8));
 }
 
+/**
+ * CAD-Quality Feature Vector — 11 inputs, all in [0,1]
+ *
+ * The original vector scored candidates as generic retrieval candidates.
+ * This version scores them specifically for CAD generation quality:
+ * "How useful is this memory row for helping the AI generate correct FeatureScript?"
+ *
+ * Input layout:
+ *  0  keyword_overlap      — how many prompt keywords match this memory's text
+ *  1  shape_match          — exact shape_type match to the current request
+ *  2  quality_score        — stored quality_score (0=bad, 1=confirmed working)
+ *  3  has_feature_pattern  — does this row contain FeatureScript code/pattern?
+ *  4  success_rate         — success_count / (success_count + failure_count)
+ *  5  failure_penalty      — failure_count normalized (high = avoid this)
+ *  6  source_authority     — confirmed_generation > feedback_lesson > seed > local
+ *  7  recency              — exponential decay over 45 days
+ *  8  usage_normalized     — log-normalized usage_count (popular = useful)
+ *  9  has_failure_modes    — does this row warn about specific mistakes?
+ * 10  has_validation_rules — does this row have rules we can check against?
+ */
 export function candidateFeatureVector(candidate, context = {}, sourceKind = "memory") {
   const shapeHint = context.shapeHint;
+
+  // 0: keyword overlap
+  const keywordOverlapVal = keywordOverlap(candidate, context);
+
+  // 1: shape match
   const shapeMatch = shapeHint && candidate.shape_type === shapeHint ? 1 : 0;
-  const usage = Math.log1p(Number(candidate.usage_count || 0)) / Math.log1p(100);
-  const hasFailures = Array.isArray(candidate.failure_modes || candidate.failureModes)
-    && (candidate.failure_modes || candidate.failureModes).length > 0;
+
+  // 2: quality score — clamped, this is the primary learning signal
+  const qualityVal = clamp(Number(candidate.quality_score ?? 0.5));
+
+  // 3: has FeatureScript pattern/code — rows with actual code are more useful
+  const hasPatternVal = Boolean(
+    candidate.feature_pattern || candidate.featurescript ||
+    (candidate.text && candidate.text.includes("defineFeature"))
+  ) ? 1 : 0;
+
+  // 4: success rate
+  const successVal = successScore(candidate);
+
+  // 5: failure penalty — inverted, so high failure = low score
+  const failureVal = failureScore(candidate);
+
+  // 6: source authority — confirmed generations are most valuable for CAD
+  const authorityMap = {
+    confirmed_generation: 1.0,
+    feedback_lesson: 0.82,
+    memory: 0.75,
+    example: 0.70,
+    knowledge: 0.62,
+    shape: 0.58,
+    pruning_rule: 0.55,
+    local_seed: 0.45,
+    local: 0.42,
+    docs: 0.50,
+    seed: 0.48,
+  };
+  const authority = clamp(
+    authorityMap[candidate.memory_type || candidate.memoryType || sourceKind] ??
+    authorityMap[sourceKind] ??
+    0.5
+  );
+
+  // 7: recency
+  const recencyVal = recencyScore(candidate);
+
+  // 8: usage — popular memories are useful, but log-normalize to prevent dominance
+  const usage = clamp(Math.log1p(Number(candidate.usage_count || 0)) / Math.log1p(100));
+
+  // 9: has failure modes — warns the AI what NOT to do, very valuable
+  const hasFailureModes = Array.isArray(candidate.failure_modes || candidate.failureModes)
+    && (candidate.failure_modes || candidate.failureModes).length > 0 ? 0.85 : 0;
+
+  // 10: has validation rules — lets AI self-check output
+  const hasValidationRules = Array.isArray(candidate.validation_rules || candidate.validationRules)
+    && (candidate.validation_rules || candidate.validationRules).length > 0 ? 0.75 : 0;
 
   return [
-    heuristicScore(candidate),
-    keywordOverlap(candidate, context),
+    keywordOverlapVal,
     shapeMatch,
-    qualityScore(candidate),
-    sourceScore(sourceKind),
-    successScore(candidate),
-    failureScore(candidate),
-    clamp(usage),
-    recencyScore(candidate),
-    hasPattern(candidate) ? 1 : 0,
-    hasFailures ? 0.75 : 0,
+    qualityVal,
+    hasPatternVal,
+    successVal,
+    failureVal,
+    authority,
+    recencyVal,
+    usage,
+    hasFailureModes,
+    hasValidationRules,
   ].map(value => clamp(value));
 }
 
