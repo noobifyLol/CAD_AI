@@ -50,8 +50,8 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null) {
 // Key FeatureScript rules baked in here, not left to the AI:
 //   - isLength(definition.foo, BOUNDS) in precondition → gives user an editable slider
 //   - definition.foo in body already has Length type — do NOT multiply by * inch
-//   - opCylinder takes: context, id, { bottomCenter, topCenter, radius, operationType }
-//     NO startAngle / endAngle — those do not exist on opCylinder
+//   - fCylinder takes: context, id, { bottomCenter, topCenter, radius }
+//   - opCylinder is not the right primitive here for this codebase's FS docs
 //   - newSketchOnPlane for user-selected planes, not newSketch
 //   - skSolve() after all sketch entities, before any opExtrude
 
@@ -207,14 +207,12 @@ function tCylinder(d) {
       preconditionLength("radius", "Radius",  0.01, d.radiusInches, 24),
       preconditionLength("height", "Height",  0.01, d.depthInches,  48),
     ].join("\n"),
-    // opCylinder correct signature: context, id, { bottomCenter, topCenter, radius, operationType }
-    // NO startAngle, NO endAngle — those params do not exist
+    // fCylinder is the documented primitive in the local FS docs.
     body: `${planeVar()}
-        opCylinder(context, id + "cyl1", {
+        fCylinder(context, id + "cyl1", {
             "bottomCenter"  : skPlane.origin,
             "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
-            "radius"        : definition.radius,
-            "operationType" : NewBodyOperationType.NEW
+            "radius"        : definition.radius
         });`,
   };
 }
@@ -455,11 +453,10 @@ function tHitchPeg(d) {
     ].join("\n"),
     body: `${planeVar()}
         // Shaft
-        opCylinder(context, id + "shaft", {
+        fCylinder(context, id + "shaft", {
             "bottomCenter"  : skPlane.origin,
             "topCenter"     : skPlane.origin + skPlane.normal * definition.shaftHeight,
-            "radius"        : definition.shaftRadius,
-            "operationType" : NewBodyOperationType.NEW
+            "radius"        : definition.shaftRadius
         });
         // Dome head — revolved semicircle centred at top of shaft
         var domePlane = plane(skPlane.origin + skPlane.normal * definition.shaftHeight, skPlane.normal, skPlane.x);
@@ -744,9 +741,10 @@ function buildLearningContextText(learningContext = {}) {
     lines.push(`6. Sketches: var sk = newSketchOnPlane(context, id + "sk1", { "sketchPlane": skPlane }); — then add entities — then ALWAYS call skSolve(sk); before any opExtrude/opRevolve.`);
     lines.push(`7. Vector coords: vector(x, y) * inch where x and y are unitless numbers (divide a Length by inch to get a number: definition.width / inch).`);
     lines.push(`8. opExtrude: opExtrude(context, id + "ext1", { "entities": qSketchRegion(id + "sk1"), "direction": skPlane.normal, "endBound": BoundingType.BLIND, "endDepth": definition.depth });`);
-    lines.push(`9. opCylinder: opCylinder(context, id + "cyl1", { "bottomCenter": pt, "topCenter": pt, "radius": r, "operationType": NewBodyOperationType.NEW }); — NO startAngle/endAngle.`);
+    lines.push(`9. fCylinder: fCylinder(context, id + "cyl1", { "bottomCenter": pt, "topCenter": pt, "radius": r });`);
     lines.push(`10. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
-    lines.push(`11. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
+    lines.push(`11. Remove helper variables that are computed but never used if they do not affect the final geometry.`);
+    lines.push(`12. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
   }
 
   if (examples.length) {
@@ -902,8 +900,8 @@ function performGeometricReasoning(dims) {
 
   // ── 7. Structural guidance tag ────────────────────────────────────────────
   const structural =
-    profile === "thin_plate"     ? "use_plate_or_sheet_template" :
-    profile.includes("slender")  ? "axial_load_dominant_consider_opCylinder_or_opExtrude" :
+    profile === "thin_plate"     ? "use_plate_or_sheet_profile" :
+    profile.includes("slender")  ? "axial_load_dominant_consider_fCylinder_or_opExtrude" :
     genus > 0                    ? "sketch_holes_before_extrude_not_opBoolean_subtract" :
     wt > 0 && wt < 0.1           ? "keep_wall_thickness_editable_parameter" :
                                    "standard_solid_body";
@@ -960,8 +958,10 @@ function sanitizeFeatureScript(code) {
 
   // ── Basic token repairs ───────────────────────────────────────────────────
   cleaned = cleaned
+    .replace(/\bopCylinder\s*\(/g, "fCylinder(")
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
+    .replace(/^\s*"operationType"\s*:\s*NewBodyOperationType\.\w+,?\s*$/gm, "")
     .replace(/^\s*return\s+[^;{][^;]*;\s*$/gm, "")          // remove value-returning returns in bodies
     .replace(/\bskSpline\s*\(/g, "skFitSpline(")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
@@ -1212,7 +1212,7 @@ function buildThinkingTrace(prompt, d, meta = {}) {
     lines.push(`Compound shape: cylindrical shaft + hemispherical dome`);
     lines.push(`  Shaft: radius ${d.widthInches/2} in, height ${d.depthInches} in`);
     lines.push(`  Dome:  radius ${d.radiusInches} in`);
-    lines.push(`  Build: opCylinder (shaft) + opRevolve (dome) + opBoolean union`);
+    lines.push(`  Build: fCylinder (shaft) + opRevolve (dome) + opBoolean union`);
   } else if (d.shape === "LINKAGE") {
     const hR = d.holeRadiusInches > 0 ? d.holeRadiusInches : d.widthInches * 0.18;
     lines.push(`  Length: ${d.shaftLengthInches} in  Width: ${d.widthInches} in  Thickness: ${d.depthInches} in`);
@@ -1307,8 +1307,13 @@ Every file must follow this exact structure:
         "endDepth"  : definition.depth
     });
 - definition.depth is already a Length value from isLength() — NEVER write definition.depth * inch.
-- opCylinder valid keys: "bottomCenter" (Vector), "topCenter" (Vector), "radius" (Length), "operationType".
-  NO startAngle, NO endAngle — those do not exist on opCylinder.
+- Simple cylinders in this project should use:
+    fCylinder(context, id + "cyl1", {
+        "bottomCenter" : vector(0, 0, 0) * inch,
+        "topCenter"    : vector(0, 0, 1) * inch,
+        "radius"       : definition.radius
+    });
+- Do not use opCylinder in this project. The local FeatureScript docs here teach fCylinder for simple cylindrical solids.
 - opRevolve: { "entities": Query, "axis": Line, "angleForward": 2 * PI * radian }
 - opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperationType.UNION }
 
@@ -1333,11 +1338,12 @@ Use const lambdas for ALL helper functions inside the feature body.
 ═══ COMMON MISTAKES TO AVOID ═══
 1. Writing "definition.x is Length" in precondition — WRONG. Use isLength(definition.x, LENGTH_BOUNDS).
 2. Writing "definition.x * inch" in the body when x is an isLength param — doubles the units, WRONG.
-3. Using startAngle or endAngle on opCylinder — those keys DO NOT EXIST.
+3. Using opCylinder for a simple cylinder in this project — use fCylinder instead.
 4. Forgetting skSolve(sk) before opExtrude — sketch geometry will not appear without it.
 5. Named functions (function foo() {}) inside the feature body — use const lambdas instead.
 6. Using "skPolygon" — it does not exist. Use skRegularPolygon.
-7. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
+7. Keeping helper variables that are computed but never used — remove them before returning code.
+8. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
 
 ═══ GOAL ═══
 - Author a fresh FeatureScript design from the request and the context below. Do not default to a canned box, plate, or gear template unless the request is extremely simple.
@@ -1472,10 +1478,10 @@ PRECONDITION EXACT SYNTAX:
   NEVER:    definition.x is number;
   NEVER:    definition.x >= N;
 
-opCylinder signature:
-  opCylinder(context is Context, id is Id, definition is map)
-  Map keys: "bottomCenter" (Vector), "topCenter" (Vector), "radius" (Length), "operationType" (NewBodyOperationType)
-  NO startAngle. NO endAngle. NO angle params whatsoever.
+fCylinder signature:
+  fCylinder(context is Context, id is Id, definition is map)
+  Map keys: "bottomCenter" (Vector), "topCenter" (Vector), "radius" (Length)
+  Use fCylinder for simple cylindrical solids in this project.
 
 isLength in precondition:
   annotation { "Name" : "My Param", "Default" : "1 * inch" }
@@ -1509,6 +1515,9 @@ skFitSpline: valid sketch spline API
   skFitSpline(sketch, "spline1", { "points": [...] })
   "skSpline" is not a valid sketch API name.
 
+UNUSED VARIABLES:
+  If the compiler says "Variable X set but not used", delete that variable and any dead calculations feeding it.
+
 LAMBDA TYPES:
   "vector" (lowercase) is a constructor function, not a type declaration.
   WRONG: function(p is vector, a is number)
@@ -1526,7 +1535,7 @@ FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse
 
 FIX RULES:
 1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
-2. startAngle / endAngle on opCylinder → remove those lines entirely
+2. opCylinder for simple cylinders → replace it with fCylinder and remove unsupported fields
 3. definition.param * inch in body when param is isLength → remove the * inch
 4. Raw number without units in geometry (e.g. "endDepth" : 2) → add * inch or use a definition param
 5. newSketch used with evPlane result → change to newSketchOnPlane
@@ -1537,7 +1546,8 @@ FIX RULES:
 10. Named typed function inside feature body (function foo(...) returns T { }) →
     convert to const lambda: const foo = function(...) { }; at the top of the body,
     OR move to module top level before the annotation block
-11. skSolve missing after sketch entities → add skSolve(sketch1); before opExtrude/opRevolve`;
+11. skSolve missing after sketch entities → add skSolve(sketch1); before opExtrude/opRevolve
+12. variable set but not used → remove the variable and any dead helper math`;
 
 export function validateFeatureScript(code) {
   const text = String(code || "");
@@ -1551,6 +1561,9 @@ export function validateFeatureScript(code) {
     const lineNo = index + 1;
     if (/\bisInteger\s*\(\s*definition\.\w+\s*\)\s*;/.test(line)) {
       addIssue(lineNo, "isInteger() is missing the required FS 2931 bounds map.", line);
+    }
+    if (/\bopCylinder\s*\(/.test(line)) {
+      addIssue(lineNo, "Use fCylinder instead of opCylinder for simple cylindrical solids in this project.", line);
     }
     if (/^\s*definition\.\w+\s+is\s+number\s*;/.test(line)) {
       addIssue(lineNo, "Use isInteger(..., {(unitless) : [...]}) instead of definition.x is number.", line);
@@ -1585,6 +1598,17 @@ export function validateFeatureScript(code) {
     addIssue(0, "Sketch created without any skSolve() call.", "(global)");
   }
 
+  const declarationRegex = /^\s*(?:const|var)\s+([A-Za-z_]\w*)\s*=/;
+  lines.forEach((line, index) => {
+    const match = line.match(declarationRegex);
+    if (!match) return;
+    const name = match[1];
+    const totalMentions = text.match(new RegExp(`\\b${name}\\b`, "g"))?.length || 0;
+    if (totalMentions <= 1) {
+      addIssue(index + 1, `Variable ${name} is declared but never used. Remove dead helper math.`, line);
+    }
+  });
+
   const bodyMatch = text.match(/defineFeature\s*\(\s*function\s*\([^)]*\)[^{]*\{[\s\S]*?\n\s*\{/);
   if (bodyMatch) {
     const bodyStart = text.indexOf(bodyMatch[0]) + bodyMatch[0].length;
@@ -1610,6 +1634,7 @@ function hasFatalFeatureScriptPatterns(code) {
     [/\bdefinition\.\w+\s+is\s+number\s*;/, "definition.x is number (invalid feature precondition syntax)"],
     [/isLength\(\s*definition\.\w+\s*,\s*\{/, "isLength with inline bounds map (use LENGTH_BOUNDS)"],
     [/\bisInteger\(\s*definition\.\w+\s*\)\s*;/, "isInteger missing required bounds map"],
+    [/\bopCylinder\s*\(/, "opCylinder used where this project expects fCylinder"],
 
     // Invalid opCylinder params (these map keys don't exist on opCylinder)
     [/"startAngle"\s*:/, "startAngle on opCylinder (invalid key)"],

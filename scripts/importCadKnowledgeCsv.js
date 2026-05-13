@@ -19,7 +19,13 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 
 async function upsert(table, records, options) {
   const { error } = await supabase.from(table).upsert(records, options);
-  if (error) throw error;
+  if (error) {
+    if (error.code === "42P10") {
+      console.warn(`[Import] Skipped ${table}; the table is missing the unique constraint needed for onConflict=${options?.onConflict || "(none)"}.`);
+      return;
+    }
+    throw error;
+  }
   console.log(`[Import] Upserted ${records.length} records into ${table}.`);
 }
 

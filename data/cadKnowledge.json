@@ -24,10 +24,10 @@
       "Call skSolve before opExtrude or opRevolve.",
       "Never multiply definition.lengthParam by inch in the body because isLength already returns a Length."
     ],
-    "featurePattern": "FeatureScript 2931; import geometry.fs; define one exported feature; precondition plane and dimensions; build one stable sketch; skSolve; create body with opExtrude/opRevolve/opCylinder.",
+    "featurePattern": "FeatureScript 2931; import geometry.fs; define one exported feature; precondition plane and dimensions; build one stable sketch; skSolve; create body with opExtrude/opRevolve and fCylinder when a primitive cylinder is needed.",
     "failureModes": [
       "definition.foo is Length is invalid FeatureScript.",
-      "startAngle and endAngle are not valid opCylinder map keys."
+      "Use fCylinder for simple cylindrical solids instead of opCylinder in this project."
     ],
     "validationRules": [
       "Exactly one export const feature should exist.",
@@ -236,9 +236,9 @@
       "Create the shaft with a cylinder-like operation and the head with a revolve profile.",
       "Union the head and shaft at the end."
     ],
-    "featurePattern": "opCylinder shaft from base to height, revolve a half-dome or cap profile around the center axis, then boolean union.",
+    "featurePattern": "fCylinder shaft from base to height, revolve a half-dome or cap profile around the center axis, then boolean union.",
     "failureModes": [
-      "Do not use opCylinder angle parameters.",
+      "Use fCylinder for the shaft primitive and keep the dome as a separate revolved body.",
       "Do not leave the head and shaft as separate bodies unless requested."
     ],
     "validationRules": [
@@ -454,7 +454,7 @@
       "Separate what is visible from what is inferred in the reasoning trace.",
       "Use image labels to decide which view controls dimensions."
     ],
-    "featurePattern": "Vision description -> compact dimension prompt -> extractDims -> template if known shape, custom FeatureScript only for genuinely complex geometry.",
+    "featurePattern": "Vision description -> compact dimension prompt -> extractDims -> AI-authored FeatureScript first -> static validation and repair -> fallback only if fatal issues remain.",
     "failureModes": [
       "Do not pass long image descriptions into multiple LLM calls.",
       "Do not treat shadows, perspective, or material texture as required geometry."
@@ -500,15 +500,15 @@
       "holeRadiusInches: bore hole for shaft, typically 0.25 * pitch radius. Set 0 for solid gear."
     ],
     "modelingNotes": [
-      "The tGear template in AI.js computes involute points directly in JavaScript and writes them as skSpline calls \u2014 do NOT ask Llama to compute involute math.",
-      "GEAR_SPUR shape type triggers the tGear template which produces working tooth geometry without LLM hallucination.",
+      "AI-authored gear code should compute only the geometry it actually uses and remove dead helper variables before returning the file.",
+      "GEAR_SPUR prompts should stay parameter-driven so tooth count, pitch radius, face width, bore, and pressure angle all remain editable.",
       "8:1 gear ratio means one gear has 8x as many teeth as the other. For an 8:1 set at 20DP: pinion=8 teeth (r=0.2in), driven=64 teeth (r=1.6in).",
       "Module (metric) = 25.4 / diametral_pitch. 1mm module = ~25.4 DP. Convert module to inches: pitchRadius = (numTeeth * module_mm) / (2 * 25.4)."
     ],
-    "featurePattern": "extractDims classifies as GEAR_SPUR \u2192 tGear template runs in JS: computes rb,rd,ra from numTeeth+radiusInches \u2192 generates N tooth outlines as skSpline+skArc calls \u2192 skSolve \u2192 opExtrude to depthInches.",
+    "featurePattern": "extractDims classifies as GEAR_SPUR \u2192 AI-authored gear logic computes rb, rd, ra from numTeeth+radiusInches \u2192 generates tooth outlines as skFitSpline+skArc calls \u2192 skSolve \u2192 opExtrude to depthInches.",
     "failureModes": [
-      "Do NOT let Llama write involute gear math \u2014 it will hallucinate wrong formulas. Always route to tGear template.",
-      "Do NOT use opCylinder for gears \u2014 the tooth profile requires a sketch-based approach.",
+      "Do not leave unused helper variables such as derived radii or angles in the final gear code.",
+      "Do NOT use fCylinder for gears \u2014 the tooth profile requires a sketch-based approach.",
       "A gear with fewer than 6 teeth will have undercut problems; enforce minimum 6."
     ],
     "validationRules": [
@@ -554,7 +554,7 @@
       "When user says 'pinion', generate the smaller driver gear.",
       "Face width for FRC drivetrain gears is typically 0.375 to 0.75 inches."
     ],
-    "featurePattern": "Parse ratio \u2192 compute numTeeth = ratio * pinion_teeth (default pinion=8) \u2192 compute pitchRadius = numTeeth / (2 * diametralPitch) \u2192 route to GEAR_SPUR \u2192 tGear template.",
+    "featurePattern": "Parse ratio \u2192 compute numTeeth = ratio * pinion_teeth (default pinion=8) \u2192 compute pitchRadius = numTeeth / (2 * diametralPitch) \u2192 route to AI-authored GEAR_SPUR logic.",
     "failureModes": [
       "Do not confuse gear ratio with number of teeth \u2014 ratio 8:1 means 8x as many teeth, not 8 teeth.",
       "Do not make bore holes larger than the root circle."
@@ -591,13 +591,13 @@
       "For hex shafts, use a hexagonal polygon cross-section instead of circle."
     ],
     "modelingNotes": [
-      "Use two opCylinder calls \u2014 one for main body, one for stepped end \u2014 then opBoolean union.",
+      "Use two fCylinder calls \u2014 one for main body, one for stepped end \u2014 then opBoolean union.",
       "Stepped shafts in FRC are commonly 0.5 inch hex or round with snap ring grooves.",
       "If user says 'hex shaft', use POLYGON shape with sides=6 instead of CYLINDER."
     ],
-    "featurePattern": "opCylinder main body \u2192 opCylinder step end (smaller radius, positioned at top of main) \u2192 opBoolean UNION.",
+    "featurePattern": "fCylinder main body \u2192 fCylinder step end (smaller radius, positioned at top of main) \u2192 opBoolean UNION.",
     "failureModes": [
-      "Do not use opCylinder with startAngle/endAngle \u2014 those params don't exist.",
+      "Do not teach opCylinder for simple cylindrical solids in this codebase; prefer fCylinder.",
       "Do not forget to union the two bodies."
     ],
     "validationRules": [

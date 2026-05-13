@@ -73,6 +73,10 @@ async function upsert(table, records, options) {
       console.warn(`[Seed] Skipped ${table}; run the adaptive CAD memory migration first.`);
       return;
     }
+    if (error.code === "42P10") {
+      console.warn(`[Seed] Skipped ${table}; the table is missing the unique constraint needed for onConflict=${options?.onConflict || "(none)"}.`);
+      return;
+    }
     throw error;
   }
   console.log(`[Seed] Upserted ${records.length} records into ${table}.`);

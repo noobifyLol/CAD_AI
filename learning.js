@@ -376,7 +376,7 @@ function expandedDocKeywords(prompt, keywords, shapeHint) {
 
   // ── Circular / cylindrical geometry ──────────────────────────────────────
   if (/\b(round|cylinder|shaft|rod|pin|bore|hole|circle|washer|bushing|flange|ring|annular)\b/.test(text)) {
-    ["opCylinder", "skCircle", "evAxis", "qCreatedBy", "opRevolve", "evLength"].forEach(t => expanded.add(t.toLowerCase()));
+    ["fCylinder", "skCircle", "evAxis", "qCreatedBy", "opRevolve", "evLength"].forEach(t => expanded.add(t.toLowerCase()));
   }
 
   // ── Curved / organic / swept forms ────────────────────────────────────────
