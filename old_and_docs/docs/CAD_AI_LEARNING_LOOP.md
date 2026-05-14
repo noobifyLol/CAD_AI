@@ -5,7 +5,7 @@ This app does not change Groq/Llama model weights in real time. Hosted LLM weigh
 ## What Each File Does
 
 - `server.js` is the API server. Browser requests hit `/generate`, `/debug`, `/analyze-multi`, `/feedback`, `/learning/analyze`, and `/learning/diagnostics` here.
-- `AI.js` talks to Groq. It extracts dimensions, generates custom FeatureScript from retrieved context, fixes FeatureScript, analyzes images, and runs the learning auditor. Validated templates are now opt-in with `USE_VALIDATED_TEMPLATES=true`, with fallback still available for unsafe AI-authored code.
+- `AI.js` talks to Groq. It extracts dimensions, generates custom FeatureScript from retrieved context, fixes FeatureScript, analyzes images, and runs the learning auditor. It now prefers stronger Groq models for high-fidelity prompts, uses a vector-sketch cylinder path for bore/hole prompts, and keeps validated templates available as a safety net.
 - `learning.js` talks to Supabase and indexes `old_and_docs/docs/FS doc`. It fetches memory before generation, retrieves relevant FeatureScript documentation snippets, logs generations, logs debug/image sessions, records feedback weights, reads diagnostics, and saves AI-created memory lessons.
 - `adaptiveNetwork.js` is the local neural reranker. It uses 3 hidden layers (`14 x 10 x 6`) to score memory/docs/examples before they are sent to Llama, then trains from Good/Needs Work feedback.
 - `public/index.html` is the browser UI structure and styles.
@@ -64,6 +64,28 @@ The app now has a small trainable neural network in `adaptiveNetwork.js`.
 
 This still does not alter hosted Llama weights. It changes what context Llama receives next time, which is the part this app can actually control.
 
+## Groq Model Routing
+
+The app now has explicit model-routing knobs instead of assuming one model is enough for every stage.
+
+- `GROQ_MODEL` is the main authoring model for FeatureScript generation. Default: `openai/gpt-oss-120b`.
+- `GROQ_COMPLEX_MODEL` can override the model used for complex authoring and debugging. Default: falls back to `GROQ_MODEL`.
+- `GROQ_DIM_MODEL` can override the model used for dimension extraction. Default: falls back to the complex model, so realistic or organic prompts no longer have to rely on the smaller fast model.
+- `GROQ_FAST_MODEL` remains available for simpler extraction requests when the prompt is straightforward.
+- `GROQ_FALLBACK_MODEL` is still the emergency fallback if the stronger models hit rate limits.
+- `GROQ_MAX_COMPLETION_TOKENS` controls the maximum completion budget passed to Groq chat completions. This helps long FeatureScript generations avoid getting clipped too early.
+
+The practical change is that prompts like `realistically shaped carrot` or other freeform/organic parts can now use a higher-capacity model earlier in the pipeline instead of only during the final authoring step.
+
+## Cylinder And Organic Shape Fixes
+
+Two generation issues were causing a lot of avoidable failures:
+
+1. Simple cylinder prompts with a bore or “hole on top” were often routed through the AI-first custom path, and the extracted bore radius could even land at the same size as the outer radius. The generator now prefers a validated vector-based sketch route for simple cylindrical parts, using concentric circles plus one extrude so the hole stays centered and editable.
+2. Organic shapes like carrots were under-specified. A two-point spline is not enough for a realistic tapered revolve profile. The generator and debugger prompts now explicitly require multi-point spline profiles and a real `Line` revolve axis for carrot-like or organic revolved shapes.
+
+These changes are meant to improve both compile success and actual geometric quality, not just silence syntax errors.
+
 ## What The Weights Mean
 
 `cad_memory.quality_score` is the app's learning weight. A higher score means the memory row is more likely to be retrieved and shown to the AI next time.
@@ -84,7 +106,7 @@ The SQL RPC `record_cad_feedback` applies those weights to every memory row link
 
 ## Database Setup
 
-Current local diagnosis: the Supabase project is reachable, but the adaptive memory schema is incomplete. `generations` and `shape_knowledge` are visible; `cad_knowledge`, `cad_memory`, `cad_generation_memory_matches`, `cad_feedback_events`, `cad_memory_pruning_events`, and `cad_learning_state` still need the migration. The anon key can read and insert allowed rows, but it cannot create missing tables, so the SQL must be applied in Supabase SQL editor or with a privileged Supabase CLI connection.
+Use the diagnostics route or the Guide tab to confirm the current table state before trusting any one generation result. The app depends on both Supabase memory tables and the local FeatureScript docs index; if either side is stale, the AI can still regress even when the server is up.
 
 Run this SQL once in the Supabase SQL editor:
 
@@ -127,14 +149,15 @@ You can also open the app, go to `Guide`, and click `Check Database`.
 4. Paste an Onshape compile error into Debug; verify `debug_sessions` gets a row and the original generation receives negative feedback.
 5. Seed the new advanced knowledge pack: `data/cadKnowledge.csv` now adds gear standards, pulley sizing, bearing envelopes, structural tube guidance, frame profiles, scissor simplification, enclosure shells, and freeform-relief guidance. `data/cadPruningTable.csv` adds routing rules that keep prompts on safer editable paths.
 6. Import only the new pruning rules when needed with `npm run import:cad-pruning`, or import the knowledge CSV alone with `npm run import:cad-knowledge`.
-7. Expand the validated template set. `ROBOT_MECH` now exists for blocky cuboid mechs; the next best templates are picture frame, hinged scissors, lined-paper relief, tabletop vacuum shell, computer tower, speaker enclosure, and a dedicated timing pulley.
-8. Add a FeatureScript validation step before returning code. The best next implementation is a static checker that rejects known invalid APIs, duplicate exports, missing `skSolve`, invalid `isLength`, bad query regions, and unsafe fillet radii.
+7. Expand the validated template set. `ROBOT_MECH` now exists for blocky cuboid mechs; simple cylinders with bores now use a vector-sketch template path, and the next best templates are picture frame, hinged scissors, lined-paper relief, tabletop vacuum shell, computer tower, speaker enclosure, and a dedicated timing pulley.
+8. Keep refining the FeatureScript validation step before returning code. It already rejects many known invalid APIs and query mistakes; the next best additions are more organic-profile checks and deeper revolve-axis validation.
 
 ## Seed Pack Update
 
 - `seed:knowledge` now merges `data/cadKnowledge.json`, `data/cadKnowledge.csv`, and `data/cadPruningTable.csv`.
 - Local retrieval also reads the new CSV files even before Supabase is fully seeded, so the app can use those rules as prompt context right away.
 - The validated spur gear template was repaired to create its sketch correctly and keep tooth count, pitch radius, bore radius, face width, and pressure angle user-editable.
+- Seed knowledge and pruning rules were also cleaned up so the local memory no longer teaches contradictory cylinder guidance such as `prefer fCylinder` in one place and `use opCylinder` in another.
 
 See also:
 

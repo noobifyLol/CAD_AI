@@ -3,8 +3,11 @@ import Groq from "groq-sdk";
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const TEXT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const FAST_MODEL = process.env.GROQ_FAST_MODEL || "openai/gpt-oss-20b";
+const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || TEXT_MODEL;
+const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
 const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "llama-3.3-70b-versatile";
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+const MAX_COMPLETION_TOKENS = Math.max(512, Number(process.env.GROQ_MAX_COMPLETION_TOKENS) || 4096);
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // Templates stay available as a safety net, but AI-first generation is now the default path.
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
@@ -16,16 +19,35 @@ function stripJson(text) {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function chat(messages, model = TEXT_MODEL, fallbackModels = null) {
+function promptRequestsAxialHole(prompt = "") {
+  return /\b(bore|through hole|center hole|centre hole|axial hole|hole down the center|hole down the centre|hollow|inner diameter|\bid\b|hole on (the )?top|hole in the top|top hole)\b/i.test(prompt);
+}
+
+function promptNeedsHighFidelityModel(prompt = "") {
+  return /\b(organic|realistic|carrot|freeform|smooth|curved|spline|loft|sweep|sculpt|detailed|gear|involute|helical|complex)\b/i.test(prompt);
+}
+
+async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
   const fallbackList = Array.isArray(fallbackModels)
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
   const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
+  const maxCompletionTokens = Number.isFinite(Number(options.maxCompletionTokens))
+    ? Math.max(256, Math.round(Number(options.maxCompletionTokens)))
+    : MAX_COMPLETION_TOKENS;
+  const temperature = Number.isFinite(Number(options.temperature))
+    ? Number(options.temperature)
+    : 0.0;
 
   for (const m of modelsToTry) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await groq.chat.completions.create({ model: m, temperature: 0.0, messages });
+        const res = await groq.chat.completions.create({
+          model: m,
+          temperature,
+          max_completion_tokens: maxCompletionTokens,
+          messages,
+        });
         const text = res?.choices?.[0]?.message?.content ?? "";
         if (m !== model) console.warn(`[AI] Used fallback model ${m}`);
         return text;
@@ -50,8 +72,8 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null) {
 // Key FeatureScript rules baked in here, not left to the AI:
 //   - isLength(definition.foo, BOUNDS) in precondition → gives user an editable slider
 //   - definition.foo in body already has Length type — do NOT multiply by * inch
+//   - sketch circles + extrude are the most reliable path for cylinders with bores
 //   - opCylinder takes: context, id, { bottomCenter, topCenter, radius, operationType }
-//   - opCylinder is not the right primitive here for this codebase's FS docs
 //   - newSketchOnPlane for user-selected planes, not newSketch
 //   - skSolve() after all sketch entities, before any opExtrude
 
@@ -201,18 +223,32 @@ function tBox(d) {
 }
 
 function tCylinder(d) {
+  const boreDefault = d.holeRadiusInches > 0
+    ? Math.min(d.holeRadiusInches, Math.max(0.01, d.radiusInches * 0.45))
+    : 0;
   return {
     precondition: [
       preconditionPlane(),
       preconditionLength("radius", "Radius",  0.01, d.radiusInches, 24),
       preconditionLength("height", "Height",  0.01, d.depthInches,  48),
+      `        annotation { "Name" : "Hole Radius", "Default" : "${n(Math.max(0, boreDefault))} * inch" }
+        isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);`,
     ].join("\n"),
-    // opCylinder is the correct FS standard library primitive.
     body: `${planeVar()}
-        opCylinder(context, id + "cyl1", {
-            "bottomCenter"  : skPlane.origin,
-            "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
-            "radius"        : definition.radius
+        var hasBore = definition.holeRadius > 0 * inch && definition.holeRadius < definition.radius;
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+        skCircle(sketch1, "outer", { "center" : vector(0, 0) * inch, "radius" : definition.radius });
+        if (hasBore)
+        {
+            skCircle(sketch1, "inner", { "center" : vector(0, 0) * inch, "radius" : definition.holeRadius });
+        }
+        skSolve(sketch1);
+        var cylEntities = hasBore ? qSketchRegion(id + "sketch1", true) : qSketchRegion(id + "sketch1");
+        opExtrude(context, id + "extrude1", {
+            "entities"  : cylEntities,
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.height
         });`,
   };
 }
@@ -456,7 +492,8 @@ function tHitchPeg(d) {
         opCylinder(context, id + "shaft", {
             "bottomCenter"  : skPlane.origin,
             "topCenter"     : skPlane.origin + skPlane.normal * definition.shaftHeight,
-            "radius"        : definition.shaftRadius
+            "radius"        : definition.shaftRadius,
+            "operationType" : NewBodyOperationType.NEW
         });
         // Dome head — revolved semicircle centred at top of shaft
         var domePlane = plane(skPlane.origin + skPlane.normal * definition.shaftHeight, skPlane.normal, skPlane.x);
@@ -822,8 +859,11 @@ function normalizeDims(dims) {
   };
 
   if (!normalized.featureLabel.trim()) normalized.featureLabel = "AI Shape";
-  if (normalized.holeRadiusInches * 2 >= normalized.radiusInches && ["WASHER", "BUSHING"].includes(normalized.shape)) {
-    normalized.holeRadiusInches = Math.max(0.01, normalized.radiusInches * 0.6);
+  if (normalized.holeRadiusInches > 0 && ["WASHER", "BUSHING", "CYLINDER"].includes(normalized.shape)) {
+    const defaultRatio = normalized.shape === "CYLINDER" ? 0.45 : 0.6;
+    if (normalized.holeRadiusInches >= normalized.radiusInches) {
+      normalized.holeRadiusInches = Math.max(0.01, normalized.radiusInches * defaultRatio);
+    }
   }
   return normalized;
 }
@@ -928,7 +968,19 @@ function canUseTemplateFallback(dims) {
   ]).has(dims.shape);
 }
 
+function shouldPreferValidatedTemplate(prompt, dims) {
+  if (!USE_VALIDATED_TEMPLATES || dims.parseFailed || dims.confidence === "LOW" || promptLooksComplex(prompt)) {
+    return false;
+  }
+  if (dims.shape === "CYLINDER") return true;
+  return ["BUSHING", "WASHER"].includes(dims.shape);
+}
+
 function decideGenerationMode(prompt, dims) {
+  if (shouldPreferValidatedTemplate(prompt, dims)) {
+    return "template";
+  }
+
   if (GENERATION_STRATEGY === "template_only") {
     return canUseTemplateFallback(dims) ? "template" : "custom";
   }
@@ -1089,7 +1141,7 @@ Schema (ALL fields required, use sensible defaults for anything not stated):
 {
   "featureName":          "camelCase identifier — no spaces",
   "featureLabel":         "Human readable name",
-  "shape":                "see SHAPE LIST",
+  "shape":                "see SHAPE LIST, CUSTOM allowed",
   "confidence":           "HIGH | MEDIUM | LOW",
   "widthInches":          2,
   "heightInches":         2,
@@ -1108,7 +1160,7 @@ Schema (ALL fields required, use sensible defaults for anything not stated):
 
 SHAPE LIST (choose the closest match — never output "UNKNOWN"):
 BOX, ROBOT_MECH, CYLINDER, PLATE, POLYGON, LINKAGE, PLATE_HOLES, L_BRACKET, T_BRACKET,
-FLANGE, HEX_NUT, WASHER, BUSHING, HITCH_PEG, GEAR_SPUR
+FLANGE, HEX_NUT, WASHER, BUSHING, HITCH_PEG, GEAR_SPUR, CUSTOM
 
 Shape classification:
 ROBOT_MECH   — robotic mech, mecha, blocky robot, android, humanoid robot,
@@ -1131,6 +1183,8 @@ HITCH_PEG    — hitch peg, mushroom head pin, thumb peg, lollipop pin,
                any pin with a domed or spherical head on a cylindrical shaft
 GEAR_SPUR    — spur gear, gear wheel, pinion, drive gear, driven gear,
                any gear described by tooth count or gear ratio
+CUSTOM       — organic, sculpted, tapered, or unsupported single-part geometry such as carrots,
+               props, freeform silhouettes, or shapes that need spline, loft, or revolve logic
 
 Mechanical engineering defaults:
 GEARS — pressure angle 20deg standard; "8:1 ratio" → numTeeth=40, radiusInches=2.5 (8 DP);
@@ -1141,6 +1195,8 @@ BOLTS — M3=0.118in, M4=0.157in, M5=0.197in, M6=0.236in, M8=0.315in, M10=0.394i
 GEARS — pressure angle is normally 20°, use 14.5° for older gears and 25° for stronger teeth; expose pressure angle when user requests specific tooth form.
 HITCH PEG — shaft diameter from widthInches, head radius from radiusInches, shaft height from depthInches
 ROBOT MECH — default widthInches=12, heightInches=12, depthInches=6; expose all as editable parameters
+CYLINDER WITH HOLE — keep shape as CYLINDER; if no bore is specified, set holeRadiusInches to roughly 30% to 45% of outer radius; never let holeRadiusInches >= radiusInches
+CARROT / ORGANIC ROOT — usually shape CUSTOM; use widthInches as max diameter, heightInches as full tapered length, and keep confidence LOW or MEDIUM if dimensions are inferred
 
 Unit rules:
 - All output in INCHES. Divide mm by 25.4.
@@ -1148,6 +1204,7 @@ Unit rules:
 - "across flats X" (hex) → widthInches = X
 - "OD X ID Y" → radiusInches = X/2, holeRadiusInches = Y/2
 - LINKAGE: shaftLengthInches = total length, widthInches = bar width, depthInches = thickness
+- If a prompt says "hole on top", "top hole", "bore", "center hole", or "hollow cylinder", treat that as an axial hole or bore, not a decorative surface mark
 - Missing dims: use sensible mechanical defaults, never 0 for main dimensions
 - confidence: HIGH if all dims explicit, MEDIUM if some inferred, LOW if mostly guessed`;
 
@@ -1163,7 +1220,8 @@ async function extractDims(prompt, learningContext = {}, history = []) {
 
   messages.push({ role: "user", content: prompt.trim() });
 
-  const raw = await chat(messages, FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
+  const extractorModel = promptNeedsHighFidelityModel(prompt) ? DIM_MODEL : FAST_MODEL;
+  const raw = await chat(messages, extractorModel, [DIM_MODEL, TEXT_MODEL, FALLBACK_MODEL]);
   try {
     const parsed = JSON.parse(stripJson(raw));
     const d = normalizeDims({
@@ -1242,6 +1300,9 @@ function buildThinkingTrace(prompt, d, meta = {}) {
     if (d.shape === "POLYGON") parts.push(`${d.sides} sides, circumradius ${d.radiusInches} in`);
     if (["PLATE_HOLES","FLANGE"].includes(d.shape)) parts.push(`${d.numHoles} holes`);
     if (parts.length) lines.push(`  ${parts.join("  |  ")}`);
+    if (d.shape === "CYLINDER" && d.holeRadiusInches > 0) {
+      lines.push(`  Strategy: concentric vector-based sketch circles extruded into a tube-style body for a stable center bore.`);
+    }
   }
 
   lines.push(`Output target: parametric FeatureScript with editable dimensions in the Onshape dialog`);
@@ -1319,15 +1380,30 @@ Every file must follow this exact structure:
         "endBound"  : BoundingType.BLIND,
         "endDepth"  : definition.depth
     });
+- qSketchRegion must reference the sketch id expression, such as qSketchRegion(id + "sk1").
+  NEVER pass the sketch variable itself, such as qSketchRegion(sk).
 - definition.depth is already a Length value from isLength() — NEVER write definition.depth * inch.
-- Simple cylinders in this project should use:
+- For cylinders or round parts with a center hole or top bore, prefer one sketch with concentric circles:
+    skCircle(sk, "outer", { "center": vector(0, 0) * inch, "radius": definition.radius });
+    skCircle(sk, "inner", { "center": vector(0, 0) * inch, "radius": definition.holeRadius });
+    skSolve(sk);
+    opExtrude(context, id + "ext1", {
+        "entities"  : qSketchRegion(id + "sk1", true),
+        "direction" : skPlane.normal,
+        "endBound"  : BoundingType.BLIND,
+        "endDepth"  : definition.height
+    });
+- If you do use opCylinder, the safe form is:
     opCylinder(context, id + "cyl1", {
         "bottomCenter"  : skPlane.origin,
         "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
-        "radius"       : definition.radius
+        "radius"        : definition.radius,
+        "operationType" : NewBodyOperationType.NEW
     });
-- opCylinder is the correct standard library function.
 - opRevolve: { "entities": Query, "axis": Line, "angleForward": 2 * PI * radian }
+- The revolve axis must be a Line value, such as line(skPlane.origin, skPlane.normal), not a query.
+- Organic tapered shapes like carrots should use a revolved spline profile with at least 4 profile points.
+  A 2-point skFitSpline is not enough for a realistic tapered organic shape.
 - opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperationType.UNION }
 
 ═══ FUNCTION SCOPE AND EDITING RULES ═══
@@ -1344,18 +1420,20 @@ Every file must follow this exact structure:
 - skRectangle(sk, "rect1", { "firstCorner": vector(-w/2,-h/2) * inch, "secondCorner": vector(w/2,h/2) * inch });
   (w and h are plain numbers here — multiply by inch to make them Length vectors)
 - skFitSpline(sk, "spline1", { "points": [vector(x1,y1) * inch, vector(x2,y2) * inch, ...] });
+- For organic profiles, use 4 to 7 control points with meaningful taper and curvature.
 - skRegularPolygon(sk, "poly1", { "center": vector(0,0) * inch, "firstVertex": vector(r,0) * inch, "sides": 6 });
   ("skPolygon" does NOT exist — always use skRegularPolygon)
 
 ═══ COMMON MISTAKES TO AVOID ═══
 1. Writing "definition.x is Length" in precondition — WRONG. Use isLength(definition.x, LENGTH_BOUNDS).
 2. Writing "definition.x * inch" in the body when x is an isLength param — doubles the units, WRONG.
-3. Forgetting operationType on opCylinder — always include "operationType": NewBodyOperationType.NEW.
+3. Passing qSketchRegion(sk) or qSketchRegion(sketch1) — WRONG. Use qSketchRegion(id + "sk1").
 4. Forgetting skSolve(sk) before opExtrude — sketch geometry will not appear without it.
 5. Named functions (function foo() {}) inside the feature body — use const lambdas instead.
 6. Using "skPolygon" — it does not exist. Use skRegularPolygon.
 7. Keeping helper variables that are computed but never used — remove them before returning code.
 8. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
+9. Organic profiles with only two spline points — these collapse into straight or trivial geometry and do not look realistic.
 
 ═══ GOAL ═══
 - Author a fresh FeatureScript design from the request and the context below. Do not default to a canned box, plate, or gear template unless the request is extremely simple.
@@ -1392,7 +1470,8 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
 
   messages.push({ role: "user", content: userPrompt });
 
-  const raw = await chat(messages, TEXT_MODEL, [FALLBACK_MODEL]);
+  const authoringModel = promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL;
+  const raw = await chat(messages, authoringModel, [TEXT_MODEL, FALLBACK_MODEL]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));
@@ -1537,6 +1616,13 @@ opExtrude direction: use skPlane.normal (a Vector) or a constant like Z_DIRECTIO
   Never use evPlane(...).normal inline — assign evPlane to a variable first.
 
 opRevolve: { "entities": Query, "axis": Line, "angleForward": Angle (use 2 * PI * radian for full) }
+  The axis must be a Line value, not qSketchEntity(...) or qCreatedBy(...).
+
+qSketchRegion:
+  qSketchRegion(id + "sketch1")
+  qSketchRegion(id + "sketch1", true)
+  NEVER: qSketchRegion(sketch1)
+  NEVER: qSketchRegion(sk)
 
 opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperationType.UNION|SUBTRACTION }
 
@@ -1546,6 +1632,7 @@ skRegularPolygon: { "center": Vector, "firstVertex": Vector, "sides": integer }
 skFitSpline: valid sketch spline API
   skFitSpline(sketch, "spline1", { "points": [...] })
   "skSpline" is not a valid sketch API name.
+  For organic profiles such as carrots, use at least 4 control points on the spline side.
 
 UNUSED VARIABLES:
   If the compiler says "Variable X set but not used", delete that variable and any dead calculations feeding it.
@@ -1579,7 +1666,9 @@ FIX RULES:
     convert to const lambda: const foo = function(...) { }; at the top of the body,
     OR move to module top level before the annotation block
 11. skSolve missing after sketch entities → add skSolve(sketch1); before opExtrude/opRevolve
-12. variable set but not used → remove the variable and any dead helper math`;
+12. qSketchRegion(sketchVariable) → replace with qSketchRegion(id + "sketch1", optionalTrueForInnerLoops)
+13. qSketchEntity(...) or qCreatedBy(...) used as an opRevolve axis → replace with a Line value
+14. variable set but not used → remove the variable and any dead helper math`;
 
 export function validateFeatureScript(code) {
   const text = String(code || "");
@@ -1594,7 +1683,7 @@ export function validateFeatureScript(code) {
     if (/\bisInteger\s*\(\s*definition\.\w+\s*\)\s*;/.test(line)) {
       addIssue(lineNo, "isInteger() is missing the required FS 2931 bounds map.", line);
     }
-    if (/\bopCylinder\s*\(/.test(line)) {
+    if (/"startAngle"\s*:|"endAngle"\s*:/.test(line)) {
       addIssue(lineNo, "opCylinder startAngle/endAngle keys do not exist — remove them.", line);
     }
     if (/^\s*definition\.\w+\s+is\s+number\s*;/.test(line)) {
@@ -1608,6 +1697,12 @@ export function validateFeatureScript(code) {
     }
     if (/\bfunction\s*\([^)]*\)\s+returns\s+(vector|array|map)\b/i.test(line)) {
       addIssue(lineNo, "Avoid lambda return-type annotations here; use an untyped const lambda.", line);
+    }
+    if (/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/.test(line)) {
+      addIssue(lineNo, "qSketchRegion expects the sketch id expression like id + \"sketch1\", not the sketch variable.", line);
+    }
+    if (/\bqSketchEntity\s*\(|\bqCreatedBy\s*\([^)]*(sk|sketch\w*)/.test(line)) {
+      addIssue(lineNo, "Sketch queries are not valid opRevolve axes; construct a Line value instead.", line);
     }
   });
 
@@ -1671,6 +1766,8 @@ function hasFatalFeatureScriptPatterns(code) {
     // Invalid opCylinder params (these map keys don't exist on opCylinder)
     [/"startAngle"\s*:/, "startAngle on opCylinder (invalid key)"],
     [/"endAngle"\s*:/, "endAngle on opCylinder (invalid key)"],
+    [/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/, "qSketchRegion called with a sketch variable instead of sketch id expression"],
+    [/\bqSketchEntity\s*\(/, "qSketchEntity query used where a Line or sketch id is expected"],
 
     // Named top-level function declared INSIDE the feature body.
     // FS spec (toplevel.md): only lambdas (const x = function(...){}) are valid inside bodies.
@@ -1716,7 +1813,7 @@ export async function debugFeatureScript(code, errors, options = {}) {
   const raw = await chat([
     { role: "system", content: withLearningContext(DEBUG_SYSTEM, learningContext) },
     { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
-  ], TEXT_MODEL, [FALLBACK_MODEL]);
+  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));

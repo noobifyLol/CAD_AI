@@ -376,7 +376,7 @@ function expandedDocKeywords(prompt, keywords, shapeHint) {
 
   // ── Circular / cylindrical geometry ──────────────────────────────────────
   if (/\b(round|cylinder|shaft|rod|pin|bore|hole|circle|washer|bushing|flange|ring|annular)\b/.test(text)) {
-    ["fCylinder", "skCircle", "evAxis", "qCreatedBy", "opRevolve", "evLength"].forEach(t => expanded.add(t.toLowerCase()));
+    ["opCylinder", "skCircle", "vector", "qSketchRegion", "opExtrude", "opRevolve", "evLength"].forEach(t => expanded.add(t.toLowerCase()));
   }
 
   // ── Curved / organic / swept forms ────────────────────────────────────────
@@ -487,7 +487,7 @@ function priorityDocTerms(prompt) {
     return ["syntax", "types", "predicate", "annotation"];
   }
   if (/\b(round|cylinder|shaft|rod|pin|bore|hole|circle|washer|bushing|flange)\b/.test(text)) {
-    return ["skcircle", "opcylinder", "qcreatedby"];
+    return ["skcircle", "opcylinder", "qsketchregion", "vector"];
   }
   return [];
 }

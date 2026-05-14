@@ -24,10 +24,10 @@
       "Call skSolve before opExtrude or opRevolve.",
       "Never multiply definition.lengthParam by inch in the body because isLength already returns a Length."
     ],
-    "featurePattern": "FeatureScript 2931; import geometry.fs; define one exported feature; precondition plane and dimensions; build one stable sketch; skSolve; create body with opExtrude/opRevolve and fCylinder when a primitive cylinder is needed.",
+    "featurePattern": "FeatureScript 2931; import geometry.fs; define one exported feature; precondition plane and dimensions; build one stable sketch; skSolve; create body with opExtrude/opRevolve and use concentric sketch circles plus opExtrude for cylinders with bores.",
     "failureModes": [
       "definition.foo is Length is invalid FeatureScript.",
-      "Use fCylinder for simple cylindrical solids instead of opCylinder in this project."
+      "Do not pass qSketchRegion the sketch variable instead of the sketch id expression."
     ],
     "validationRules": [
       "Exactly one export const feature should exist.",
@@ -236,9 +236,9 @@
       "Create the shaft with a cylinder-like operation and the head with a revolve profile.",
       "Union the head and shaft at the end."
     ],
-    "featurePattern": "fCylinder shaft from base to height, revolve a half-dome or cap profile around the center axis, then boolean union.",
+    "featurePattern": "opCylinder shaft from base to height with operationType NEW, revolve a half-dome or cap profile around the center axis, then boolean union.",
     "failureModes": [
-      "Use fCylinder for the shaft primitive and keep the dome as a separate revolved body.",
+      "Use opCylinder or an equivalent stable shaft primitive and keep the dome as a separate revolved body.",
       "Do not leave the head and shaft as separate bodies unless requested."
     ],
     "validationRules": [
@@ -591,13 +591,13 @@
       "For hex shafts, use a hexagonal polygon cross-section instead of circle."
     ],
     "modelingNotes": [
-      "Use two fCylinder calls \u2014 one for main body, one for stepped end \u2014 then opBoolean union.",
+      "Use two opCylinder calls \u2014 one for main body, one for stepped end \u2014 then opBoolean union.",
       "Stepped shafts in FRC are commonly 0.5 inch hex or round with snap ring grooves.",
       "If user says 'hex shaft', use POLYGON shape with sides=6 instead of CYLINDER."
     ],
-    "featurePattern": "fCylinder main body \u2192 fCylinder step end (smaller radius, positioned at top of main) \u2192 opBoolean UNION.",
+    "featurePattern": "opCylinder main body \u2192 opCylinder step end (smaller radius, positioned at top of main) \u2192 opBoolean UNION.",
     "failureModes": [
-      "Do not teach opCylinder for simple cylindrical solids in this codebase; prefer fCylinder.",
+      "Do not forget operationType or union when composing stepped shafts from multiple cylindrical stages.",
       "Do not forget to union the two bodies."
     ],
     "validationRules": [
