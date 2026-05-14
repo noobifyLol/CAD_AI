@@ -526,17 +526,16 @@
   /* ── User bar ── */
   #user-bar {
     position: fixed;
-    top: 14px;
-    right: 20px;
     z-index: 1500;
     display: flex;
     gap: 12px;
-    align-items: center;
+
     background: rgba(13, 16, 17, 0.95);
     padding: 8px 14px;
     border-radius: 8px;
     border: 1px solid var(--border);
     backdrop-filter: blur(4px);
+
   }
 
   #user-bar-name {
@@ -906,7 +905,7 @@
 <div id="auth-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:2000; align-items:center; justify-content:center;">
   <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:32px; width:340px; max-width:90vw;">
     <h2 style="margin:0 0 8px; font-size:1.2rem;" id="auth-modal-title">Sign In</h2>
-    <p style="margin:0 0 20px; color:var(--muted); font-size:0.85rem;" id="auth-modal-sub">No email required.</p>
+    <p style="margin:0 0 20px; color:var(--bg); font-size:0.85rem;" id="auth-modal-sub">No email required.</p>
     <input id="auth-username" type="text" placeholder="Username (letters, numbers, - _)" autocomplete="username"
       style="width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-size:0.9rem; margin-bottom:10px;">
     <input id="auth-password" type="password" placeholder="Password (min 6 chars)" autocomplete="current-password"
@@ -914,7 +913,7 @@
     <div id="auth-error" style="color:#ef4444; font-size:0.82rem; margin-bottom:10px; display:none;"></div>
     <button id="auth-submit-btn" onclick="authSubmit()" class="btn primary" style="width:100%; margin-bottom:10px;">Sign In</button>
     <button onclick="toggleAuthMode()" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.83rem; width:100%; text-align:center;">
-      <span id="auth-switch-text">Don't have an account? Sign up</span>
+      <span id="auth-switch-text" style = "color:var(--bg)">Don't have an account? Sign up</span>
     </button>
     <button onclick="closeAuthModal()" style="position:absolute; top:16px; right:16px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:1.2rem; line-height:1;">✕</button>
   </div>
