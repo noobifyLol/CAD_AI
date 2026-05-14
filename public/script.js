@@ -551,4 +551,179 @@ document.addEventListener('DOMContentLoaded', () => {
   syncSlotLabels();
   const firstSlot = document.querySelector('#image-slots-container .image-slot');
   if (firstSlot) firstSlot.classList.add('slot-visible');
+
+  // Restore auth state on load
+  authInit();
 });
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+let _authMode = 'login'; // 'login' | 'signup'
+
+function authInit() {
+  const token = localStorage.getItem('cad_token');
+  const username = localStorage.getItem('cad_username');
+  if (token && username) updateUserBar(username);
+}
+
+function getAuthToken() { return localStorage.getItem('cad_token') || null; }
+function getAuthHeaders() {
+  const t = getAuthToken();
+  return t ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${t}` }
+           : { 'Content-Type': 'application/json' };
+}
+
+function updateUserBar(username) {
+  const nameEl = document.getElementById('user-bar-name');
+  const btn = document.getElementById('user-bar-btn');
+  const histBtn = document.getElementById('history-btn');
+  if (username) {
+    nameEl.textContent = `@${username}`;
+    nameEl.style.display = 'inline';
+    btn.textContent = 'Sign Out';
+    histBtn.style.display = 'inline-block';
+  } else {
+    nameEl.style.display = 'none';
+    btn.textContent = 'Sign In';
+    histBtn.style.display = 'none';
+  }
+}
+
+function userBarClick() {
+  if (getAuthToken()) {
+    localStorage.removeItem('cad_token');
+    localStorage.removeItem('cad_username');
+    updateUserBar(null);
+  } else {
+    openAuthModal('login');
+  }
+}
+
+function openAuthModal(mode = 'login') {
+  _authMode = mode;
+  document.getElementById('auth-error').style.display = 'none';
+  document.getElementById('auth-username').value = '';
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-modal-title').textContent = mode === 'signup' ? 'Create Account' : 'Sign In';
+  document.getElementById('auth-modal-sub').textContent = mode === 'signup'
+    ? 'Pick a username — no email needed.' : 'No email required.';
+  document.getElementById('auth-submit-btn').textContent = mode === 'signup' ? 'Create Account' : 'Sign In';
+  document.getElementById('auth-switch-text').textContent = mode === 'signup'
+    ? 'Already have an account? Sign in' : "Don't have an account? Sign up";
+  const modal = document.getElementById('auth-modal');
+  modal.style.display = 'flex';
+  setTimeout(() => document.getElementById('auth-username').focus(), 50);
+}
+
+function closeAuthModal() {
+  document.getElementById('auth-modal').style.display = 'none';
+}
+
+function toggleAuthMode() {
+  openAuthModal(_authMode === 'login' ? 'signup' : 'login');
+}
+
+async function authSubmit() {
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  const btn = document.getElementById('auth-submit-btn');
+  errEl.style.display = 'none';
+
+  if (!username || !password) { showAuthError('Enter username and password.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Please wait…';
+  try {
+    const r = await fetch(`/auth/${_authMode}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await r.json();
+    if (!r.ok) { showAuthError(data.error || 'Something went wrong.'); return; }
+    localStorage.setItem('cad_token', data.token);
+    localStorage.setItem('cad_username', data.user.username);
+    updateUserBar(data.user.username);
+    closeAuthModal();
+  } catch (e) {
+    showAuthError('Network error — is the server running?');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = _authMode === 'signup' ? 'Create Account' : 'Sign In';
+  }
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// Handle Enter key in auth modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('auth-modal').style.display === 'flex') {
+    authSubmit();
+  }
+  if (e.key === 'Escape') {
+    closeAuthModal();
+    closeHistory();
+  }
+});
+
+// ─── History ─────────────────────────────────────────────────────────────────
+
+async function openHistory() {
+  const drawer = document.getElementById('history-drawer');
+  drawer.style.display = 'block';
+  const list = document.getElementById('history-list');
+  list.innerHTML = '<p style="color:var(--muted); font-size:0.85rem;">Loading…</p>';
+
+  try {
+    const r = await fetch('/history', { headers: getAuthHeaders() });
+    if (r.status === 401) {
+      list.innerHTML = '<p style="color:var(--muted); font-size:0.85rem;">Sign in to see your history.</p>';
+      return;
+    }
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed');
+    if (!data.history?.length) {
+      list.innerHTML = '<p style="color:var(--muted); font-size:0.85rem;">No generations yet. Generate something first!</p>';
+      return;
+    }
+    list.innerHTML = data.history.map(h => `
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px; cursor:pointer;"
+           onclick="loadHistoryItem(${JSON.stringify(JSON.stringify(h)).replace(/\\/g, '\\\\')})">
+        <div style="font-size:0.78rem; color:var(--muted); margin-bottom:4px;">
+          ${new Date(h.created_at).toLocaleString()} · ${h.shape_type || 'CUSTOM'}
+          ${h.user_rating ? ` · ${'★'.repeat(h.user_rating)}` : ''}
+        </div>
+        <div style="font-size:0.88rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          ${escHtml(h.prompt || '(no prompt)')}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = `<p style="color:#ef4444; font-size:0.85rem;">Error: ${e.message}</p>`;
+  }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function closeHistory() {
+  document.getElementById('history-drawer').style.display = 'none';
+}
+
+function loadHistoryItem(jsonStr) {
+  try {
+    const h = JSON.parse(jsonStr);
+    if (h.featurescript) {
+      setOutput('gen-output', h.featurescript, 'copy-btn');
+      document.getElementById('gen-status').textContent = `Loaded from history: ${h.prompt || ''}`;
+      document.getElementById('gen-status').className = 'status show ok';
+      switchTab('generate');
+      closeHistory();
+    }
+  } catch { /* ignore */ }
+}

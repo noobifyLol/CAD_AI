@@ -50,7 +50,7 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null) {
 // Key FeatureScript rules baked in here, not left to the AI:
 //   - isLength(definition.foo, BOUNDS) in precondition → gives user an editable slider
 //   - definition.foo in body already has Length type — do NOT multiply by * inch
-//   - fCylinder takes: context, id, { bottomCenter, topCenter, radius }
+//   - opCylinder takes: context, id, { bottomCenter, topCenter, radius, operationType }
 //   - opCylinder is not the right primitive here for this codebase's FS docs
 //   - newSketchOnPlane for user-selected planes, not newSketch
 //   - skSolve() after all sketch entities, before any opExtrude
@@ -207,9 +207,9 @@ function tCylinder(d) {
       preconditionLength("radius", "Radius",  0.01, d.radiusInches, 24),
       preconditionLength("height", "Height",  0.01, d.depthInches,  48),
     ].join("\n"),
-    // fCylinder is the documented primitive in the local FS docs.
+    // opCylinder is the correct FS standard library primitive.
     body: `${planeVar()}
-        fCylinder(context, id + "cyl1", {
+        opCylinder(context, id + "cyl1", {
             "bottomCenter"  : skPlane.origin,
             "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
             "radius"        : definition.radius
@@ -453,7 +453,7 @@ function tHitchPeg(d) {
     ].join("\n"),
     body: `${planeVar()}
         // Shaft
-        fCylinder(context, id + "shaft", {
+        opCylinder(context, id + "shaft", {
             "bottomCenter"  : skPlane.origin,
             "topCenter"     : skPlane.origin + skPlane.normal * definition.shaftHeight,
             "radius"        : definition.shaftRadius
@@ -741,7 +741,7 @@ function buildLearningContextText(learningContext = {}) {
     lines.push(`6. Sketches: var sk = newSketchOnPlane(context, id + "sk1", { "sketchPlane": skPlane }); — then add entities — then ALWAYS call skSolve(sk); before any opExtrude/opRevolve.`);
     lines.push(`7. Vector coords: vector(x, y) * inch where x and y are unitless numbers (divide a Length by inch to get a number: definition.width / inch).`);
     lines.push(`8. opExtrude: opExtrude(context, id + "ext1", { "entities": qSketchRegion(id + "sk1"), "direction": skPlane.normal, "endBound": BoundingType.BLIND, "endDepth": definition.depth });`);
-    lines.push(`9. fCylinder: fCylinder(context, id + "cyl1", { "bottomCenter": pt, "topCenter": pt, "radius": r });`);
+    lines.push(`9. opCylinder(context, id + "cyl1", { "bottomCenter": skPlane.origin, "topCenter": skPlane.origin + skPlane.normal * definition.height, "radius": r, "operationType": NewBodyOperationType.NEW });`);
     lines.push(`10. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
     lines.push(`11. Remove helper variables that are computed but never used if they do not affect the final geometry.`);
     lines.push(`12. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
@@ -880,10 +880,15 @@ function performGeometricReasoning(dims) {
     const wtRatio = wt / Math.max(minSpan, 0.001);
     const wtClass =
       wtRatio < 0.05  ? "dangerously_thin" :
-      wtRatio < 0.10  ? "thin_walled" :
+      wtRatio < 0.10  ? "thin_walled_check_3d_print_feasibility" :
       wtRatio < 0.25  ? "standard_shell" :
                         "solid_section";
     hints.push(`wall_ratio=${wtRatio.toFixed(3)} class=${wtClass}`);
+    
+    // Add manufacturing guardrails
+    if (wt < 0.04) { // Roughly 1mm
+        hints.push("MFG_CONSTRAINT: Wall thickness is below 1mm; recommend increasing for structural integrity.");
+    }
   }
 
   // ── 6. Gear-specific derived geometry ─────────────────────────────────────
@@ -901,7 +906,7 @@ function performGeometricReasoning(dims) {
   // ── 7. Structural guidance tag ────────────────────────────────────────────
   const structural =
     profile === "thin_plate"     ? "use_plate_or_sheet_profile" :
-    profile.includes("slender")  ? "axial_load_dominant_consider_fCylinder_or_opExtrude" :
+    profile.includes("slender")  ? "axial_load_dominant_consider_opCylinder_or_opExtrude" :
     genus > 0                    ? "sketch_holes_before_extrude_not_opBoolean_subtract" :
     wt > 0 && wt < 0.1           ? "keep_wall_thickness_editable_parameter" :
                                    "standard_solid_body";
@@ -958,12 +963,13 @@ function sanitizeFeatureScript(code) {
 
   // ── Basic token repairs ───────────────────────────────────────────────────
   cleaned = cleaned
-    .replace(/\bopCylinder\s*\(/g, "fCylinder(")
+    // opCylinder IS the correct FS function — do NOT rename it
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
-    .replace(/^\s*"operationType"\s*:\s*NewBodyOperationType\.\w+,?\s*$/gm, "")
+    // operationType is a valid opCylinder key — do NOT strip it
     .replace(/^\s*return\s+[^;{][^;]*;\s*$/gm, "")          // remove value-returning returns in bodies
     .replace(/\bskSpline\s*\(/g, "skFitSpline(")
+    .replace(/\bskPolygon\s*\(/g, "skRegularPolygon(")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
     .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);')
     // Remove "* inch" multiplied onto a parameter already declared with isLength —
@@ -1145,12 +1151,19 @@ Unit rules:
 - Missing dims: use sensible mechanical defaults, never 0 for main dimensions
 - confidence: HIGH if all dims explicit, MEDIUM if some inferred, LOW if mostly guessed`;
 
-async function extractDims(prompt, learningContext = {}) {
+async function extractDims(prompt, learningContext = {}, history = []) {
   const context = normalizeLearningContext(learningContext);
-  const raw = await chat([
-    { role: "system", content: withLearningContext(DIM_SYSTEM, context) },
-    { role: "user",   content: prompt.trim() }
-  ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
+  const messages = [{ role: "system", content: withLearningContext(DIM_SYSTEM, context) }];
+
+  // Add history to help LLM understand relative changes (e.g. "wider", "taller")
+  for (const turn of history.slice(-3)) {
+    messages.push({ role: "user", content: turn.prompt });
+    messages.push({ role: "assistant", content: JSON.stringify(turn.dims || {}) });
+  }
+
+  messages.push({ role: "user", content: prompt.trim() });
+
+  const raw = await chat(messages, FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
   try {
     const parsed = JSON.parse(stripJson(raw));
     const d = normalizeDims({
@@ -1212,7 +1225,7 @@ function buildThinkingTrace(prompt, d, meta = {}) {
     lines.push(`Compound shape: cylindrical shaft + hemispherical dome`);
     lines.push(`  Shaft: radius ${d.widthInches/2} in, height ${d.depthInches} in`);
     lines.push(`  Dome:  radius ${d.radiusInches} in`);
-    lines.push(`  Build: fCylinder (shaft) + opRevolve (dome) + opBoolean union`);
+    lines.push(`  Build: opCylinder (shaft) + opRevolve (dome) + opBoolean union`);
   } else if (d.shape === "LINKAGE") {
     const hR = d.holeRadiusInches > 0 ? d.holeRadiusInches : d.widthInches * 0.18;
     lines.push(`  Length: ${d.shaftLengthInches} in  Width: ${d.widthInches} in  Thickness: ${d.depthInches} in`);
@@ -1308,23 +1321,22 @@ Every file must follow this exact structure:
     });
 - definition.depth is already a Length value from isLength() — NEVER write definition.depth * inch.
 - Simple cylinders in this project should use:
-    fCylinder(context, id + "cyl1", {
-        "bottomCenter" : vector(0, 0, 0) * inch,
-        "topCenter"    : vector(0, 0, 1) * inch,
+    opCylinder(context, id + "cyl1", {
+        "bottomCenter"  : skPlane.origin,
+        "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
         "radius"       : definition.radius
     });
-- Do not use opCylinder in this project. The local FeatureScript docs here teach fCylinder for simple cylindrical solids.
+- opCylinder is the correct standard library function.
 - opRevolve: { "entities": Query, "axis": Line, "angleForward": 2 * PI * radian }
 - opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperationType.UNION }
 
-═══ FUNCTION SCOPE RULE — THE #1 CAUSE OF PARSE ERRORS ═══
-The feature body is a LAMBDA (anonymous function) passed to defineFeature.
-Named top-level functions (function foo(...) returns T { }) are ILLEGAL inside a lambda.
-WRONG — causes "missing TOP_SEMI" and "no viable alternative" parse errors:
-    function invPoint(t is number, rb is number) returns vector { ... }
-RIGHT — const lambda is a VALUE, legal inside any scope:
-    const invPoint = function(t is number, rb is number) { return ...; };
-Use const lambdas for ALL helper functions inside the feature body.
+═══ FUNCTION SCOPE AND EDITING RULES ═══
+1. EDIT MODE: If history is provided, you are EDITING existing code. Do not rewrite everything from scratch. 
+   Modify the existing FeatureScript to reflect the new request while keeping valid parameters.
+2. SCOPE: The feature body is a LAMBDA. Named top-level functions (function foo(...) {}) are ILLEGAL inside.
+   USE: const myFunc = function(x) { ... }; inside the body.
+3. UNITS: definition.param is already a Length if declared with isLength. 
+   NEVER write: definition.param * inch. This doubles units and fails.
 
 ═══ SKETCH API ═══
 - skLineSegment(sk, "line1", { "start": vector(0,0) * inch, "end": vector(1,0) * inch });
@@ -1338,7 +1350,7 @@ Use const lambdas for ALL helper functions inside the feature body.
 ═══ COMMON MISTAKES TO AVOID ═══
 1. Writing "definition.x is Length" in precondition — WRONG. Use isLength(definition.x, LENGTH_BOUNDS).
 2. Writing "definition.x * inch" in the body when x is an isLength param — doubles the units, WRONG.
-3. Using opCylinder for a simple cylinder in this project — use fCylinder instead.
+3. Forgetting operationType on opCylinder — always include "operationType": NewBodyOperationType.NEW.
 4. Forgetting skSolve(sk) before opExtrude — sketch geometry will not appear without it.
 5. Named functions (function foo() {}) inside the feature body — use const lambdas instead.
 6. Using "skPolygon" — it does not exist. Use skRegularPolygon.
@@ -1352,21 +1364,35 @@ Use const lambdas for ALL helper functions inside the feature body.
 - Prefer simple, robust geometry over clever but brittle geometry.
 - The code must compile and produce visible 3D geometry with zero errors.`;
 
-async function generateCustomFeatureScript(prompt, dims, learningContext = {}) {
+async function generateCustomFeatureScript(prompt, dims, learningContext = {}, history = []) {
   const context = normalizeLearningContext(learningContext);
   const systemPrompt = withLearningContext(CUSTOM_FEATURE_SYSTEM, context);
-  const userPrompt = [
-    `User request: ${prompt.trim()}`,
-    `Extracted dimensions: ${summarizeDimsForPrompt(dims)}`,
-    `Start from the user's requested design intent, not from a stock template. Build the geometry strategy yourself.`,
-    `If the part is still ambiguous, prefer a flexible parametric interpretation that the user can edit in Onshape.`,
-    `Return valid JSON only.`
-  ].join("\n");
+  const messages = [{ role: "system", content: systemPrompt }];
 
-  const raw = await chat([
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userPrompt }
-  ], TEXT_MODEL, [FALLBACK_MODEL]);
+  // Provide the AI with its previous code so it can perform incremental edits
+  for (const turn of history.slice(-3)) {
+    messages.push({ role: "user", content: turn.prompt });
+    messages.push({ role: "assistant", content: JSON.stringify({ reasoning: turn.reasoning, code: turn.code }) });
+  }
+
+  const isEdit = history.length > 0;
+  const userPrompt = isEdit 
+    ? [
+        `ITERATION REQUEST: ${prompt.trim()}`,
+        `PREVIOUS DIMS: ${summarizeDimsForPrompt(history[history.length-1].dims || {})}`,
+        `NEW DIMS: ${summarizeDimsForPrompt(dims)}`,
+        `TASK: Modify the previous FeatureScript code provided in the assistant history to apply these changes. Ensure the code remains a single complete file.`,
+        `Return valid JSON only.`
+      ].join("\n")
+    : [
+        `NEW GENERATION REQUEST: ${prompt.trim()}`,
+        `Extracted dimensions: ${summarizeDimsForPrompt(dims)}`,
+        `Build the geometry strategy yourself. Return valid JSON only.`
+      ].join("\n");
+
+  messages.push({ role: "user", content: userPrompt });
+
+  const raw = await chat(messages, TEXT_MODEL, [FALLBACK_MODEL]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));
@@ -1393,7 +1419,8 @@ export async function generateFeatureScript(prompt, options = {}) {
   console.log(`[AI] Generating: "${prompt}"`);
 
   const learningContext = normalizeLearningContext(options.learningContext);
-  const dims = await extractDims(prompt, learningContext);
+  const history = Array.isArray(options.history) ? options.history : [];
+  const dims = await extractDims(prompt, learningContext, history);
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
   // Add geometric reasoning to the learning context before generation
@@ -1409,7 +1436,7 @@ export async function generateFeatureScript(prompt, options = {}) {
   if (generationMode === "template") {
     code = buildFeatureScript(dims);
   } else {
-    const custom = await generateCustomFeatureScript(prompt, dims, learningContext);
+    const custom = await generateCustomFeatureScript(prompt, dims, learningContext, history);
     featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
     featureLabel = custom.featureLabel || featureLabel;
     customReasoning = custom.reasoning;
@@ -1478,10 +1505,15 @@ PRECONDITION EXACT SYNTAX:
   NEVER:    definition.x is number;
   NEVER:    definition.x >= N;
 
-fCylinder signature:
-  fCylinder(context is Context, id is Id, definition is map)
-  Map keys: "bottomCenter" (Vector), "topCenter" (Vector), "radius" (Length)
-  Use fCylinder for simple cylindrical solids in this project.
+opCylinder signature (correct Onshape standard library function — use this for all cylinders):
+  opCylinder(context, id + "cyl1", {
+      "bottomCenter"  : skPlane.origin,
+      "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
+      "radius"        : definition.radius,
+      "operationType" : NewBodyOperationType.NEW
+  });
+  Valid keys: bottomCenter (Vector), topCenter (Vector), radius (Length), operationType.
+  NO startAngle. NO endAngle. Those keys DO NOT EXIST on opCylinder.
 
 isLength in precondition:
   annotation { "Name" : "My Param", "Default" : "1 * inch" }
@@ -1535,7 +1567,7 @@ FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse
 
 FIX RULES:
 1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
-2. opCylinder for simple cylinders → replace it with fCylinder and remove unsupported fields
+2. opCylinder with startAngle/endAngle → remove those invalid keys; opCylinder is correct
 3. definition.param * inch in body when param is isLength → remove the * inch
 4. Raw number without units in geometry (e.g. "endDepth" : 2) → add * inch or use a definition param
 5. newSketch used with evPlane result → change to newSketchOnPlane
@@ -1563,7 +1595,7 @@ export function validateFeatureScript(code) {
       addIssue(lineNo, "isInteger() is missing the required FS 2931 bounds map.", line);
     }
     if (/\bopCylinder\s*\(/.test(line)) {
-      addIssue(lineNo, "Use fCylinder instead of opCylinder for simple cylindrical solids in this project.", line);
+      addIssue(lineNo, "opCylinder startAngle/endAngle keys do not exist — remove them.", line);
     }
     if (/^\s*definition\.\w+\s+is\s+number\s*;/.test(line)) {
       addIssue(lineNo, "Use isInteger(..., {(unitless) : [...]}) instead of definition.x is number.", line);
@@ -1634,7 +1666,7 @@ function hasFatalFeatureScriptPatterns(code) {
     [/\bdefinition\.\w+\s+is\s+number\s*;/, "definition.x is number (invalid feature precondition syntax)"],
     [/isLength\(\s*definition\.\w+\s*,\s*\{/, "isLength with inline bounds map (use LENGTH_BOUNDS)"],
     [/\bisInteger\(\s*definition\.\w+\s*\)\s*;/, "isInteger missing required bounds map"],
-    [/\bopCylinder\s*\(/, "opCylinder used where this project expects fCylinder"],
+    [/\"startAngle\"\s*:/, "startAngle on opCylinder — key does not exist"],
 
     // Invalid opCylinder params (these map keys don't exist on opCylinder)
     [/"startAngle"\s*:/, "startAngle on opCylinder (invalid key)"],

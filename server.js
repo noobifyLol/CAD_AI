@@ -87,11 +87,12 @@ app.get("/learning/diagnostics", async (_req, res) => {
 
 app.post("/generate", async (req, res) => {
   const prompt = String(req.body.prompt || "").trim();
+  const history = Array.isArray(req.body.history) ? req.body.history : [];
   if (!prompt) return res.status(400).json({ error: "No prompt provided." });
 
   try {
-    const learningContext = await learning.fetchLearningContext(prompt);
-    const result = await generateFeatureScript(prompt, { learningContext });
+    const learningContext = await learning.fetchLearningContext(prompt, history);
+    const result = await generateFeatureScript(prompt, { learningContext, history });
     const generationLog = await learning.logGeneration(prompt, result, { learningContext });
     const diagnostics = await learning.diagnostics();
     res.json(generationResponse(result, generationLog, learningContext, diagnostics));

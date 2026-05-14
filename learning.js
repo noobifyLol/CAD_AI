@@ -811,8 +811,9 @@ export function createLearningService({
     }
   }
 
-  async function fetchLearningContext(prompt) {
-    const keywords = extractKeywords(prompt);
+  async function fetchLearningContext(prompt, history = []) {
+    const conversationText = [...history.map(h => h.prompt), prompt].join(" ");
+    const keywords = extractKeywords(conversationText);
     const shapeHint = inferShapeFromPrompt(prompt);
     const adaptiveState = await loadAdaptiveState();
     const rankContext = { prompt, keywords, shapeHint };
@@ -1122,6 +1123,10 @@ export function createLearningService({
     const isGood = ["good", "helpful", "copied"].includes(signal) || Number(safeRating) >= 4;
     if (!isGood) return;
 
+    // IMPROVEMENT: Check if the generation had a 'compile_error' signal in the past 
+    // before promoting. We don't want to promote code that was eventually fixed 
+    // but had a buggy history.
+    
     const { data: gen, error } = await supabase
       .from("generations")
       .select("id, prompt, shape_type, featurescript, thinking, dims")
