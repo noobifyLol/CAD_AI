@@ -7,8 +7,8 @@
  *   JWT_SECRET=any-long-random-string
  *   BCRYPT_ROUNDS=10  (optional, defaults to 10)
  *
- * Supabase table (run once in SQL editor):
- *   see supabase/migrations/20260505214000_users_auth.sql
+ * Supabase auth migration:
+ *   see the latest auth-related SQL file in supabase/migrations
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -95,6 +95,43 @@ export function requireAuth(req, res, next) {
   next();
 }
 
+async function findUserByUsername(supabase, username) {
+  const rpc = await supabase.rpc("auth_get_user_by_username", {
+    p_username: username,
+  });
+
+  if (!rpc.error) {
+    const user = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+    return { data: user || null, error: null };
+  }
+
+  const fallback = await supabase
+    .from("cad_users")
+    .select("id, username, password_hash, created_at")
+    .eq("username", username)
+    .maybeSingle();
+
+  return fallback;
+}
+
+async function createUserRecord(supabase, username, passwordHash) {
+  const rpc = await supabase.rpc("auth_create_user", {
+    p_username: username,
+    p_password_hash: passwordHash,
+  });
+
+  if (!rpc.error) {
+    const user = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+    return { data: user || null, error: null };
+  }
+
+  return supabase
+    .from("cad_users")
+    .insert([{ username, password_hash: passwordHash }])
+    .select("id, username, created_at")
+    .single();
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 export function createAuthRouter(supabase) {
   const routes = {};
@@ -114,20 +151,16 @@ export function createAuthRouter(supabase) {
     if (!supabase) return res.status(503).json({ error: "Database not configured." });
 
     // Check if username taken
-    const { data: existing } = await supabase
-      .from("cad_users")
-      .select("id")
-      .eq("username", username)
-      .maybeSingle();
+    const { data: existing, error: existingError } = await findUserByUsername(supabase, username);
+    if (existingError) {
+      console.error("[Auth] Signup lookup error:", existingError.message);
+      return res.status(500).json({ error: "Could not verify username availability." });
+    }
 
     if (existing) return res.status(409).json({ error: "Username already taken." });
 
     const passwordHash = await hashPassword(password);
-    const { data: user, error } = await supabase
-      .from("cad_users")
-      .insert([{ username, password_hash: passwordHash }])
-      .select("id, username, created_at")
-      .single();
+    const { data: user, error } = await createUserRecord(supabase, username, passwordHash);
 
     if (error) {
       console.error("[Auth] Signup error:", error.message);
@@ -148,11 +181,7 @@ export function createAuthRouter(supabase) {
 
     if (!supabase) return res.status(503).json({ error: "Database not configured." });
 
-    const { data: user, error } = await supabase
-      .from("cad_users")
-      .select("id, username, password_hash, created_at")
-      .eq("username", username)
-      .maybeSingle();
+    const { data: user, error } = await findUserByUsername(supabase, username);
 
     if (error || !user) return res.status(401).json({ error: "Invalid username or password." });
 
@@ -163,7 +192,7 @@ export function createAuthRouter(supabase) {
     res.json({ token, user: { id: user.id, username: user.username, createdAt: user.created_at } });
   };
 
-  // GET /auth/me
+  // GET /auth/me 
   routes.me = (req, res) => {
     if (!req.user) return res.status(401).json({ error: "Not authenticated." });
     res.json({ user: req.user });

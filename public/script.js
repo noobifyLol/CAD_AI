@@ -91,7 +91,7 @@ async function submitRunFeedback(signal, rating) {
   try {
     const r = await fetch('/learning/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         generationId: runModalContext.generationId,
         prompt: runModalContext.prompt,
@@ -229,7 +229,7 @@ async function copyCode(outputId) {
   if (generationId) {
     fetch('/feedback', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ generationId, signal: 'copied' })
     }).catch(() => {});
   }
@@ -257,7 +257,7 @@ async function generate() {
   try {
     const r = await fetch('/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ prompt })
     });
     const data = await r.json();
@@ -304,7 +304,7 @@ async function debugCode() {
   try {
     const r = await fetch('/debug', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ code, errors, generationId: debugSourceGenerationId })
     });
     const data = await r.json();
@@ -507,7 +507,7 @@ async function analyzeMultiImg() {
   try {
     const r = await fetch('/analyze-multi', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ images, globalPrompt })
     });
     const data = await r.json();
@@ -675,7 +675,7 @@ document.addEventListener('keydown', e => {
 
 async function openHistory() {
   const drawer = document.getElementById('history-drawer');
-  drawer.style.display = 'block';
+  drawer.classList.add('show');
   const list = document.getElementById('history-list');
   list.innerHTML = '<p style="color:var(--muted); font-size:0.85rem;">Loading…</p>';
 
@@ -692,15 +692,12 @@ async function openHistory() {
       return;
     }
     list.innerHTML = data.history.map(h => `
-      <div style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px; cursor:pointer;"
-           onclick="loadHistoryItem(${JSON.stringify(JSON.stringify(h)).replace(/\\/g, '\\\\')})">
-        <div style="font-size:0.78rem; color:var(--muted); margin-bottom:4px;">
+      <div onclick="loadHistoryItem(${JSON.stringify(JSON.stringify(h)).replace(/\\/g, '\\\\')})">
+        <div class="timestamp">
           ${new Date(h.created_at).toLocaleString()} · ${h.shape_type || 'CUSTOM'}
           ${h.user_rating ? ` · ${'★'.repeat(h.user_rating)}` : ''}
         </div>
-        <div style="font-size:0.88rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-          ${escHtml(h.prompt || '(no prompt)')}
-        </div>
+        <div class="prompt">${escHtml(h.prompt || '(no prompt)')}</div>
       </div>`).join('');
   } catch (e) {
     list.innerHTML = `<p style="color:#ef4444; font-size:0.85rem;">Error: ${e.message}</p>`;
@@ -712,7 +709,7 @@ function escHtml(s) {
 }
 
 function closeHistory() {
-  document.getElementById('history-drawer').style.display = 'none';
+  document.getElementById('history-drawer').classList.remove('show');
 }
 
 function loadHistoryItem(jsonStr) {

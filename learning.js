@@ -918,6 +918,7 @@ export function createLearningService({
       dims: jsonSafe(result?.dims),
       featurescript: result?.code || "",
       thinking: result?.thinking || "",
+      user_id: metadata.userId || null,
     };
 
     const { data, error } = await supabase

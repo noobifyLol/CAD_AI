@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { analyzeImage, analyzeImages, analyzeLearningOutcome, debugFeatureScript, generateFeatureScript } from "./ai.js";
+import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
 import { createLearningService } from "./learning.js";
 
 const app = express();
@@ -22,8 +23,10 @@ const learning = createLearningService({
   cadPruningPath: new URL("./data/cadPruningTable.csv", import.meta.url),
   fsDocsPath: new URL("./old_and_docs/docs/FS doc/", import.meta.url),
 });
+const authRoutes = createAuthRouter(supabase);
 
 app.use(express.json({ limit: "20mb" }));
+app.use(authMiddleware);
 app.use(express.static("public"));
 
 if (!supabase) {
@@ -76,6 +79,48 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.post("/auth/signup", authRoutes.signup);
+app.post("/auth/login", authRoutes.login);
+app.get("/auth/me", authRoutes.me);
+
+app.get("/history", requireAuth, async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: "Database not configured." });
+  }
+
+  const requestedLimit = Number(req.query.limit || 30);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(100, Math.round(requestedLimit)))
+    : 30;
+
+  try {
+    const rpc = await supabase.rpc("get_user_history", {
+      p_user_id: req.user.id,
+      p_limit: limit,
+    });
+
+    if (!rpc.error) {
+      return res.json({ history: rpc.data || [] });
+    }
+
+    const fallback = await supabase
+      .from("generations")
+      .select("id,prompt,shape_type,confidence,featurescript,user_rating,created_at")
+      .eq("user_id", req.user.id)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (fallback.error) {
+      throw fallback.error;
+    }
+
+    res.json({ history: fallback.data || [] });
+  } catch (err) {
+    console.error("[/history]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/learning/diagnostics", async (_req, res) => {
   try {
     res.json(await learning.diagnostics());
@@ -93,7 +138,10 @@ app.post("/generate", async (req, res) => {
   try {
     const learningContext = await learning.fetchLearningContext(prompt, history);
     const result = await generateFeatureScript(prompt, { learningContext, history });
-    const generationLog = await learning.logGeneration(prompt, result, { learningContext });
+    const generationLog = await learning.logGeneration(prompt, result, {
+      learningContext,
+      userId: req.user?.id || null,
+    });
     const diagnostics = await learning.diagnostics();
     res.json(generationResponse(result, generationLog, learningContext, diagnostics));
   } catch (err) {
@@ -143,7 +191,10 @@ app.post("/analyze", async (req, res) => {
   try {
     const learningContext = await learning.fetchLearningContext(prompt);
     const result = await analyzeImage(imageBase64, mimeType, prompt, { learningContext });
-    const generationLog = await learning.logGeneration(prompt || "Image analysis", result, { learningContext });
+    const generationLog = await learning.logGeneration(prompt || "Image analysis", result, {
+      learningContext,
+      userId: req.user?.id || null,
+    });
     const generationId = normalizeDbLog(generationLog).id;
 
     await learning.logImageAnalysis({
@@ -179,7 +230,10 @@ app.post("/analyze-multi", async (req, res) => {
 
     const learningContext = await learning.fetchLearningContext(contextualPrompt);
     const result = await analyzeImages(images, globalPrompt, { learningContext });
-    const generationLog = await learning.logGeneration(contextualPrompt || "Multi-image analysis", result, { learningContext });
+    const generationLog = await learning.logGeneration(contextualPrompt || "Multi-image analysis", result, {
+      learningContext,
+      userId: req.user?.id || null,
+    });
     const generationId = normalizeDbLog(generationLog).id;
 
     await learning.logImageAnalysis({
