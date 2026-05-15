@@ -1,733 +1,1438 @@
 [
   {
-    "title": "FeatureScript Compile Safety",
-    "summary": "Use conservative FeatureScript APIs and parameter preconditions so generated code is more likely to compile on the first paste.",
-    "tags": [
-      "featurescript",
-      "compile",
-      "safety",
-      "precondition"
-    ],
-    "keywords": [
-      "featurescript",
-      "compile",
-      "precondition",
-      "isLength",
-      "skSolve",
-      "opExtrude"
-    ],
+    "title": "opRevolve Symmetric Body",
+    "summary": "Revolve a 2D profile around an axis to create any rotationally symmetric solid: cones, domes, vases, spools, pulleys, or tapered rods. The profile must be a closed region with the axis line on one edge.",
+    "tags": ["revolve", "symmetric", "cone", "dome", "spool", "vase", "rotation"],
+    "keywords": ["revolve", "opRevolve", "axis", "symmetric", "cone", "dome", "taper", "spin", "lathe"],
     "parameterHints": [
-      "Expose dimensions with annotation defaults plus isLength(definition.name, LENGTH_BOUNDS).",
-      "Use isInteger for counts such as teeth, holes, and pattern instances."
+      "Expose all radii and heights as isLength parameters.",
+      "If the shape tapers, expose both base radius and top radius separately.",
+      "Use isLength(definition.topRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS) so top radius can legally be 0 (sharp tip)."
     ],
     "modelingNotes": [
-      "Call skSolve before opExtrude or opRevolve.",
-      "Never multiply definition.lengthParam by inch in the body because isLength already returns a Length."
+      "The sketch must contain the axis line as one segment (on x=0 or along y=0) AND the profile outline as connected segments or spline on the other side.",
+      "skSolve the sketch BEFORE calling opRevolve.",
+      "The revolve axis in FeatureScript is a Line value: line(skPlane.origin, skPlane.normal). Never pass a Query as the axis.",
+      "Full revolution: angleForward = 2 * PI * radian. Half section: PI * radian.",
+      "The profile and axis must form a closed region — connect top, side, and bottom segments."
     ],
-    "featurePattern": "FeatureScript 2931; import geometry.fs; define one exported feature; precondition plane and dimensions; build one stable sketch; skSolve; create body with opExtrude/opRevolve and use concentric sketch circles plus opExtrude for cylinders with bores.",
+    "featurePattern": "sketch axis line + profile segments/spline on one side, skSolve, opRevolve with line() axis and 2*PI*radian angleForward.",
     "failureModes": [
-      "definition.foo is Length is invalid FeatureScript.",
-      "Do not pass qSketchRegion the sketch variable instead of the sketch id expression."
+      "Passing qSketchRegion or qCreatedBy as the revolve axis — axis must be a Line value.",
+      "Forgetting to close the profile — an open profile produces no solid region.",
+      "Using definition.radius * inch when radius is already a Length from isLength — this doubles units.",
+      "A 2-point skFitSpline is too simple; use at least 4 control points for organic curves."
     ],
     "validationRules": [
-      "Exactly one export const feature should exist.",
-      "All sketch entities must be solved before downstream operations."
+      "Profile must stay on one side of the axis (all x >= 0 if axis is vertical).",
+      "Top and bottom of profile must connect to the axis."
     ],
-    "example_prompt": "Create a compile-safe parametric mounting block"
+    "example_prompt": "Cone 2 inch base radius, 3 inch tall, sharp tip"
   },
   {
-    "title": "Parametric Box Body",
-    "summary": "Use a centered rectangle sketch and blind extrude for robot bodies, housings, and simple block geometry.",
-    "tags": [
-      "box",
-      "plate",
-      "body",
-      "chassis",
-      "robot"
-    ],
-    "keywords": [
-      "box",
-      "body",
-      "robot",
-      "chassis",
-      "housing",
-      "plate"
-    ],
+    "title": "opLoft Between Two Profiles",
+    "summary": "opLoft transitions a solid between two or more cross-section sketches on separate planes. Use for tapered boxes, airfoils, transition fittings, and any shape where the cross-section changes along its length.",
+    "tags": ["loft", "transition", "airfoil", "taper", "cross-section", "organic"],
+    "keywords": ["loft", "opLoft", "transition", "profile", "cross-section", "airfoil", "taper", "blend"],
     "parameterHints": [
-      "Expose width, height, and depth as editable length parameters.",
-      "Use a fillet radius parameter only if a rounded edge is explicitly requested."
+      "Each profile sketch must be on a separate plane.",
+      "Create the second plane with: plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal).",
+      "Expose the height between profiles and any radius or dimension change."
     ],
     "modelingNotes": [
-      "Sketch the base profile on a selectable plane with newSketchOnPlane.",
-      "Keep the rectangle centered around the origin so later mirrors and mating are easier."
+      "opLoft takes an 'edges' array of qSketchRegion queries — one per profile — in order from start to end.",
+      "opLoft NEVER takes a 'sections' key. Only 'edges' and 'vertices'.",
+      "Both profiles must be solved (skSolve) before calling opLoft.",
+      "For a tapered cylinder: profile 1 = large circle, profile 2 = smaller circle on offset plane.",
+      "For a tapered box: profile 1 = wide rectangle, profile 2 = narrower rectangle.",
+      "The profiles do not need to be the same shape — a circle can loft to a square.",
+      "Use more than 2 profiles for S-curve or waisted shapes."
     ],
-    "featurePattern": "Centered rectangle from -width/2,-height/2 to width/2,height/2, solve sketch, extrude blind to depth.",
+    "featurePattern": "sketchA on planeA (large profile) + sketchB on planeB (small profile), both skSolve'd, then opLoft edges:[qSketchRegion(id+'skA'), qSketchRegion(id+'skB')].",
     "failureModes": [
-      "Do not create an off-origin corner rectangle unless the user asks for a datum-corner model.",
-      "Do not hardcode dimensions if they can be exposed as parameters."
+      "Adding 'sections' key to opLoft — that key does not exist in FS.",
+      "Passing the sketch variable instead of the id string to qSketchRegion.",
+      "Profiles that are too different in shape can produce twisted loft geometry — use guide curves if needed.",
+      "Both profiles must be separate sketches — you cannot loft within a single sketch."
     ],
     "validationRules": [
-      "Width, height, and depth must all be greater than zero.",
-      "Fillet radius should be less than half the smallest nearby edge."
+      "At least 2 profile entries required in the edges array.",
+      "All profile sketches must be solved before opLoft."
     ],
-    "example_prompt": "Robot body 12 inches wide, 6 inches tall, 4 inches deep with 0.25 inch fillets"
+    "example_prompt": "Transition fitting from 2 inch square to 1 inch circle, 3 inches tall"
   },
   {
-    "title": "Bushing Or Sleeve",
-    "summary": "Model bushings and spacers as concentric circles extruded to length.",
-    "tags": [
-      "bushing",
-      "washer",
-      "sleeve",
-      "spacer"
-    ],
-    "keywords": [
-      "bushing",
-      "sleeve",
-      "spacer",
-      "bearing",
-      "liner"
-    ],
+    "title": "opSweep Profile Along Path",
+    "summary": "Sweep a cross-section profile along a path curve to create pipes, bent tubes, curved handles, hooks, and rails. The profile sketch is on a plane perpendicular to the path start.",
+    "tags": ["sweep", "pipe", "tube", "hook", "handle", "rail", "path"],
+    "keywords": ["sweep", "opSweep", "path", "profile", "extrude along path", "tube", "hook", "curved", "rail"],
     "parameterHints": [
-      "Expose outer radius, inner radius, and length.",
-      "Validate that inner radius stays smaller than outer radius."
+      "Expose the profile radius or dimensions and the path geometry dimensions separately.",
+      "For a circular tube, profile is a circle with the tube's outer radius.",
+      "For a hollow tube, profile is two concentric circles."
     ],
     "modelingNotes": [
-      "Use one sketch with two concentric circles and extrude the ring region.",
-      "Prefer editable radii over hardcoded diameters in the body."
+      "opSweep takes 'profiles' (qSketchRegion of the cross-section) and 'path' (qCreatedBy of the path sketch edges).",
+      "The path sketch must produce wire edges — use skLineSegment, skArc, or skFitSpline.",
+      "The profile plane should be perpendicular to the path at its start point.",
+      "For a simple L-shaped path: sketch two connected skLineSegments in an L, solve, then sweep a circle profile.",
+      "For a curved path: use skArc or skFitSpline in the path sketch.",
+      "Path edges are queried with qCreatedBy(id + 'pathSk', EntityType.EDGE), not qSketchRegion."
     ],
-    "featurePattern": "Create two concentric circles in the same sketch, solve, then extrude the annular sketch region.",
+    "featurePattern": "pathSketch (open wire curve) + profileSketch (closed cross-section on perpendicular plane), both skSolve'd, opSweep profiles:qSketchRegion(profile) path:qCreatedBy(pathId, EntityType.EDGE).",
     "failureModes": [
-      "Do not allow the inner radius to equal or exceed the outer radius.",
-      "Do not convert a diameter into a radius twice."
+      "Using qSketchRegion for the path — path must use qCreatedBy with EntityType.EDGE.",
+      "Profile plane not perpendicular to path start — causes twisted geometry.",
+      "An open profile cross-section produces a sheet, not a solid.",
+      "Path sketch must be wire (open or closed curve) — not a region."
     ],
     "validationRules": [
-      "OD X means outer radius X/2.",
-      "ID Y means inner radius Y/2."
+      "Profile must be a closed region sketch.",
+      "Path must be a connected edge wire — not a region."
     ],
-    "example_prompt": "Bushing with 0.75 inch outer diameter, 0.5 inch inner diameter, and 1 inch length"
+    "example_prompt": "Bent pipe 0.5 inch outer diameter following a 90 degree arc of 3 inch radius"
   },
   {
-    "title": "Linkage Arm",
-    "summary": "Use a centered bar sketch with end holes for train linkages, couplers, and lever arms.",
-    "tags": [
-      "linkage",
-      "arm",
-      "lever",
-      "coupler"
-    ],
-    "keywords": [
-      "linkage",
-      "arm",
-      "lever",
-      "coupler",
-      "connecting rod",
-      "clevis"
-    ],
+    "title": "opShell Hollow Body",
+    "summary": "opShell hollows out a solid body to a specified wall thickness, optionally leaving one or more faces open. Use for enclosures, boxes, cups, and shells.",
+    "tags": ["shell", "hollow", "enclosure", "cup", "box", "wall"],
+    "keywords": ["shell", "opShell", "hollow", "thin wall", "enclosure", "housing", "cup"],
     "parameterHints": [
-      "Expose total length, bar width, thickness, and pin hole radius.",
-      "Compute hole offset from total length and hole size to preserve end material."
+      "Expose wallThickness as an isLength parameter.",
+      "If a face is left open, expose a boolean toggle like 'Open Top'.",
+      "Wall thickness for plastic: 0.04 to 0.15 inch. For sheet metal: 0.03 to 0.125 inch."
     ],
     "modelingNotes": [
-      "Create the outer rectangle and end holes in the same sketch.",
-      "Keep holes symmetric unless the prompt explicitly requests asymmetry."
+      "opShell must be called AFTER the solid body is created (after opExtrude or opRevolve).",
+      "The 'entities' field takes the solid body query: qCreatedBy(id + 'ext1', EntityType.BODY).",
+      "The 'excludeFaces' field removes those faces from the shelling operation — they become open holes.",
+      "Use qCapEntity(id + 'ext1', CapType.START) to open the bottom face.",
+      "Use qCapEntity(id + 'ext1', CapType.END) to open the top face.",
+      "opShell on a complex body can fail — prefer sketching the hollow profile directly for simple shapes."
     ],
-    "featurePattern": "Sketch a centered rounded or rectangular bar, place two symmetric pin holes along the length axis, solve, extrude to thickness.",
+    "featurePattern": "opExtrude solid box, then opShell with thickness and excludeFaces to open top or bottom.",
     "failureModes": [
-      "Do not place holes too close to the edge; leave at least 2x hole radius of material.",
-      "Do not confuse total length with center-to-center hole spacing."
+      "Calling opShell before the solid body exists — must extrude first.",
+      "Wall thickness larger than half the smallest dimension causes opShell to fail.",
+      "opShell often fails on bodies with fillets or complex topology — apply shell before fillets."
     ],
     "validationRules": [
-      "Hole radius must be smaller than half the bar width.",
-      "Thickness should be a separate editable depth parameter."
+      "wallThickness must be less than half the smallest dimension.",
+      "Apply shell before opFillet for best results."
     ],
-    "example_prompt": "Linkage arm 5 inches long, 1 inch wide, 0.25 inch thick with 0.2 inch pin holes"
+    "example_prompt": "Open-top rectangular box 4x3x2 inches with 0.1 inch walls"
   },
   {
-    "title": "Flange With Bolt Circle",
-    "summary": "Model circular flanges with a bore and evenly patterned bolt holes.",
-    "tags": [
-      "flange",
-      "bolt circle",
-      "mount"
-    ],
-    "keywords": [
-      "flange",
-      "bolt",
-      "bolt circle",
-      "mount",
-      "hub"
-    ],
+    "title": "opFillet Rounded Edges",
+    "summary": "opFillet rounds selected edges. Use to soften corners on mechanical parts, reduce stress concentrations, and add visual polish.",
+    "tags": ["fillet", "round", "edge", "chamfer", "corner"],
+    "keywords": ["fillet", "opFillet", "round", "radius", "corner", "smooth", "blend"],
     "parameterHints": [
-      "Expose outer radius, bore radius, hole radius, hole count, and thickness.",
-      "If bolt circle diameter is not given, use a derived radius around 70 to 80 percent of outer radius."
+      "Expose filletRadius as an isLength parameter with NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS.",
+      "Check filletRadius > 0 before calling opFillet to avoid an error with zero radius.",
+      "Maximum fillet radius is limited by adjacent face size — typically less than half the narrowest face width."
     ],
     "modelingNotes": [
-      "Generate all circles in one sketch before extruding.",
-      "Evenly distribute bolt holes using cosine and sine from the center."
+      "opFillet entities field: qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id+'ext1', EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED) selects all convex edges.",
+      "To fillet only top edges: filter by position after evaluateQuery.",
+      "Apply opFillet AFTER all boolean operations — filleting before subtraction causes failures.",
+      "Only fillet edges that actually exist on the body — querying non-existent edges throws an error.",
+      "Separate fillet operations with different radii on different edge sets."
     ],
-    "featurePattern": "Outer circle plus bore circle plus N bolt-hole circles on a bolt circle radius, then extrude the remaining region.",
+    "featurePattern": "opExtrude body, then if filletRadius > 0*inch: opFillet with qEdgeTopologyFilter selecting TWO_SIDED edges on the body.",
     "failureModes": [
-      "Do not put bolt holes outside the flange OD.",
-      "Do not make the bore larger than the outer radius."
+      "Fillet radius larger than adjacent face — geometry becomes invalid.",
+      "Filleting before boolean subtract — causes topology conflicts.",
+      "qEdgeTopologyFilter must use TWO_SIDED for convex edges, ONE_SIDED for boundary edges."
     ],
     "validationRules": [
-      "Bolt circle radius plus hole radius must be less than outer radius.",
-      "Use at least 3 bolt holes unless the prompt says otherwise."
+      "filletRadius < min(wallThickness, adjacent face width) / 2.",
+      "Guard with: if (definition.filletRadius > 0 * inch) { opFillet(...); }"
     ],
-    "example_prompt": "Round flange 4 inch OD with 1 inch bore and 4 bolt holes"
+    "example_prompt": "Box with 0.25 inch fillets on all edges"
   },
   {
-    "title": "L Bracket",
-    "summary": "Use a simple 2D L profile extruded to length for angle brackets and corner supports.",
-    "tags": [
-      "bracket",
-      "angle",
-      "support"
-    ],
-    "keywords": [
-      "bracket",
-      "angle",
-      "corner",
-      "support",
-      "l bracket"
-    ],
+    "title": "opChamfer Beveled Edges",
+    "summary": "opChamfer bevels selected edges at a 45-degree angle. Use on mating faces, sharp corners, and thread chamfers.",
+    "tags": ["chamfer", "bevel", "edge", "deburr", "45 degree"],
+    "keywords": ["chamfer", "opChamfer", "bevel", "45 degree", "edge break", "deburr"],
     "parameterHints": [
-      "Expose arm width, arm height, wall thickness, and extrusion length.",
-      "Keep wall thickness smaller than both arm dimensions."
+      "Use ChamferType.EQUAL_OFFSETS for a symmetric 45-degree chamfer.",
+      "Use ChamferType.OFFSET_ANGLE for a specified angle.",
+      "Typical chamfer width: 0.02 to 0.1 inch."
     ],
     "modelingNotes": [
-      "Sketch a closed L profile instead of extruding a full plate and cutting it afterward.",
-      "Use simple straight segments for reliability."
+      "opChamfer syntax: { 'entities': edgeQuery, 'chamferType': ChamferType.EQUAL_OFFSETS, 'width': definition.chamferWidth }",
+      "For OFFSET_ANGLE: { 'chamferType': ChamferType.OFFSET_ANGLE, 'width': ..., 'angle': 45 * degree }",
+      "Apply after all boolean operations, same as opFillet.",
+      "Typically used on leading edges of bolts, shafts, and thread starts."
     ],
-    "featurePattern": "Closed L polygon with outside arm dimensions and inside notch based on wall thickness, then extrude along depth.",
+    "featurePattern": "opExtrude body, then opChamfer with ChamferType.EQUAL_OFFSETS and width parameter on selected edges.",
     "failureModes": [
-      "Do not make wall thickness greater than either leg.",
-      "Do not leave the L profile open."
+      "Chamfer width larger than adjacent face — invalid geometry.",
+      "Wrong ChamferType enum name — use ChamferType.EQUAL_OFFSETS, not ChamferType.SYMMETRIC."
     ],
     "validationRules": [
-      "The polygon must be closed before sketch solve.",
-      "Wall thickness should be exposed as an editable parameter."
+      "chamferWidth must be smaller than shortest adjacent edge.",
+      "Apply after all boolean operations."
     ],
-    "example_prompt": "L bracket 3 inches by 4 inches, 0.25 inch wall, 2 inch long"
+    "example_prompt": "Cylinder with 0.05 inch chamfer on the top rim"
   },
   {
-    "title": "Hitch Peg Or Mushroom Pin",
-    "summary": "Model a pin with a cylindrical shaft and domed or revolved head.",
-    "tags": [
-      "peg",
-      "pin",
-      "hitch",
-      "axle"
-    ],
-    "keywords": [
-      "peg",
-      "pin",
-      "hitch",
-      "axle",
-      "mushroom",
-      "shaft"
-    ],
+    "title": "Circular Pattern With opPattern",
+    "summary": "Repeat geometry around a central axis using opPattern with PatternType.CIRCULAR. Use for bolt hole patterns, fin arrays, spokes, and radial features.",
+    "tags": ["pattern", "circular", "array", "bolt holes", "radial", "repeat"],
+    "keywords": ["pattern", "circular pattern", "opPattern", "radial", "bolt circle", "array", "repeat", "spokes", "fins"],
     "parameterHints": [
-      "Expose shaft radius, shaft height, and head radius.",
-      "If head height is not provided, approximate a rounded cap from the head radius."
+      "Expose instanceCount as isInteger and the circle axis (or use the sketch plane normal).",
+      "For bolt holes: instanceCount and boltCircleRadius are the main params.",
+      "PatternType.CIRCULAR requires: axis (Line), instanceCount, angle (total sweep, usually 2*PI*radian for full circle)."
     ],
     "modelingNotes": [
-      "Create the shaft with a cylinder-like operation and the head with a revolve profile.",
-      "Union the head and shaft at the end."
+      "opPattern creates copies of a body or feature.",
+      "For circular body patterns: { 'entities': qCreatedBy(id+'feat1', EntityType.BODY), 'patternType': PatternType.CIRCULAR, 'axis': line(origin, normal), 'instanceCount': N, 'angle': 2*PI*radian }",
+      "Alternatively, use a for loop in the sketch to place all circles at once — simpler and more reliable.",
+      "For-loop approach: for (var k = 0; k < N; k += 1) { var a = 2*PI*k/N; skCircle(sk, 'hole'~k, { 'center': vector(boltR*cos(a), boltR*sin(a))*inch, 'radius': holeR }); }",
+      "The for-loop sketch approach is preferred for holes because all holes are in a single sketch and extrude together."
     ],
-    "featurePattern": "opCylinder shaft from base to height with operationType NEW, revolve a half-dome or cap profile around the center axis, then boolean union.",
+    "featurePattern": "For hole patterns: for loop in sketch placing circles at angle = 2*PI*k/N around bolt circle radius. For solid feature copies: opPattern with PatternType.CIRCULAR.",
     "failureModes": [
-      "Use opCylinder or an equivalent stable shaft primitive and keep the dome as a separate revolved body.",
-      "Do not leave the head and shaft as separate bodies unless requested."
+      "Using opPattern on a body before boolean — results in overlapping bodies.",
+      "Forgetting to union patterned bodies — leaves them as separate solids.",
+      "for-loop sketch approach is simpler and more reliable than opPattern for holes."
     ],
     "validationRules": [
-      "Head radius should be greater than or equal to shaft radius.",
-      "The revolve axis must align with the shaft axis."
+      "instanceCount >= 2.",
+      "boltCircleRadius + holeRadius < outerRadius."
     ],
-    "example_prompt": "Hitch peg with 0.25 inch shaft diameter, 0.5 inch shaft height, and 0.42 inch dome head"
+    "example_prompt": "6 bolt holes on a 3 inch bolt circle"
   },
   {
-    "title": "Spur Gear",
-    "summary": "Use an involute-inspired 2D tooth profile and extrude it to face width for train gears and pinions.",
-    "tags": [
-      "gear",
-      "spur gear",
-      "pinion"
-    ],
-    "keywords": [
-      "gear",
-      "spur",
-      "pinion",
-      "tooth",
-      "teeth",
-      "diametral pitch",
-      "module"
-    ],
+    "title": "Linear Pattern Array",
+    "summary": "Repeat a feature or body at equal spacing along an axis using opPattern with PatternType.LINEAR or a for loop in a sketch.",
+    "tags": ["pattern", "linear", "array", "repeat", "ribs", "fins"],
+    "keywords": ["linear pattern", "opPattern", "array", "repeat", "spacing", "ribs", "fins", "teeth", "slots"],
     "parameterHints": [
-      "Expose tooth count and face width; derive pitch geometry from pitch radius or diametral pitch.",
-      "Add a bore radius parameter when the gear must mount to a shaft."
+      "Expose instanceCount and spacing as editable parameters.",
+      "Total span = spacing * (instanceCount - 1)."
     ],
     "modelingNotes": [
-      "Keep pressure angle at 20 degrees unless the prompt requests otherwise.",
-      "Prefer a valid simplified gear profile over an overcomplicated but brittle one."
+      "For a linear array of holes or slots in a sketch: use a for loop placing rectangles or circles at x offsets.",
+      "For-loop sketch: for (var i = 0; i < N; i += 1) { var cx = startX + i * spacing; skCircle(sk, 'h'~i, {...}); }",
+      "For opPattern solid copy: { 'patternType': PatternType.LINEAR, 'entities': bodyQuery, 'direction': skPlane.x, 'distance': spacing, 'instanceCount': N }",
+      "opPattern LINEAR needs a direction vector (skPlane.x, skPlane.y, or skPlane.normal)."
     ],
-    "featurePattern": "Generate alternating root/flank/tip/flank points around the pitch circle, solve one closed sketch, then extrude to face width.",
+    "featurePattern": "For holes/slots: for loop in sketch with x offset. For solid features: opPattern LINEAR with direction, distance, instanceCount.",
     "failureModes": [
-      "Do not ask the LLM to invent a full involute API.",
-      "Do not generate hundreds of separate sketch operations when a compact loop can create the tooth outline."
+      "Pattern direction must be a unit vector — use skPlane.x, skPlane.y, or skPlane.normal.",
+      "For-loop variable names must be unique strings per iteration: 'hole' ~ k is correct."
     ],
     "validationRules": [
-      "Tooth count should be at least 6.",
-      "Pitch radius, root radius, and tip radius must stay positive and ordered root < pitch < tip."
+      "instanceCount >= 1.",
+      "Total span must fit within the body."
     ],
-    "example_prompt": "20 tooth spur gear with 2 inch pitch diameter and 0.5 inch face width"
+    "example_prompt": "4 evenly spaced holes along a plate"
   },
   {
-    "title": "Spur Gear Parameterization",
-    "summary": "Expose gear pitch radius, tooth count, face width, bore radius, and pressure angle so the generated feature stays editable.",
-    "tags": [
-      "gear",
-      "spur",
-      "parameterization"
-    ],
-    "keywords": [
-      "gear",
-      "spurs",
-      "pressure angle",
-      "numTeeth",
-      "pitch diameter",
-      "radius"
-    ],
+    "title": "Boolean Subtract Cut",
+    "summary": "Use opBoolean with BooleanOperationType.SUBTRACTION to cut holes, pockets, and slots by subtracting a tool body from a target. Required for any internal cavity that cannot be sketched directly.",
+    "tags": ["boolean", "subtract", "cut", "pocket", "hole", "cavity"],
+    "keywords": ["boolean", "subtract", "cut", "pocket", "slot", "hole", "cavity", "opBoolean", "tool"],
     "parameterHints": [
-      "Expose number of teeth as an integer parameter.",
-      "Expose pitch radius as a length parameter and compute tooth geometry from it.",
-      "Expose pressure angle so the user can adjust tooth form for 14.5°, 20°, or 25° profiles."
+      "The tool body is what gets cut away. The target body is what remains.",
+      "Build the tool body first (smaller shape), then subtract from the larger target."
     ],
     "modelingNotes": [
-      "Compute the involute profile using runtime math from the feature definition.",
-      "Avoid baking fixed tooth geometry into the generated FeatureScript code.",
-      "Use a default face width equal to roughly half the pitch diameter."
+      "opBoolean subtract: { 'tools': qCreatedBy(id+'tool', EntityType.BODY), 'targets': qCreatedBy(id+'main', EntityType.BODY), 'operationType': BooleanOperationType.SUBTRACTION }",
+      "The tool body is consumed by the subtraction — it no longer exists as a separate body after.",
+      "For cylindrical holes: sketch a circle + extrude beyond the body + subtract.",
+      "Simpler: use a sketch with the hole profile in the same sketch as the outer profile and extrude with qSketchRegion(id, true) — this auto-subtracts inner regions.",
+      "qSketchRegion(id + 'sk1', true) means 'use all regions, treating inner ones as cuts' — prefer this over boolean for simple cases."
     ],
-    "featurePattern": "Parameterize numTeeth, radius, pressureAngleDegrees, faceWidth, and holeRadius; build each tooth profile in a loop and extrude the resulting sketch.",
+    "featurePattern": "Build tool cylinder (opExtrude or opCylinder), then opBoolean SUBTRACTION with tools=toolBody targets=mainBody.",
     "failureModes": [
-      "Do not hardcode the number of teeth or pitch radius into the feature body.",
-      "Do not omit a user-editable pressure angle when the gear is described as a standard gear.",
-      "Do not expose only face width without allowing the user to change the gear size."
+      "Tool body not fully overlapping the target — the cut will be shallow or miss entirely.",
+      "Wrong operationType enum — must be BooleanOperationType.SUBTRACTION.",
+      "Tool body must be separate from target body — cannot subtract from itself."
     ],
     "validationRules": [
-      "numTeeth must be an integer and at least 6.",
-      "pressureAngleDegrees should be between 10 and 30.",
-      "Bore radius must be smaller than pitch radius."
+      "Tool must intersect target geometry.",
+      "Prefer qSketchRegion(id, true) for holes in the same sketch over boolean subtract."
     ],
-    "example_prompt": "Generate a 24 tooth spur gear with 2.5 inch pitch radius, 20° pressure angle, 0.5 inch face width, and 0.25 inch bore radius"
+    "example_prompt": "Box with a cylindrical pocket cut in the top face"
   },
   {
-    "title": "Slotted Mounting Plate",
-    "summary": "For adjustable mounts, use a plate profile with one or more slots instead of only round holes.",
-    "tags": [
-      "slot",
-      "mounting plate",
-      "adjustable"
-    ],
-    "keywords": [
-      "slot",
-      "slotted",
-      "mount",
-      "adjustable",
-      "plate",
-      "bracket"
-    ],
+    "title": "Cone Or Tapered Frustum",
+    "summary": "Model cones, truncated cones, funnels, nozzles, and tapered rods by revolving a closed trapezoidal profile around the vertical axis. Set top radius to 0 for a sharp tip.",
+    "tags": ["cone", "frustum", "funnel", "nozzle", "taper", "tip"],
+    "keywords": ["cone", "frustum", "funnel", "nozzle", "tapered", "taper", "tip", "hopper", "shroud"],
     "parameterHints": [
-      "Expose plate width, plate height, thickness, slot length, slot width, and slot spacing.",
-      "If the prompt is ambiguous, use centered slots with enough margin to the outer edge."
+      "Expose bottomRadius, topRadius (0 for sharp tip), and height.",
+      "Use NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS for topRadius so 0 is allowed.",
+      "For a funnel: large topRadius, small bottomRadius."
     ],
     "modelingNotes": [
-      "Build each slot from two circles connected by tangent lines in the same sketch.",
-      "Extrude the resulting sketch region with the slot cutouts already present."
+      "Sketch a closed trapezoid: axis line on x=0, then base at y=0, slanted side, top at y=height, and close back to axis.",
+      "Revolve with line(skPlane.origin, skPlane.normal) as axis and 2*PI*radian.",
+      "bRv = definition.bottomRadius / inch; tRv = definition.topRadius / inch; htv = definition.height / inch.",
+      "Segments: axis(0,0)→(0,htv), base(0,0)→(bRv,0), side(bRv,0)→(tRv,htv), top(tRv,htv)→(0,htv).",
+      "For a carrot: use a revolved spline with 5 control points that taper and slightly curve inward near the tip."
     ],
-    "featurePattern": "Outer rectangle plus each slot as a capsule profile using two equal-radius circles and tangent line segments.",
+    "featurePattern": "Closed trapezoidal profile (axis + base + slanted side + top cap), skSolve, opRevolve with line() axis.",
     "failureModes": [
-      "Do not make slot width larger than slot length.",
-      "Do not place slots beyond plate boundaries."
+      "Open profile — all 4 segments must connect to form a closed region.",
+      "topRadius equal to or greater than bottomRadius for a normal cone — check relationship.",
+      "If topRadius = 0 exactly, the tip vertex must exactly touch the axis."
     ],
     "validationRules": [
-      "Slot radius is slot width / 2.",
-      "Slot center spacing must leave edge margin."
+      "bottomRadius > 0.",
+      "topRadius >= 0 and topRadius < bottomRadius for a standard cone."
     ],
-    "example_prompt": "Mounting plate 6 by 3 inches with two 1.5 inch slots"
+    "example_prompt": "Cone 1.5 inch base, 4 inches tall, sharp tip"
   },
   {
-    "title": "Ribbed Bracket Or Gusset",
-    "summary": "Add triangular ribs or gussets to brackets when stiffness or load support is requested.",
-    "tags": [
-      "rib",
-      "gusset",
-      "bracket",
-      "stiffener"
-    ],
-    "keywords": [
-      "rib",
-      "gusset",
-      "stiffener",
-      "reinforced",
-      "support",
-      "load"
-    ],
+    "title": "Organic Carrot Or Root Shape",
+    "summary": "Organic tapered shapes like carrots and roots use a revolved spline profile. The spline side has 5+ control points curving inward from base to tip. The profile is closed with an axis line and base segment.",
+    "tags": ["organic", "carrot", "root", "taper", "spline", "revolve", "natural"],
+    "keywords": ["carrot", "root", "organic", "taper", "spline", "revolve", "natural shape", "vegetable", "prop"],
     "parameterHints": [
-      "Expose rib thickness, rib height, and rib count when the prompt requests reinforcement.",
-      "Default rib thickness can be close to wall thickness."
+      "Expose baseRadius (widest point, at y=0) and height (total length).",
+      "The tip is always at (x=0, y=height) — touching the axis.",
+      "Control points at 20%, 45%, 70%, 85%, and 100% of height with decreasing radius."
     ],
     "modelingNotes": [
-      "Keep ribs simple and symmetric for first-pass generated CAD.",
-      "A triangular prism rib is usually more robust than complex curved webbing."
+      "Spline control points (bRv = baseRadius/inch, htv = height/inch):",
+      "  vector(bRv, 0)*inch, vector(bRv*0.9, htv*0.2)*inch, vector(bRv*0.7, htv*0.45)*inch, vector(bRv*0.4, htv*0.7)*inch, vector(0.02, htv)*inch",
+      "Close the profile: skLineSegment 'top' from (0.02,htv) to (0,htv), skLineSegment 'axis' from (0,0) to (0,htv), skLineSegment 'base' from (0,0) to (bRv,0).",
+      "skFitSpline 'profile' with these 5 points on the right side.",
+      "Revolve with line(skPlane.origin, skPlane.normal) and 2*PI*radian.",
+      "The 5-point spline gives the characteristic gentle taper of an organic root — 2 points produces a straight line (cone), not organic."
     ],
-    "featurePattern": "Create the base bracket first, then add triangular rib profiles on the side plane and extrude/union them into the bracket.",
+    "featurePattern": "axis + base + 5-point skFitSpline + top connector segments forming closed region, revolve 360°.",
     "failureModes": [
-      "Do not create ribs that float without touching both supported faces.",
-      "Do not overcomplicate with lofts unless the user specifically asks."
+      "Spline with only 2 points is a straight line — not organic.",
+      "Spline control points must be on one side of the axis (x > 0) — negative x causes a self-intersecting profile.",
+      "Profile must close: tip of spline must connect back to axis via a short line."
     ],
     "validationRules": [
-      "Ribs should intersect the main bracket body.",
-      "Rib thickness should be less than the bracket width."
+      "All spline control x-values >= 0.",
+      "Last spline point must be close to x=0 to join the axis."
     ],
-    "example_prompt": "Reinforced L bracket with two triangular gussets"
+    "example_prompt": "Parametric carrot shape 0.75 inch base diameter 4 inches long"
   },
   {
-    "title": "Shell Or Enclosure",
-    "summary": "For cases and housings, model an outer block with editable wall thickness and an open side.",
-    "tags": [
-      "enclosure",
-      "shell",
-      "case",
-      "housing"
-    ],
-    "keywords": [
-      "enclosure",
-      "shell",
-      "case",
-      "housing",
-      "box",
-      "wall thickness"
-    ],
+    "title": "Dome Or Hemisphere",
+    "summary": "A dome or hemisphere is a revolved semicircle. Sketch a quarter-circle arc plus axis line, solve, then revolve 360 degrees.",
+    "tags": ["dome", "hemisphere", "sphere", "cap", "top", "rounded"],
+    "keywords": ["dome", "hemisphere", "sphere", "cap", "rounded top", "half sphere", "bump"],
     "parameterHints": [
-      "Expose width, height, depth, wall thickness, and optional lid clearance.",
-      "Keep wall thickness below one third of the smallest outer dimension."
+      "Expose domeRadius as the main parameter.",
+      "For a flattened elliptical dome, expose domeRadius and domeHeight separately."
     ],
     "modelingNotes": [
-      "Use simple rectangular shell logic before adding bosses, clips, or vents.",
-      "If the exact open face is unclear, default to an open top."
+      "Sketch: axis line from (0,0) to (0,R), arc from (R,0) to (0,R), base line from (0,0) to (R,0).",
+      "skArc: { 'start': vector(R,0)*inch, 'mid': vector(R*0.707, R*0.707)*inch, 'end': vector(0,R)*inch }",
+      "Revolve: line(skPlane.origin, skPlane.normal), 2*PI*radian.",
+      "For a full sphere: sketch a full semicircle (axis + right semicircle arc) and revolve.",
+      "For Hitch Peg head: build shaft with opCylinder first, then revolve dome centered at shaft top, then opBoolean UNION."
     ],
-    "featurePattern": "Create outer box, create inner offset cavity based on wall thickness, subtract or sketch the ring profile and extrude as a shell-like body.",
+    "featurePattern": "Quarter-circle arc + axis + base, skSolve, opRevolve 360° around plane normal.",
     "failureModes": [
-      "Do not let wall thickness consume the interior cavity.",
-      "Do not add tiny snap details unless dimensions are provided."
+      "Arc mid-point must be at the 45-degree point: vector(R*cos(45°), R*sin(45°)) ≈ vector(0.707R, 0.707R).",
+      "Axis must be a Line value — not a query or variable reference.",
+      "Profile must be closed."
     ],
     "validationRules": [
-      "Inner width/height/depth must remain positive.",
-      "Open face should match the prompt or default to top."
+      "Arc start must be on x-axis (y=0), arc end must be on y-axis (x=0).",
+      "Arc mid-point at 45 degrees: x and y both equal R * sqrt(2)/2."
     ],
-    "example_prompt": "Small electronics enclosure 4 x 3 x 1.5 inches with 0.1 inch walls"
+    "example_prompt": "Hemispherical dome 2 inch radius on a flat base"
   },
   {
-    "title": "Image Based CAD Interpretation",
-    "summary": "When generating from images, prioritize explicit dimensions and simple manufacturable geometry over visual decoration.",
-    "tags": [
-      "image",
-      "vision",
-      "dimensions",
-      "cad interpretation"
-    ],
-    "keywords": [
-      "image",
-      "photo",
-      "drawing",
-      "dimension",
-      "reference",
-      "analyze"
-    ],
+    "title": "Pipe Along Arc Or L-Path",
+    "summary": "An elbow pipe or bent tube is created by sweeping a circular cross-section along an arc or L-shaped path. The path sketch is wire edges; the profile sketch is a perpendicular circle.",
+    "tags": ["pipe", "elbow", "bent tube", "sweep", "arc path", "90 degree"],
+    "keywords": ["pipe elbow", "bent pipe", "tube", "sweep", "arc", "90 degree", "elbow", "conduit", "hose"],
     "parameterHints": [
-      "If a dimension is visible, use it directly.",
-      "If a dimension is missing, infer conservatively and expose it as an editable parameter."
+      "Expose tubeRadius (profile circle radius) and bendRadius (arc radius of the path).",
+      "For 90-degree elbow: path arc from (0,0) sweeping 90° at bendRadius."
     ],
     "modelingNotes": [
-      "Separate what is visible from what is inferred in the reasoning trace.",
-      "Use image labels to decide which view controls dimensions."
+      "Path sketch: draw an arc (skArc) on the sketch plane — this is the centerline of the pipe.",
+      "Profile sketch: draw a circle on a plane perpendicular to the path at its start point.",
+      "Perpendicular plane: plane(startPoint, pathTangent) where pathTangent is the direction of the path at its start.",
+      "For a simple L-path: two connected skLineSegments forming 90° corner, then sweep a circle along them.",
+      "opSweep: { 'profiles': qSketchRegion(id+'prof'), 'path': qCreatedBy(id+'path', EntityType.EDGE) }",
+      "Path edges are queried with EntityType.EDGE, not qSketchRegion."
     ],
-    "featurePattern": "Vision description -> compact dimension prompt -> extractDims -> AI-authored FeatureScript first -> static validation and repair -> fallback only if fatal issues remain.",
+    "featurePattern": "Arc path sketch + perpendicular circle profile sketch, both skSolve'd, opSweep profiles=region path=edge.",
     "failureModes": [
-      "Do not pass long image descriptions into multiple LLM calls.",
-      "Do not treat shadows, perspective, or material texture as required geometry."
+      "Using qSketchRegion for the path — path must be EntityType.EDGE.",
+      "Profile plane not perpendicular to path tangent — produces twisted tube.",
+      "Hollow pipe: use two concentric circles in the profile sketch and qSketchRegion(id, true)."
     ],
     "validationRules": [
-      "Generated dimensions should be editable.",
-      "If confidence is low, the reasoning should say which dimensions were inferred."
+      "tubeRadius < bendRadius to avoid self-intersection.",
+      "Profile must be a closed region."
     ],
-    "example_prompt": "Use this dimensioned drawing to generate the mounting bracket"
+    "example_prompt": "90 degree pipe elbow 0.5 inch radius tube on 2 inch bend radius"
   },
   {
-    "title": "Spur Gear Involute Tooth Math",
-    "summary": "For spur gears, derive all geometry from pitch radius and tooth count. Pressure angle 20deg is standard. Tip radius = pitch + module. Root radius = pitch - 1.35*module. Base circle = pitch * cos(20deg). Generate tooth profile as an involute curve parametrized by t.",
-    "tags": [
-      "gear",
-      "spur",
-      "involute",
-      "teeth",
-      "diametral pitch",
-      "module",
-      "FRC"
-    ],
-    "keywords": [
-      "gear",
-      "spur",
-      "pinion",
-      "teeth",
-      "tooth",
-      "involute",
-      "diametral",
-      "pitch",
-      "module",
-      "pressure angle",
-      "FRC",
-      "robot",
-      "driven",
-      "drive"
-    ],
+    "title": "Box With Boss Or Raised Pad",
+    "summary": "A boss is a raised cylindrical or rectangular platform on a flat surface. Build it by extruding the main box, then extruding a smaller boss profile from the top face using a second sketch and additive extrude.",
+    "tags": ["boss", "pad", "raised", "platform", "hub", "mounting boss"],
+    "keywords": ["boss", "pad", "raised pad", "hub", "post", "stand-off on plate", "locating boss"],
     "parameterHints": [
-      "numTeeth: integer, minimum 6. For gear ratios, driven gear teeth = ratio * driver teeth.",
-      "radiusInches: pitch radius = numTeeth / (2 * diametralPitch). For 20DP 32T gear: 32/(2*20)=0.8in.",
-      "depthInches: face width = 0.4 to 0.8 * pitch diameter. Default 0.5 * pitchDiameter.",
-      "holeRadiusInches: bore hole for shaft, typically 0.25 * pitch radius. Set 0 for solid gear."
+      "Expose boxWidth, boxHeight, boxDepth for the base, and bossRadius and bossHeight for the raised feature.",
+      "Boss diameter is typically 1.5 to 2.5x the screw diameter it supports."
     ],
     "modelingNotes": [
-      "AI-authored gear code should compute only the geometry it actually uses and remove dead helper variables before returning the file.",
-      "GEAR_SPUR prompts should stay parameter-driven so tooth count, pitch radius, face width, bore, and pressure angle all remain editable.",
-      "8:1 gear ratio means one gear has 8x as many teeth as the other. For an 8:1 set at 20DP: pinion=8 teeth (r=0.2in), driven=64 teeth (r=1.6in).",
-      "Module (metric) = 25.4 / diametral_pitch. 1mm module = ~25.4 DP. Convert module to inches: pitchRadius = (numTeeth * module_mm) / (2 * 25.4)."
+      "Method 1 (simple): Create the base box with opExtrude. Then create a second sketch on the top face plane and extrude the boss geometry. Use opBoolean UNION to join the two bodies.",
+      "Method 2 (single sketch): Include both the outer rectangle and boss circle in one sketch only if no overlap — extrude both regions at the box height, then add-extrude the boss circle again for extra boss height.",
+      "Method 3 (additive extrude in FS): extrude the boss circle with 'operationType': NewBodyOperationType.ADD — this adds to the existing body without opBoolean.",
+      "For best results: separate extrudes + opBoolean UNION."
     ],
-    "featurePattern": "extractDims classifies as GEAR_SPUR \u2192 AI-authored gear logic computes rb, rd, ra from numTeeth+radiusInches \u2192 generates tooth outlines as skFitSpline+skArc calls \u2192 skSolve \u2192 opExtrude to depthInches.",
+    "featurePattern": "opExtrude base box, create offsetPlane at box top, newSketchOnPlane on offsetPlane, sketch boss circle, skSolve, opExtrude boss, opBoolean UNION.",
     "failureModes": [
-      "Do not leave unused helper variables such as derived radii or angles in the final gear code.",
-      "Do NOT use fCylinder for gears \u2014 the tooth profile requires a sketch-based approach.",
-      "A gear with fewer than 6 teeth will have undercut problems; enforce minimum 6."
+      "Boss extruded from world plane instead of offset plane at top of box — boss sinks into body.",
+      "Forgetting to union — leaves boss as separate body.",
+      "Boss radius must be smaller than box half-width."
     ],
     "validationRules": [
-      "tipRadius > pitchRadius > rootRadius > 0 always.",
-      "Face width (depthInches) should be 0.2 to 1.5 * pitch diameter.",
-      "Bore hole radius must be less than root radius * 0.85."
+      "Boss plane = plane(boxOrigin + boxNormal * boxDepth, boxNormal).",
+      "bossRadius < min(boxWidth, boxHeight) / 2."
     ],
-    "example_prompt": "spur gear 32 teeth 20 diametral pitch 0.5 inch face width with 0.25 inch bore"
+    "example_prompt": "2x2x1 inch plate with a 0.25 inch radius boss 0.5 inch tall in the center"
   },
   {
-    "title": "FRC Robot Gear Train Sizing",
-    "summary": "FRC robots commonly use 20DP or 32DP spur gears for drivetrains. Ratio is driven/driver teeth. Small pinions (8-12T) mesh with large gears (40-64T) for speed reduction. Belt + pulley and chain + sprocket are alternatives but this app generates spur gears.",
-    "tags": [
-      "FRC",
-      "robot",
-      "gear train",
-      "drivetrain",
-      "reduction",
-      "pinion"
-    ],
-    "keywords": [
-      "FRC",
-      "robot",
-      "drivetrain",
-      "reduction",
-      "pinion",
-      "ratio",
-      "20DP",
-      "32DP",
-      "train",
-      "sprocket",
-      "belt",
-      "chain"
-    ],
+    "title": "T-Bracket Or T-Plate",
+    "summary": "A T-bracket is two rectangles forming a T cross-section extruded to length. Sketch the T profile as a closed polygon: the wide top flange plus the narrow vertical web.",
+    "tags": ["t-bracket", "t-plate", "structural", "extrusion", "web", "flange"],
+    "keywords": ["t-bracket", "t-plate", "t-section", "structural", "web", "flange", "angle iron", "beam"],
     "parameterHints": [
-      "For 8:1 ratio at 20DP: pinion=8T r=0.2in, driven=64T r=1.6in.",
-      "For 4:1 ratio at 20DP: pinion=12T r=0.3in, driven=48T r=1.2in.",
-      "Standard FRC gear pitches: 20DP (strong, drivetrain), 32DP (lighter, mechanisms).",
-      "Center distance between two meshing gears = pitchRadius1 + pitchRadius2."
+      "Expose flangeWidth, flangeThickness, webHeight, webThickness, and length.",
+      "Typical structural T: flangeWidth = 2 * webHeight, flangeThickness = webThickness."
     ],
     "modelingNotes": [
-      "When user says 'gear ratio X:1', generate the driven (larger) gear \u2014 it's the useful output shaft gear.",
-      "When user says 'pinion', generate the smaller driver gear.",
-      "Face width for FRC drivetrain gears is typically 0.375 to 0.75 inches."
+      "Sketch the T profile as 8 connected line segments forming a closed T outline.",
+      "Center the flange on x=0. Web drops down from the center of the flange.",
+      "Points (flangeW=flangeWidth/inch, flangeT=flangeThickness/inch, webH=webHeight/inch, webT=webThickness/inch):",
+      "  (-flangeW/2, 0) → (flangeW/2, 0) → (flangeW/2, flangeT) → (webT/2, flangeT) → (webT/2, flangeT+webH) → (-webT/2, flangeT+webH) → (-webT/2, flangeT) → (-flangeW/2, flangeT) → close.",
+      "Extrude along skPlane.normal (the length direction)."
     ],
-    "featurePattern": "Parse ratio \u2192 compute numTeeth = ratio * pinion_teeth (default pinion=8) \u2192 compute pitchRadius = numTeeth / (2 * diametralPitch) \u2192 route to AI-authored GEAR_SPUR logic.",
+    "featurePattern": "8-segment closed T polygon (flange + web), skSolve, opExtrude to length.",
     "failureModes": [
-      "Do not confuse gear ratio with number of teeth \u2014 ratio 8:1 means 8x as many teeth, not 8 teeth.",
-      "Do not make bore holes larger than the root circle."
+      "Open polygon — all 8 segments must connect back to start.",
+      "Web not centered on flange — check x-symmetry.",
+      "flangeThickness > 0 required — T profile has nonzero flange thickness."
     ],
     "validationRules": [
-      "Always produce at least numTeeth=6.",
-      "Diametral pitch defaults to 20 for FRC unless stated otherwise."
+      "webThickness < flangeWidth.",
+      "Profile must be closed — final segment returns to start point."
     ],
-    "example_prompt": "8:1 ratio spur gear for FRC drivetrain at 20 diametral pitch"
+    "example_prompt": "T-bracket 2 inch flange, 1 inch web, 0.125 inch wall, 6 inches long"
   },
   {
-    "title": "Stepped Shaft Or Shoulder Shaft",
-    "summary": "A shaft with multiple diameters \u2014 a smaller section for bearing/bushing seating and a larger section for torque transfer. Build as two coaxial cylinders unioned together.",
-    "tags": [
-      "shaft",
-      "stepped",
-      "shoulder",
-      "axle",
-      "motor shaft"
-    ],
-    "keywords": [
-      "shaft",
-      "stepped",
-      "shoulder",
-      "axle",
-      "spindle",
-      "motor",
-      "hex",
-      "keyed"
-    ],
-    "parameterHints": [
-      "Expose mainRadius, stepRadius (smaller), mainLength, stepLength.",
-      "stepRadius < mainRadius always.",
-      "For hex shafts, use a hexagonal polygon cross-section instead of circle."
-    ],
-    "modelingNotes": [
-      "Use two opCylinder calls \u2014 one for main body, one for stepped end \u2014 then opBoolean union.",
-      "Stepped shafts in FRC are commonly 0.5 inch hex or round with snap ring grooves.",
-      "If user says 'hex shaft', use POLYGON shape with sides=6 instead of CYLINDER."
-    ],
-    "featurePattern": "opCylinder main body \u2192 opCylinder step end (smaller radius, positioned at top of main) \u2192 opBoolean UNION.",
-    "failureModes": [
-      "Do not forget operationType or union when composing stepped shafts from multiple cylindrical stages.",
-      "Do not forget to union the two bodies."
-    ],
-    "validationRules": [
-      "stepRadius must be less than mainRadius.",
-      "Both lengths must be positive."
-    ],
-    "example_prompt": "stepped shaft 0.5 inch diameter main section 3 inches long, 0.375 inch step 1 inch long"
-  },
-  {
-    "title": "U-Channel Or C-Channel Profile",
-    "summary": "Structural channel used in FRC robots. A U or C cross-section extruded to length. Sketch the open profile as a closed U polygon, then extrude.",
-    "tags": [
-      "channel",
-      "u-channel",
-      "c-channel",
-      "structural",
-      "FRC",
-      "extrusion"
-    ],
-    "keywords": [
-      "channel",
-      "u-channel",
-      "c-channel",
-      "aluminum",
-      "structural",
-      "extrusion",
-      "rail",
-      "box tube"
-    ],
+    "title": "U-Channel Or C-Channel",
+    "summary": "A U-channel (or C-channel) is an open structural profile: flat web with two parallel flanges. Sketch as a closed U polygon and extrude to length. Do NOT use opShell — sketch the profile directly.",
+    "tags": ["u-channel", "c-channel", "structural", "extrusion", "rail", "box tube"],
+    "keywords": ["u-channel", "c-channel", "aluminum extrusion", "structural", "rail", "box tube", "maxtube"],
     "parameterHints": [
       "Expose channelWidth, channelHeight, wallThickness, and length.",
-      "Keep wall thickness 0.05 to 0.25 inches for aluminum extrusions.",
-      "MaxTube (FRC common): 2x1x0.1 or 1x1x0.1 inch cross-section."
+      "FRC MAXTube: 2x1 inch cross-section, 0.1 inch wall.",
+      "For open channel: do NOT close the top. For box tube: add top wall to close it."
     ],
     "modelingNotes": [
-      "Sketch the U profile as 6 line segments forming the open channel cross-section, solve, then extrude along length.",
-      "Avoid opShell \u2014 sketch the profile directly for reliability.",
-      "For box tube (closed), use two concentric rectangles and extrude the ring region."
+      "U-channel profile: 6 segments. Bottom (web) goes full width. Two flanges go up from each end. Inner cavity is based on wall thickness.",
+      "Points (W=width/inch, H=height/inch, t=wall/inch):",
+      "  outer: (0,0)→(W,0)→(W,H)→(W-t,H)→(W-t,t)→(t,t)→(t,H)→(0,H)→(0,0)",
+      "This is an 8-segment closed U with inner cavity.",
+      "For box tube: add (0,H)→(W,H) closing segment becomes the top wall — use two nested rectangles instead.",
+      "Box tube: outer rectangle + inner rectangle (inset by wall), extrude the ring region."
     ],
-    "featurePattern": "Sketch closed U polygon (outer W x H, subtract inner cavity based on wall thickness), skSolve, opExtrude to length.",
+    "featurePattern": "8-segment closed U polygon (outer U minus inner cavity), skSolve, opExtrude to channel length.",
     "failureModes": [
-      "Open sketch profiles will fail skSolve \u2014 ensure the U is closed at the bottom.",
-      "Do not use opShell \u2014 it requires a solid body first and often fails on thin walls."
+      "Using opShell — fails on thin-walled shapes, prefer direct profile sketch.",
+      "Open profile — U must be closed for extrusion to work.",
+      "Wall thickness must be less than half width AND half height."
     ],
     "validationRules": [
-      "Wall thickness must be less than half of both width and height.",
-      "Inner cavity must remain positive (width - 2*wall > 0)."
+      "wallThickness < channelWidth / 2.",
+      "wallThickness < channelHeight."
     ],
-    "example_prompt": "2x1 inch aluminum U-channel 12 inches long 0.1 inch wall thickness"
+    "example_prompt": "2x1 inch aluminum U-channel 12 inches long 0.1 inch wall"
   },
   {
-    "title": "Pulley Or Belt Wheel",
-    "summary": "Timing belt pulleys have a specific tooth profile. For FeatureScript generation, approximate as a cylinder with the pitch diameter as the main dimension and expose tooth count and belt pitch.",
-    "tags": [
-      "pulley",
-      "belt",
-      "GT2",
-      "timing",
-      "drivetrain",
-      "FRC"
-    ],
-    "keywords": [
-      "pulley",
-      "belt",
-      "timing",
-      "GT2",
-      "HTD",
-      "tooth",
-      "flange",
-      "idler"
-    ],
+    "title": "Hex Nut Or Polygon Nut",
+    "summary": "A hex nut is a regular hexagonal prism with a central threaded through-hole. Use skRegularPolygon for the hex outline and a concentric circle for the through-hole, then extrude the ring region.",
+    "tags": ["hex nut", "nut", "hex", "polygon", "fastener"],
+    "keywords": ["hex nut", "nut", "jam nut", "lock nut", "castle nut", "hex", "fastener", "threaded"],
     "parameterHints": [
-      "GT2 belt: pitch = 2mm = 0.0787 inch. pitchDiameter = numTeeth * 2mm / pi.",
-      "HTD 5mm belt: pitch = 5mm = 0.1969 inch.",
-      "Expose numTeeth, beltPitch, faceWidth, flangeDiameter, boreRadius."
+      "acrossFlats is the standard dimension for nuts — convert: circumradius = acrossFlats / (sqrt(3)) for a hex.",
+      "Or: circumradius = acrossFlats / 2 / cos(30°) = acrossFlats * 0.5774.",
+      "Standard metric nuts: M4 AF=7mm, M5 AF=8mm, M6 AF=10mm, M8 AF=13mm.",
+      "Expose acrossFlats (or circumradius), throughHoleRadius, and thickness."
     ],
     "modelingNotes": [
-      "A simplified pulley is a cylinder with pitch diameter. For FeatureScript, use CYLINDER or BUSHING shape.",
-      "Use tCylinder or tBushing template with radius = pitchDiameter/2.",
-      "Tooth profile detail is typically not needed for FRC part studios \u2014 use simplified cylinder."
+      "Use skRegularPolygon for the hex — NOT skPolygon (it doesn't exist).",
+      "skRegularPolygon: { 'center': vector(0,0)*inch, 'firstVertex': vector(R,0)*inch, 'sides': 6 }",
+      "Also sketch a concentric circle for the through-hole.",
+      "Extrude with qSketchRegion(id, true) to get the ring region (hex minus hole).",
+      "For M6: AF=10mm=0.394in, circumradius=0.228in, throughHoleRadius=3mm=0.118in, thickness=5mm=0.197in."
     ],
-    "featurePattern": "For GT2 20T pulley: pitchDiameter = 20 * 2mm / pi = 12.73mm = 0.501in \u2192 tCylinder with radiusInches=0.25.",
+    "featurePattern": "skRegularPolygon (hex, sides=6) + inner circle, extrude with qSketchRegion(true).",
     "failureModes": [
-      "Do not confuse pitch diameter with outer diameter \u2014 pulley OD is slightly larger than pitch diameter.",
-      "Do not try to generate individual belt teeth in FeatureScript \u2014 too complex and not needed for most uses."
+      "Using 'skPolygon' — it does not exist in FS. Always use skRegularPolygon.",
+      "acrossFlats is not the circumradius — circumradius = acrossFlats * 0.5774.",
+      "qSketchRegion without true parameter — extrudes solid hex including hole."
     ],
     "validationRules": [
-      "Pitch diameter = numTeeth * beltPitch / pi.",
-      "Bore must be less than pitch radius."
+      "throughHoleRadius < circumradius.",
+      "sides must be 6 for a standard hex nut."
     ],
-    "example_prompt": "GT2 20 tooth timing pulley 5mm wide with 8mm bore"
+    "example_prompt": "M8 hex nut (13mm across flats, 8mm thread)"
   },
   {
-    "title": "Bearing Block Or Pillow Block",
-    "summary": "A block with a circular bore for press-fitting a bearing. Typically a rectangular block with a centered circular cutout sized to the bearing OD.",
-    "tags": [
-      "bearing",
-      "block",
-      "pillow block",
-      "bore",
-      "press fit"
-    ],
-    "keywords": [
-      "bearing",
-      "pillow block",
-      "bore",
-      "press fit",
-      "mount",
-      "support",
-      "flanged"
-    ],
+    "title": "Stepped Hollow Shaft Or Counterbore",
+    "summary": "A shaft with multiple diameters and an axial bore. Combine two coaxial cylinders (or a sketch with step profile) and subtract a central bore. Common for motor output shafts, axles, and counterbored holes.",
+    "tags": ["stepped shaft", "hollow", "counterbore", "axle", "bore", "output shaft"],
+    "keywords": ["stepped shaft", "counterbore", "hollow shaft", "axle", "bore", "motor shaft", "output"],
     "parameterHints": [
-      "Common FRC bearings: 0.5in bore (OD 1.125in), 0.375in bore (OD 0.875in), R8 (0.5in bore OD 1.125in).",
-      "Press fit bore: bearing OD + 0 to -0.001in interference.",
-      "Expose blockWidth, blockHeight, blockDepth, boreRadius."
+      "Expose mainRadius, stepRadius, boreRadius, mainLength, stepLength.",
+      "boreRadius < stepRadius always.",
+      "For counterbore: larger bore at top, smaller bore through bottom."
     ],
     "modelingNotes": [
-      "Use PLATE_HOLES with numHoles=1 and holeRadius=bearingOD/2, or BOX with centered bore.",
-      "Add mounting holes using FLANGE or PLATE_HOLES pattern around the bore.",
-      "Keep block thickness equal to or slightly less than bearing width."
+      "Build stepped outer: two opCylinder calls + opBoolean UNION.",
+      "Then subtract bore: opCylinder for the bore tool, extend it beyond the full length, opBoolean SUBTRACTION.",
+      "Or: sketch the step profile as a revolve (two-step staircase shape) — faster and cleaner.",
+      "Revolve approach: axis on x=0, step profile with two widths, two heights, revolve 360°."
     ],
-    "featurePattern": "Rectangle plate sketch + centered circle for bore, skSolve with true (subtract), opExtrude BLIND to blockDepth.",
+    "featurePattern": "Revolve two-step staircase profile (4 horizontal + 4 vertical segments + axis) for clean stepped shaft with bore.",
     "failureModes": [
-      "Bore diameter must match the bearing OD precisely \u2014 wrong size means the bearing won't seat.",
-      "Block depth should not be less than bearing width."
+      "boreRadius >= stepRadius causes empty body.",
+      "Bore not fully spanning the length — leaves closed-bottom counterbore instead of through-hole."
     ],
     "validationRules": [
-      "boreRadius = bearingOD / 2.",
-      "Block must be wide enough to leave wall material around the bore (blockWidth > boreRadius * 2.5)."
+      "boreRadius < stepRadius < mainRadius.",
+      "Total length = mainLength + stepLength."
     ],
-    "example_prompt": "bearing block for 1.125 inch OD bearing 1.5 inches square and 0.75 inches thick"
+    "example_prompt": "Stepped shaft 0.5 inch OD 1 inch long, 0.375 inch OD 0.75 inch long, 0.25 inch through bore"
+  },
+  {
+    "title": "Rounded Rectangle Or Stadium Shape",
+    "summary": "A rectangle with fully rounded ends (stadium shape) is used for slots, links, and structural caps. Sketch as a rectangle with two semicircles on the short ends, or as a slot profile.",
+    "tags": ["rounded rectangle", "stadium", "slot", "link", "oblong", "pill"],
+    "keywords": ["rounded rectangle", "stadium", "oblong", "slot", "pill shape", "obround", "race track"],
+    "parameterHints": [
+      "Expose totalLength, width, and depth.",
+      "The semicircle radius = width / 2.",
+      "Center-to-center distance = totalLength - width."
+    ],
+    "modelingNotes": [
+      "Sketch: two straight lines on top and bottom, two semicircular arcs on left and right ends.",
+      "Top line: from (-cc/2, R) to (cc/2, R). Bottom: same negated Y.",
+      "Left arc: skArc from (-cc/2, R) through (-cc/2 - R, 0) to (-cc/2, -R).",
+      "Right arc: skArc from (cc/2, -R) through (cc/2 + R, 0) to (cc/2, R).",
+      "where R = width/2/inch and cc = totalLength/inch - 2*R.",
+      "Alternatively: skRectangle + two skCircle at each end center, extrude all regions."
+    ],
+    "featurePattern": "Two lines + two semicircle arcs forming closed stadium, skSolve, opExtrude to depth.",
+    "failureModes": [
+      "Arc midpoints must be correct — at 90° from start/end points.",
+      "Arcs must connect exactly to the line endpoints."
+    ],
+    "validationRules": [
+      "totalLength > width (otherwise it's a circle).",
+      "R = width / 2, cc = totalLength - width."
+    ],
+    "example_prompt": "Oblong slot 3 inches long 1 inch wide 0.25 inch thick"
+  },
+  {
+    "title": "Cross Or Plus Shape",
+    "summary": "A plus or cross shape is two overlapping rectangles. Use a single sketch with both rectangles — FS will naturally extrude their union as the cross region.",
+    "tags": ["cross", "plus", "orthogonal", "intersection"],
+    "keywords": ["cross", "plus", "cross shape", "orthogonal plate", "cruciform"],
+    "parameterHints": [
+      "Expose armWidth (width of each arm) and totalSpan (tip to tip in one direction), and depth.",
+      "For a symmetric cross: both arms have the same armWidth and totalSpan."
+    ],
+    "modelingNotes": [
+      "Sketch two centered rectangles in the same sketch:",
+      "  Rectangle 1 (horizontal): -span/2 to +span/2 wide, -armW/2 to +armW/2 tall.",
+      "  Rectangle 2 (vertical): -armW/2 to +armW/2 wide, -span/2 to +span/2 tall.",
+      "When both are in one sketch, FS extrudes their union as the cross profile.",
+      "Use skRectangle twice with different firstCorner/secondCorner values."
+    ],
+    "featurePattern": "Two overlapping skRectangle calls in one sketch (horizontal arm + vertical arm), skSolve, opExtrude.",
+    "failureModes": [
+      "Rectangles must overlap at the center — if they don't touch, two separate bodies are created.",
+      "Do not use two separate sketches and boolean union — one sketch is simpler and correct."
+    ],
+    "validationRules": [
+      "armWidth < totalSpan.",
+      "Both rectangles must share the same center."
+    ],
+    "example_prompt": "Cross bracket 4 inch span 0.5 inch arm width 0.25 inch thick"
+  },
+  {
+    "title": "Torus Or Ring Solid",
+    "summary": "A torus is created by revolving a circle offset from the axis. The circle center is at (R, 0) where R is the major radius, and the circle has minor radius r.",
+    "tags": ["torus", "ring", "donut", "O-ring", "groove"],
+    "keywords": ["torus", "ring", "donut", "O-ring", "annular ring", "circular profile"],
+    "parameterHints": [
+      "Expose majorRadius (center of tube to torus center) and minorRadius (tube radius).",
+      "majorRadius > minorRadius always.",
+      "For an O-ring: minorRadius is the cord diameter / 2."
+    ],
+    "modelingNotes": [
+      "Sketch a circle centered at (majorRadius/inch, 0) with radius = minorRadius/inch.",
+      "The sketch plane normal is the revolution axis.",
+      "Revolve 360° around the vertical axis: line(skPlane.origin, skPlane.normal).",
+      "The circle must NOT intersect the revolution axis (majorRadius > minorRadius)."
+    ],
+    "featurePattern": "Off-axis circle at (R, 0), skSolve, opRevolve 360° around origin normal axis.",
+    "failureModes": [
+      "Circle center on the axis (majorRadius=0) produces a sphere, not a torus.",
+      "Circle overlapping axis (majorRadius < minorRadius) — invalid geometry.",
+      "Revolution axis must pass through the sketch origin, not the circle center."
+    ],
+    "validationRules": [
+      "majorRadius > minorRadius > 0.",
+      "Circle center at x=majorRadius, y=0."
+    ],
+    "example_prompt": "Torus with 2 inch major radius and 0.25 inch tube radius"
+  },
+  {
+    "title": "Robot Mech Body Composition",
+    "summary": "Robotic mech bodies are built from multiple rectangular extrusions (torso, head, limbs) assembled in one feature. Build each section as an opExtrude on a sketched region, then union adjacent sections.",
+    "tags": ["robot", "mech", "humanoid", "torso", "limbs", "composition"],
+    "keywords": ["robot", "mech", "android", "humanoid", "torso", "arms", "legs", "blocky", "assembly"],
+    "parameterHints": [
+      "Expose overall width, height, depth as fractions of the mech scale.",
+      "Each body part is a fraction of the main dimensions — torso is 40% of total height.",
+      "Default mech: width=12in, height=12in, depth=6in. Scale all parts proportionally."
+    ],
+    "modelingNotes": [
+      "Build all mech parts in one sketch, one extrude, one feature:",
+      "  Torso: rectangle centered at (0, body_y) with torso width and height.",
+      "  Head: smaller rectangle centered at (0, head_y) above torso.",
+      "  Left/Right arms: rectangles at (±arm_x, arm_y) beside torso.",
+      "  Left/Right legs: rectangles at (±leg_x, leg_y) below torso.",
+      "Use skRectangle for each part in a single sketch.",
+      "All rectangles share one sketch → one extrude → all parts at same depth.",
+      "For varying depths, use multiple sketches and extrude + opBoolean UNION.",
+      "fsPoint helper: define a helper that builds a FS vector string for each corner."
+    ],
+    "featurePattern": "Multiple skRectangle in one sketch (torso + head + arms + legs as separate non-overlapping rects), skSolve, opExtrude to body depth.",
+    "failureModes": [
+      "Overlapping rectangles in the same sketch — FS auto-unions overlapping regions, which is fine for adjacent parts but can cause unexpected geometry for widely separated parts.",
+      "Parts too far apart — create disconnected bodies in the sketch region.",
+      "Too many sketch regions can slow sketch solving — keep under 20 rectangles."
+    ],
+    "validationRules": [
+      "All part rectangles must be in pixel space relative to the mech center.",
+      "All extrude to same depth for a flat mech."
+    ],
+    "example_prompt": "Blocky humanoid robot mech 12 inches tall with arms and legs"
+  },
+  {
+    "title": "Propeller Or Fan Blade",
+    "summary": "A simple fan blade is a twisted extruded airfoil. Approximate with a thin swept profile — a rectangle or lens shape swept along a radial line, with a twist applied by rotating the profile at the tip.",
+    "tags": ["propeller", "fan", "blade", "airfoil", "twist"],
+    "keywords": ["propeller", "fan", "blade", "impeller", "rotor", "airfoil", "twist"],
+    "parameterHints": [
+      "Expose bladeLength, bladeChord (width), bladeThickness, and pitchAngle.",
+      "For a simple prop: chord = 0.2 * bladeLength, thickness = 0.02 * bladeLength.",
+      "Hub radius is typically 0.15 * bladeLength."
+    ],
+    "modelingNotes": [
+      "Simple approach: extrude a thin rectangle, then apply a twist — FS does not have native twist, so approximate.",
+      "Better approach: loft between two profile sketches — base chord aligned at 0°, tip chord rotated by pitchAngle.",
+      "Profile 1 at hub plane: horizontal rectangle (chord x thickness).",
+      "Profile 2 at tip plane (hub + bladeLength): same rectangle rotated by pitchAngle in its plane.",
+      "Use opLoft with 2 profiles for a twisted-looking blade.",
+      "Repeat for N blades using for loop with rotation: plane rotated around z-axis by 360/N degrees each iteration.",
+      "Full propeller: loft one blade, opPattern circular N blades around axis."
+    ],
+    "featurePattern": "Loft between root profile and rotated tip profile for one blade, then opPattern circular for all blades.",
+    "failureModes": [
+      "FS has no native twist operation — must use loft between rotated profiles.",
+      "opPattern must union blades to hub after patterning."
+    ],
+    "validationRules": [
+      "pitchAngle < 45° for typical propellers.",
+      "Hub must be large enough to connect all blade roots."
+    ],
+    "example_prompt": "3-blade propeller 6 inch diameter 15 degree pitch"
+  },
+  {
+    "title": "Spring Or Helix (Approximation)",
+    "summary": "FeatureScript does not have a native helix sweep. Approximate a compression spring by stacking thin torus slices or using a multi-segment sweep path. For most uses, a simplified coil stack is sufficient.",
+    "tags": ["spring", "helix", "coil", "compression spring", "extension spring"],
+    "keywords": ["spring", "helix", "coil", "compression spring", "wire coil", "torsion"],
+    "parameterHints": [
+      "Expose coilDiameter, wireDiameter, numberOfCoils, and freeLength.",
+      "Pitch = freeLength / numberOfCoils."
+    ],
+    "modelingNotes": [
+      "FS does not support true helical sweep paths natively in custom features.",
+      "Approximation method: stack thin torus slices with vertical offset = pitch per coil, 12 slices per coil.",
+      "Each slice: off-axis circle at (coilR, 0), offset plane at y = slice_height, revolve 360°, union all.",
+      "Or: use Onshape's built-in Helix feature if available (not a FeatureScript call in custom features).",
+      "For decorative springs: stack 30° revolve segments with slight z-offset each.",
+      "Practical recommendation: note to user that a true spring helix requires the Onshape standard Helix feature."
+    ],
+    "featurePattern": "Stack of thin-torus revolves at pitch intervals (approximation), or flag to user that Onshape's standard Helix feature is more appropriate.",
+    "failureModes": [
+      "FS cannot produce a true helical geometry in a single opSweep — the path would need to be a 3D helix which requires a parametric path.",
+      "Too many union operations can slow regeneration."
+    ],
+    "validationRules": [
+      "wireDiameter < coilDiameter / 2.",
+      "numberOfCoils >= 1."
+    ],
+    "example_prompt": "Compression spring 1 inch coil diameter 0.1 inch wire diameter 6 coils 2 inch free length"
+  },
+  {
+    "title": "Nozzle Or Spout Shape",
+    "summary": "A nozzle combines a large input cone frustum and a small output cylindrical tip. Build as opLoft between a large circle and a small circle, or as a cone + cylinder union.",
+    "tags": ["nozzle", "spout", "injector", "tip", "transition", "spray"],
+    "keywords": ["nozzle", "spout", "injector", "tip", "spray nozzle", "cone tip", "transition fitting"],
+    "parameterHints": [
+      "Expose inletRadius, outletRadius, coneTaper (the tapered section length), and outletLength.",
+      "For a rocket nozzle: convergent section + throat + divergent section."
+    ],
+    "modelingNotes": [
+      "Simple nozzle: revolve a trapezoid (inlet face wide, outlet face narrow) + extend with a straight cylinder at the tip.",
+      "Profile: (0,0) axis, (inR,0) base, slant to (outR, taper), then (outR, taper+tipLen), back to (0, taper+tipLen).",
+      "Revolve 360° for the outer shell.",
+      "For a hollow nozzle with wall thickness: sketch both inner and outer profiles, revolve to get a hollow shell.",
+      "Inner profile mirrors outer profile at a constant wall offset."
+    ],
+    "featurePattern": "Revolve combined trapezoid + rectangle profile (inlet taper + straight tip section), 360°.",
+    "failureModes": [
+      "Throat (smallest diameter) going to zero collapses the geometry.",
+      "Inner and outer profiles must not cross."
+    ],
+    "validationRules": [
+      "outletRadius < inletRadius.",
+      "outletRadius > 0 for a viable flow path."
+    ],
+    "example_prompt": "Nozzle 2 inch inlet 0.5 inch outlet 2 inch taper 1 inch straight tip"
+  },
+  {
+    "title": "Gusset Or Diagonal Rib",
+    "summary": "A gusset is a triangular stiffening plate added at the junction of two structural members. Sketch a right triangle profile and extrude to the member depth.",
+    "tags": ["gusset", "rib", "stiffener", "triangular", "brace", "structural"],
+    "keywords": ["gusset", "rib", "stiffener", "triangle plate", "brace", "diagonal support"],
+    "parameterHints": [
+      "Expose gussetWidth (horizontal leg), gussetHeight (vertical leg), and gussetThickness.",
+      "Hypotenuse is the diagonal bracing face."
+    ],
+    "modelingNotes": [
+      "Sketch a right triangle: (0,0), (width,0), (0,height) — three segments forming a closed triangle.",
+      "Extrude the triangle to gussetThickness.",
+      "Position at the junction of two parts using offset planes.",
+      "For an L-bracket gusset: place the right angle at the inner corner of the L.",
+      "Multiple gussets: pattern linearly along the length."
+    ],
+    "featurePattern": "Right triangle sketch (3 line segments), skSolve, opExtrude to thickness.",
+    "failureModes": [
+      "Open triangle — all 3 segments must connect.",
+      "Gusset positioned off-plane from the structure it reinforces."
+    ],
+    "validationRules": [
+      "All 3 vertices must be connected.",
+      "gussetThickness must be positive."
+    ],
+    "example_prompt": "Triangular gusset plate 2 inch base 1.5 inch height 0.1 inch thick"
+  },
+  {
+    "title": "Multi-Body Composition Strategy",
+    "summary": "Complex parts are built from multiple sub-bodies that are then unioned or subtracted. Build each sub-body as a separate opExtrude or opCylinder, then combine with opBoolean. This is the correct FS pattern for parts with multiple geometric sections.",
+    "tags": ["multi-body", "composition", "boolean", "union", "assembly"],
+    "keywords": ["multi-body", "composition", "union", "subtract", "combine", "assembly", "complex"],
+    "parameterHints": [
+      "Plan which bodies to create before writing code.",
+      "Label each sub-body with a descriptive suffix: id+'torso', id+'armL', id+'bore'.",
+      "Union adjacent bodies immediately after creating them."
+    ],
+    "modelingNotes": [
+      "Pattern: create body A, create body B, opBoolean UNION B into A, create body C, opBoolean UNION C into (A+B).",
+      "For subtraction (holes, pockets): create tool body, opBoolean SUBTRACT tool from target.",
+      "qCreatedBy(id+'part1', EntityType.BODY) queries the body created by the operation named 'part1'.",
+      "The 'targets' body in UNION becomes the merged result — it absorbs 'tools'.",
+      "Never use the same id string for two operations — each opCylinder/opExtrude needs a unique id suffix."
+    ],
+    "featurePattern": "opExtrude id+'main' → opCylinder id+'boss' → opBoolean UNION boss→main → opCylinder id+'bore' (full depth) → opBoolean SUBTRACT bore→main.",
+    "failureModes": [
+      "Using duplicate id strings — second operation overwrites the first.",
+      "Subtracting before the bodies overlap — tool must intersect target.",
+      "Forgetting that 'tools' body is consumed by opBoolean — do not reference it after the boolean."
+    ],
+    "validationRules": [
+      "Every op id string must be unique.",
+      "Tool body must geometrically intersect target body for SUBTRACTION."
+    ],
+    "example_prompt": "Cylinder with a boss on top and a bore through the center"
+  },
+  {
+    "title": "Offset Plane Construction",
+    "summary": "To create geometry at different heights or on different faces, construct offset planes using the plane() function. This is essential for loft profiles, boss features, and any feature not on the main sketch plane.",
+    "tags": ["offset plane", "plane construction", "loft", "multi-level", "height"],
+    "keywords": ["offset plane", "plane()", "height offset", "plane at distance", "parallel plane", "multi-level"],
+    "parameterHints": [
+      "Use definition.height or definition.depth values to position the offset plane.",
+      "For a plane at the top of an extruded body: offset = depth of the extrusion."
+    ],
+    "modelingNotes": [
+      "Offset plane: var topPlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal);",
+      "Perpendicular plane: var sidePlane = plane(skPlane.origin, skPlane.x);",
+      "Angled plane: use rotationAround() on the normal to create a tilted plane.",
+      "For loft: create planeA at origin, planeB at (origin + normal * height), sketch profiles on each.",
+      "For boss on top face: offsetPlane = plane(skPlane.origin + skPlane.normal * boxDepth, skPlane.normal).",
+      "plane() takes: plane(origin is Vector, normal is Vector) — both as 3D unit vectors."
+    ],
+    "featurePattern": "var topPlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal); var sk2 = newSketchOnPlane(context, id+'sk2', {'sketchPlane': topPlane});",
+    "failureModes": [
+      "Using plane(skPlane.origin, skPlane.normal * definition.height) — wrong argument order.",
+      "Normal vector must be a unit vector — skPlane.normal is already unit length.",
+      "offset must use skPlane.normal multiplication, not skPlane.x."
+    ],
+    "validationRules": [
+      "plane() takes (origin, normal) — not (point, vector, distance).",
+      "Normal of offset plane should match source plane normal for parallel planes."
+    ],
+    "example_prompt": "Create a sketch plane 3 inches above the selected face"
+  },
+  {
+    "title": "Sketch Constraint: skFitSpline For Organic Curves",
+    "summary": "skFitSpline creates a smooth curve through a set of control points. Use for organic shapes, airfoils, cam profiles, and any continuously curved edge that cannot be described by arcs.",
+    "tags": ["spline", "organic", "curve", "control points", "skFitSpline", "smooth"],
+    "keywords": ["spline", "skFitSpline", "control points", "organic", "curve", "smooth", "cam", "airfoil"],
+    "parameterHints": [
+      "Use 4 to 7 control points for a smooth curve — 2 points gives a straight line.",
+      "Distribute control points proportionally — cluster near areas of high curvature.",
+      "Scale all points by inch: vector(x, y) * inch where x,y are unitless numbers."
+    ],
+    "modelingNotes": [
+      "skFitSpline(sk, 'spline1', { 'points': [vector(x1,y1)*inch, vector(x2,y2)*inch, ...] });",
+      "The spline passes through all given points (interpolated spline, not Bezier control hull).",
+      "For a closed spline: make the last point equal to the first point.",
+      "For a smooth join: the spline end should align with connected line segments.",
+      "Do NOT use skFitSpline for circular arcs — use skArc instead.",
+      "4-point minimum for meaningful organic shape; 7-point maximum for simplicity."
+    ],
+    "featurePattern": "skFitSpline with 4-7 control points, close with connecting line segments back to axis or starting point.",
+    "failureModes": [
+      "2-point spline = straight line — not organic.",
+      "Points not in sequence along the curve direction — spline will loop back on itself.",
+      "Spline not connected to adjacent segments — profile won't close."
+    ],
+    "validationRules": [
+      "At least 3 control points (4+ recommended for organic).",
+      "End point of spline must connect to adjacent sketch entity."
+    ],
+    "example_prompt": "Smooth organic curve with 5 control points"
+  },
+  {
+    "title": "Sketch Arc With skArc",
+    "summary": "skArc draws a circular arc through three points: start, a point on the arc (mid), and end. Use for rounded corners, dome profiles, pipe elbows, and any partial circular feature.",
+    "tags": ["arc", "skArc", "rounded", "corner", "circular", "curve"],
+    "keywords": ["arc", "skArc", "circular arc", "rounded", "fillet", "elbow", "semicircle"],
+    "parameterHints": [
+      "skArc needs start, mid (a point ON the arc), and end — not start, center, end.",
+      "For a quarter circle of radius R from (R,0) to (0,R): mid = vector(R*cos(45°), R*sin(45°)) ≈ vector(0.707R, 0.707R).",
+      "For a 90° arc: mid point is at 45° from center."
+    ],
+    "modelingNotes": [
+      "skArc(sk, 'arc1', { 'start': vector(R,0)*inch, 'mid': vector(R*0.707, R*0.707)*inch, 'end': vector(0,R)*inch });",
+      "The mid point defines which side of the chord the arc bulges toward.",
+      "For a semicircle: start=(R,0), mid=(0,R) [90°], end=(-R,0) — but usually split into two quarter arcs.",
+      "Connect arc endpoints to adjacent sketch lines exactly — gaps prevent profile closure.",
+      "For a full circle: use skCircle, not skArc."
+    ],
+    "featurePattern": "skArc with start, mid (at 45° from center for quarter arc), and end points, all in inch units.",
+    "failureModes": [
+      "Mid point must be ON the arc, not at the center — center-based arc syntax doesn't exist in FS.",
+      "Mid point collinear with start and end — arc degenerates to a line.",
+      "Arc endpoints not aligned with adjacent line endpoints — open profile."
+    ],
+    "validationRules": [
+      "mid must not be collinear with start and end.",
+      "All three points in the same sketch plane."
+    ],
+    "example_prompt": "90 degree arc from (1,0) to (0,1) inch"
+  },
+  {
+    "title": "For Loop In Feature Body",
+    "summary": "FeatureScript allows for loops inside the feature body to generate repeated geometry — bolt holes, gear teeth, fin arrays. Use const or var variables inside the loop.",
+    "tags": ["for loop", "repeat", "iteration", "pattern", "multiple geometry"],
+    "keywords": ["for loop", "iteration", "repeat", "multiple", "holes", "array", "pattern", "loop"],
+    "parameterHints": [
+      "Use isInteger(definition.count, {(unitless): [1, N, maxN]}) for loop count parameters.",
+      "Loop variable: for (var k = 0; k < definition.count; k += 1) { ... }"
+    ],
+    "modelingNotes": [
+      "For loop syntax in FS: for (var k = 0; k < N; k += 1) { ... }",
+      "++ and -- operators do NOT exist in FS — use k += 1.",
+      "Inside a loop, generate unique id strings: id + 'hole' ~ k",
+      "String concatenation uses ~, not + : 'hole' ~ k gives 'hole0', 'hole1', etc.",
+      "Sketch entity names in a loop: skCircle(sk, 'h' ~ k, { ... })",
+      "const inside a loop block: use var instead — const must be initialized in the same statement.",
+      "Loop-generated sketch entities: all in same sketch call → one skSolve → one opExtrude."
+    ],
+    "featurePattern": "for (var k = 0; k < definition.count; k += 1) { var angle = 2 * PI * k / definition.count; skCircle(sk, 'hole' ~ k, { 'center': vector(R*cos(angle), R*sin(angle))*inch, 'radius': hR }); }",
+    "failureModes": [
+      "Using k++ instead of k += 1 — ++ does not exist in FS.",
+      "Duplicate sketch entity names — each name must be unique; use ~ k suffix.",
+      "Using + for string concatenation — use ~ in FS.",
+      "Declaring const inside a loop when the value needs to change each iteration — use var."
+    ],
+    "validationRules": [
+      "Each sketch entity in a loop must have a unique name string.",
+      "Loop increment must use k += 1, not k++."
+    ],
+    "example_prompt": "8 equally spaced holes around a circle"
+  },
+  {
+    "title": "Lambda Functions Inside Feature Body",
+    "summary": "Helper functions inside a feature body MUST be const lambda assignments, not named function declarations. Named top-level functions (function foo() {}) are illegal inside the feature lambda.",
+    "tags": ["lambda", "function", "helper", "scope", "const"],
+    "keywords": ["lambda", "function", "helper function", "const", "scope", "nested function", "callback"],
+    "parameterHints": [
+      "Define lambdas with const: const myFn = function(x) { return x * 2; };",
+      "Lambdas can close over surrounding variables (captures).",
+      "Arrow syntax also works: const double = (x) => x * 2;"
+    ],
+    "modelingNotes": [
+      "WRONG (inside feature body): function invPoint(t, rb) { return ...; }",
+      "CORRECT: const invPoint = function(t is number, rb is number) { return ...; };",
+      "Named top-level functions are allowed OUTSIDE the feature body at module level.",
+      "Lambdas can be passed to other functions and stored in variables.",
+      "For gear tooth math: define invPoint, rotPoint, mirrorPoint as const lambdas inside the feature.",
+      "Multiple lambdas can call each other if defined in the right order (invPoint before it's used)."
+    ],
+    "featurePattern": "const helperFn = function(arg is Type) { return result; }; — defined inside feature body before use.",
+    "failureModes": [
+      "function foo() {} inside feature body — syntax error in FeatureScript.",
+      "Using a lambda before it's defined — FS is sequential, no hoisting.",
+      "Returning undefined from a lambda that should return a value."
+    ],
+    "validationRules": [
+      "All helper functions inside feature body must use const lambda syntax.",
+      "Define lambdas before their first use."
+    ],
+    "example_prompt": "Gear feature with involute tooth helper functions"
+  },
+  {
+    "title": "isLength And isInteger Preconditions",
+    "summary": "All feature parameters must be declared in the precondition block with isLength or isInteger. Never use 'definition.x is Length' — that is invalid FS syntax. Never multiply an isLength parameter by inch in the body.",
+    "tags": ["precondition", "isLength", "isInteger", "parameter", "annotation"],
+    "keywords": ["precondition", "isLength", "isInteger", "parameter", "annotation", "LENGTH_BOUNDS", "units"],
+    "parameterHints": [
+      "Length: annotation { 'Name': 'Width', 'Default': '2 * inch' } isLength(definition.width, LENGTH_BOUNDS);",
+      "Zero-allowed length: isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);",
+      "Integer: annotation { 'Name': 'Count', 'Default': '4' } isInteger(definition.count, {(unitless): [1, 4, 100]});",
+      "Boolean: annotation { 'Name': 'Add Fillet' } definition.addFillet is boolean;"
+    ],
+    "modelingNotes": [
+      "In the body, definition.width is already a Length value — never write definition.width * inch.",
+      "To get a pure number from a Length: var wNum = definition.width / inch; (then wNum is unitless).",
+      "For vector coordinates: vector(-definition.width/(2*inch), -definition.height/(2*inch)) * inch.",
+      "isLength with LENGTH_BOUNDS requires value > 0. Use NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS for 0-allowed.",
+      "isInteger requires three bounds: {(unitless): [min, default, max]}."
+    ],
+    "featurePattern": "annotation { 'Name': 'Width', 'Default': '2 * inch' } isLength(definition.width, LENGTH_BOUNDS); — in body: definition.width is already Length.",
+    "failureModes": [
+      "definition.width is Length — invalid FS syntax (not a statement).",
+      "definition.width * inch — doubles the unit (definition.width is already Length, * inch = Length * Length).",
+      "isInteger(definition.count) — missing bounds map, fails in FS 2931.",
+      "definition.count >= 1; definition.count <= 100; — not valid in precondition for integers, use bounds map."
+    ],
+    "validationRules": [
+      "All length parameters: isLength(definition.x, BOUNDS) — not 'is Length'.",
+      "Body usage: definition.x directly (no * inch).",
+      "Integer bounds: isInteger(definition.n, {(unitless): [min, default, max]})."
+    ],
+    "example_prompt": "Feature with width, height, hole count, and fillet radius parameters"
+  },
+  {
+    "title": "Plane Selection Parameter",
+    "summary": "Allow users to select which plane to sketch on by exposing a Query parameter with GeometryType.PLANE filter. In the body, resolve it with evPlane() and fall back to a default world plane.",
+    "tags": ["plane selection", "Query", "evPlane", "user input", "isQueryEmpty"],
+    "keywords": ["plane selection", "Query", "evPlane", "user plane", "geometry filter", "face selection"],
+    "parameterHints": [
+      "Precondition: annotation { 'Name': 'Plane', 'Filter': GeometryType.PLANE, 'MaxNumberOfPicks': 1 } definition.location is Query;",
+      "Body: var skPlane = isQueryEmpty(context, definition.location) ? plane(WORLD_ORIGIN, Z_DIRECTION) : evPlane(context, { 'face': definition.location });"
+    ],
+    "modelingNotes": [
+      "isQueryEmpty returns true when the user has not selected any face/plane yet.",
+      "WORLD_ORIGIN and Z_DIRECTION are standard library constants for the top plane.",
+      "evPlane(context, { 'face': definition.location }) gets the plane of the selected face.",
+      "After getting skPlane: skPlane.origin is the plane center, skPlane.normal is the surface normal.",
+      "Always provide a fallback plane — never crash when no plane is selected.",
+      "For offset planes from the selected plane: plane(skPlane.origin + skPlane.normal * offset, skPlane.normal)."
+    ],
+    "featurePattern": "var skPlane = isQueryEmpty(context, definition.location) ? plane(WORLD_ORIGIN, Z_DIRECTION) : evPlane(context, { 'face': definition.location });",
+    "failureModes": [
+      "Calling evPlane when no face is selected — throws error without isQueryEmpty guard.",
+      "Using definition.location directly as a plane — it's a Query, not a Plane.",
+      "Forgetting the fallback — feature fails when plane field is empty."
+    ],
+    "validationRules": [
+      "Always guard evPlane with isQueryEmpty check.",
+      "definition.location is Query — must be declared with 'Filter': GeometryType.PLANE."
+    ],
+    "example_prompt": "Feature that lets the user pick which face to sketch on"
+  },
+  {
+    "title": "Encoder Or Sensor Mount Plate",
+    "summary": "A rectangular plate with a central bore for a shaft and a bolt circle for mounting an encoder or sensor. Standard AMT103 bolt circle: 4x M3 holes on 25.8mm (1.016in) PCD, center bore 14mm (0.551in).",
+    "tags": ["encoder", "sensor mount", "AMT103", "mount plate", "bolt circle", "bore"],
+    "keywords": ["encoder", "sensor", "AMT103", "mount plate", "bolt circle", "bore", "FRC", "motor encoder"],
+    "parameterHints": [
+      "AMT103 mount: centerBore=0.551in radius (actually 14mm ID), boltCircle=0.508in radius (25.8mm PCD/2), 4 x 0.063in holes (M3 clearance).",
+      "NEO encoder: built-in — no separate mount needed.",
+      "CTRE CANCoder: 4x #10-32 holes on 1.5in bolt circle, 0.375in shaft bore."
+    ],
+    "modelingNotes": [
+      "Pattern: rectangle plate + center bore circle + 4 bolt holes on PCD in one sketch.",
+      "For 4 holes at 90° intervals: x = boltR * cos(k * PI/2), y = boltR * sin(k * PI/2) for k=0,1,2,3.",
+      "qSketchRegion(id + 'sk', true) extrudes all regions with inner holes cut out.",
+      "Plate thickness 0.125 to 0.25 inch typical."
+    ],
+    "featurePattern": "Rectangle + center circle + 4 bolt holes at 90° via for loop, qSketchRegion(true), opExtrude BLIND.",
+    "failureModes": [
+      "Bolt holes overlapping center bore — check boltCircleRadius > boreRadius + holeRadius.",
+      "Plate too thin — less than 0.062 inch risks flex."
+    ],
+    "validationRules": [
+      "boltCircleRadius + holeRadius < plateWidth / 2.",
+      "boreRadius < boltCircleRadius."
+    ],
+    "example_prompt": "AMT103 encoder mount plate for 0.5 inch shaft"
+  },
+  {
+    "title": "Motor Mounting Plate (CIM, NEO, Falcon 500)",
+    "summary": "Motor face mounts are plates with the motor bolt pattern plus a central bore for the motor shaft. Each motor has a specific bolt pattern.",
+    "tags": ["motor mount", "CIM", "NEO", "Falcon", "775pro", "motor", "FRC"],
+    "keywords": ["motor mount", "CIM", "NEO", "Falcon 500", "motor plate", "FRC", "drivetrain"],
+    "parameterHints": [
+      "CIM/NEO/Falcon 500: same face plate — 4x 10-32 holes on 2in bolt circle (1in radius), center bore 0.874in radius (1.748in OD).",
+      "775pro: 2x 10-32 holes on 1.5in bolt circle opposite each other, 0.315in center bore.",
+      "BAG motor: 2x M3 holes on 1.5in bolt circle, 0.315in center bore.",
+      "Expose boltCircleRadius, boltHoleRadius, centerBoreRadius, plateThickness."
+    ],
+    "modelingNotes": [
+      "Standard FRC motor face plate is typically circular (diameter matching motor face) or rectangular.",
+      "CIM/NEO/Falcon: 4 holes at 0°, 90°, 180°, 270° on 1in radius from center.",
+      "Center bore: 0.874in radius (snug motor register fit).",
+      "Add mounting holes for the gearbox or robot frame as additional hole pattern."
+    ],
+    "featurePattern": "Circle plate (or rectangle) + center bore + 4 motor bolt holes at 90° intervals + additional mounting holes, qSketchRegion(true), opExtrude.",
+    "failureModes": [
+      "Wrong bolt circle radius — double check against motor datasheet.",
+      "Center bore too large — motor register won't seat."
+    ],
+    "validationRules": [
+      "boltCircleRadius + boltHoleRadius < plateDiameter / 2.",
+      "centerBoreRadius < boltCircleRadius."
+    ],
+    "example_prompt": "NEO motor mount plate 0.25 inch thick with standard 2 inch bolt circle"
+  },
+  {
+    "title": "Slot Or Keyway Cut",
+    "summary": "A slot or keyway is a rectangular cut into a shaft or bore. Use a rectangle sketch aligned to the shaft axis, extrude through the material, and subtract from the shaft body.",
+    "tags": ["slot", "keyway", "key", "shaft", "cut", "groove"],
+    "keywords": ["slot", "keyway", "key", "groove", "shaft slot", "spline", "set screw slot"],
+    "parameterHints": [
+      "Standard keyways: 1/4 shaft = 1/16 key width, 3/8 shaft = 3/32 key, 1/2 shaft = 1/8 key.",
+      "Expose keyWidth, keyDepth (depth of cut into shaft), and keyLength.",
+      "keyDepth is typically half the key height."
+    ],
+    "modelingNotes": [
+      "Method: sketch a rectangle on a plane passing through the shaft axis, extrude outward (past the shaft OD), subtract from shaft.",
+      "The cut rectangle: keyWidth wide, positioned at the shaft surface (y = shaftRadius - keyDepth).",
+      "Extend the extrude in both directions (symmetric) to ensure full material removal.",
+      "For a square key: keyWidth = keyHeight = shaftDiameter / 4.",
+      "opBoolean SUBTRACT the slot tool body from the shaft body."
+    ],
+    "featurePattern": "Rectangle sketch on axial plane at shaft surface position, opExtrude beyond OD, opBoolean SUBTRACT from shaft.",
+    "failureModes": [
+      "Slot plane not aligned with shaft axis — results in off-angle cut.",
+      "keyDepth > shaftRadius — cuts through the shaft center."
+    ],
+    "validationRules": [
+      "keyDepth < shaftRadius.",
+      "keyWidth < shaftDiameter / 2."
+    ],
+    "example_prompt": "1/8 inch keyway slot in 0.5 inch shaft 1.5 inches long"
+  },
+  {
+    "title": "Snap Ring Or Retaining Ring Groove",
+    "summary": "A snap ring groove is a shallow annular groove cut into a shaft or bore. Model as a thin subtracted torus or a revolve of a small rectangular notch profile.",
+    "tags": ["snap ring", "retaining ring", "groove", "shaft", "circlip", "retainer"],
+    "keywords": ["snap ring", "retaining ring", "circlip", "groove", "shaft groove", "E-clip"],
+    "parameterHints": [
+      "Standard snap ring grooves: shaft diameter = D, groove diameter = D - 2*depth, groove width = ring thickness.",
+      "Expose shaftRadius, grooveDepth, and grooveWidth.",
+      "Typical groove depth = 0.04 to 0.08 inch."
+    ],
+    "modelingNotes": [
+      "Method: revolve a small rectangle (grooveWidth x grooveDepth) at the groove position to create a ring-shaped cut.",
+      "The rectangle sits at (shaftR - grooveDepth, grooveY) in the profile plane.",
+      "Revolve 360° to create the tool body, then opBoolean SUBTRACT from shaft.",
+      "Profile: axis(0,0)→(0,shaftL), shaft side(shaftR, 0)→(shaftR, grooveY), notch rectangle, etc.",
+      "Simpler: sketch the full shaft profile with the groove notch included, revolve once — no boolean needed."
+    ],
+    "featurePattern": "Shaft profile with small rectangular groove notch in the revolve profile, revolve 360° — one-operation approach.",
+    "failureModes": [
+      "Groove too deep — approaches shaft center, weakens shaft.",
+      "Groove width too narrow — snap ring won't fit in tolerance."
+    ],
+    "validationRules": [
+      "grooveDepth < shaftRadius * 0.2.",
+      "grooveWidth > 0."
+    ],
+    "example_prompt": "0.5 inch shaft with snap ring groove at 1 inch from end"
+  },
+  {
+    "title": "Threaded Hole Pattern (Simplified)",
+    "summary": "FeatureScript does not generate actual thread geometry — model threaded holes as simple cylindrical bores sized to the tap drill diameter. The thread is specified as a feature label parameter but not modeled geometrically.",
+    "tags": ["threaded hole", "tap", "thread", "bore", "fastener", "M3", "10-32"],
+    "keywords": ["thread", "threaded hole", "tap drill", "M3", "M4", "M5", "10-32", "1/4-20", "fastener"],
+    "parameterHints": [
+      "M3 tap drill: 2.5mm (0.098in) radius = 0.049in. M4: 3.3mm rad=0.065in. M5: 4.2mm rad=0.083in. M6: 5mm rad=0.098in.",
+      "#10-32: 0.159in clearance, 0.120in tap radius. 1/4-20: 0.201in clearance, 0.161in tap radius.",
+      "Model as a simple bore circle — Onshape's Hole feature handles actual threads."
+    ],
+    "modelingNotes": [
+      "For a FeatureScript custom feature, represent threaded holes as cylindrical bores at the tap drill size.",
+      "Place multiple threaded holes in a for loop: skCircle(sk, 'thread' ~ k, ...) with correct position.",
+      "The feature label or summary should note 'Thread not modeled — use Onshape Hole feature for actual threads'.",
+      "For FRC: M3 clearance hole (0.130in dia) is standard for structural bolts."
+    ],
+    "featurePattern": "Circles at tap drill radius placed in sketch, qSketchRegion(true), opExtrude to material depth.",
+    "failureModes": [
+      "Thread geometry is too complex for custom features — never attempt to generate helix threads.",
+      "Confusing clearance diameter with tap diameter — clearance holes are larger."
+    ],
+    "validationRules": [
+      "Tap drill radius < clearance hole radius < head clearance radius.",
+      "M-thread tap drill ≈ (nominal diameter - pitch) in mm."
+    ],
+    "example_prompt": "Four M4 threaded holes on a 1.5 inch bolt circle"
+  },
+  {
+    "title": "Wing Or Airfoil Profile",
+    "summary": "An airfoil cross-section is a teardrop-shaped closed curve. Approximate with a skFitSpline through a NACA 4-digit profile sample, or use a simpler lens shape for hobby applications.",
+    "tags": ["airfoil", "wing", "NACA", "aerodynamic", "profile", "blade"],
+    "keywords": ["airfoil", "wing", "NACA", "aero", "fin", "blade", "drone", "aircraft"],
+    "parameterHints": [
+      "Expose chord (length from leading to trailing edge), maxThickness, and wingspan/depth.",
+      "NACA 2412: max thickness 12% chord at 30% from leading edge.",
+      "Simplified 5-point upper: (0,0), (0.3c, 0.06c), (0.5c, 0.05c), (0.8c, 0.02c), (c,0).",
+      "Simplified 5-point lower: (0,0), (0.2c, -0.02c), (0.5c, -0.01c), (0.9c, -0.005c), (c,0)."
+    ],
+    "modelingNotes": [
+      "Sketch the upper and lower surfaces as two skFitSplines meeting at leading edge (0,0) and trailing edge (c,0).",
+      "Use 5-7 control points per surface for a smooth result.",
+      "The profile is in the YZ or XY plane; extrude along the third axis for wingspan.",
+      "For a swept wing: use opSweep with the airfoil as profile and a line/arc as span path.",
+      "For a tapered wing: use opLoft between root chord (full size) and tip chord (scaled)."
+    ],
+    "featurePattern": "Two skFitSplines (upper and lower surfaces) connecting at leading and trailing edges, skSolve, opExtrude to wingspan.",
+    "failureModes": [
+      "Upper and lower splines not meeting at leading/trailing edge — open profile.",
+      "Too few control points — profile looks blocky.",
+      "Trailing edge too thick — add a sharp trailing point at (c,0)."
+    ],
+    "validationRules": [
+      "Both surfaces must meet at x=0 and x=chord.",
+      "maxThickness < chord * 0.3 for typical airfoils."
+    ],
+    "example_prompt": "NACA 2412 airfoil 4 inch chord 6 inch wingspan"
+  },
+  {
+    "title": "Box Tube Or Square Tube",
+    "summary": "A square or rectangular hollow tube is a box profile with a concentric inner cavity. Use two nested skRectangles in one sketch and extrude the ring region. Common for FRC and structural applications.",
+    "tags": ["box tube", "square tube", "hollow", "structural", "extrusion", "FRC"],
+    "keywords": ["box tube", "square tube", "hollow square", "structural tube", "aluminum tube", "steel tube"],
+    "parameterHints": [
+      "Expose outerWidth, outerHeight, wallThickness, and length.",
+      "Common FRC: 1x1x0.1, 2x1x0.1, 2x2x0.125 inch.",
+      "innerWidth = outerWidth - 2*wall, innerHeight = outerHeight - 2*wall."
+    ],
+    "modelingNotes": [
+      "One sketch with two centered skRectangles: outer (full OD) and inner (OD minus 2*wall).",
+      "Outer: firstCorner=(-OW/2, -OH/2), secondCorner=(OW/2, OH/2) in inch-scaled form.",
+      "Inner: firstCorner=(-(OW/2-wall), -(OH/2-wall)), secondCorner=((OW/2-wall), (OH/2-wall)).",
+      "Use the inch-division pattern: vector(-definition.outerWidth/(2*inch), ...) * inch.",
+      "qSketchRegion(id+'sk', true) selects the ring region (outer minus inner).",
+      "opExtrude BLIND to definition.length."
+    ],
+    "featurePattern": "Two nested centered rectangles (outer and inner), qSketchRegion(true), opExtrude to tube length.",
+    "failureModes": [
+      "wall > outerWidth/2 or wall > outerHeight/2 — inner rectangle disappears, extrusion becomes solid.",
+      "Using vector(-0.5,-0.5)*definition.outerWidth — both components scale the same (wrong for non-square).",
+      "Must use: vector(-definition.outerWidth/(2*inch), -definition.outerHeight/(2*inch)) * inch."
+    ],
+    "validationRules": [
+      "wallThickness < outerWidth / 2.",
+      "wallThickness < outerHeight / 2.",
+      "innerWidth = outerWidth - 2*wall > 0."
+    ],
+    "example_prompt": "2x1 inch square tube 12 inches long 0.1 inch wall"
+  },
+  {
+    "title": "Mounting Bracket With Slots",
+    "summary": "A mounting plate with adjustment slots instead of fixed holes. Slots allow positional adjustment. Sketch slots as stadium shapes (rectangle + two semicircles) or as rectangular slots.",
+    "tags": ["slot", "adjustment slot", "mount", "bracket", "adjustable"],
+    "keywords": ["slot", "adjustment slot", "mounting slot", "elongated hole", "adjustment", "slotted bracket"],
+    "parameterHints": [
+      "Expose slotLength, slotWidth (clearance hole size), numSlots, and slotSpacing.",
+      "Slot clearance: slotWidth ≈ bolt diameter + 0.01 inch.",
+      "For vertical slots: orient slot along the y-axis."
+    ],
+    "modelingNotes": [
+      "Slot sketch: a rectangle (slotLength - slotWidth) x slotWidth plus two semicircles at the ends.",
+      "Or simpler: just skRectangle for a pure rectangular slot (no rounded ends) — still functional.",
+      "For rounded slots: use the stadium shape pattern (lines + arcs).",
+      "Place multiple slots in a for loop.",
+      "qSketchRegion(id, true) extrudes the plate with slot cutouts."
+    ],
+    "featurePattern": "Plate rectangle + slot shapes (rectangle or stadium) in one sketch, qSketchRegion(true), opExtrude.",
+    "failureModes": [
+      "Slots too close to edge — less than slotWidth/2 edge distance causes thin walls.",
+      "Slot width too small for the bolt — check clearance."
+    ],
+    "validationRules": [
+      "slotWidth > boltDiameter (clearance).",
+      "slotLength > slotWidth."
+    ],
+    "example_prompt": "Mounting plate 4x2 inches with three vertical adjustment slots for 1/4 inch bolts"
+  },
+  {
+    "title": "Compound Cylinder With Mounting Flange",
+    "summary": "A cylinder body with an integrated base flange. Common for standoffs, bosses on plates, and motor output adapters. Build the cylinder first, then add the flange as a wider cylinder at the base.",
+    "tags": ["cylinder", "flange", "standoff", "boss", "compound", "integrated"],
+    "keywords": ["cylinder with flange", "flanged cylinder", "standoff", "boss", "integrated flange", "adapter"],
+    "parameterHints": [
+      "Expose shaftRadius, flangeRadius, shaftHeight, flangeThickness.",
+      "flangeRadius > shaftRadius always.",
+      "Common standoff: shaftRadius = 0.25in, flangeRadius = 0.5in."
+    ],
+    "modelingNotes": [
+      "Method 1: Sketch both circles at base, extrude to flangeThickness, then extrude the inner circle region additionally to shaftHeight.",
+      "Method 2: Revolve a stepped profile (wide at bottom for flange, narrow for shaft).",
+      "Revolve method is cleaner: profile has two widths (flangeR at y=0..flangeT, shaftR at y=flangeT..shaftH).",
+      "Add bolt holes: sketch 4 circles on the flange annulus and subtract."
+    ],
+    "featurePattern": "Revolve stepped profile (flange width + shaft width) 360° for clean integrated result.",
+    "failureModes": [
+      "Two separate extrudes without union — leaves two bodies.",
+      "Revolve profile must include the step geometry."
+    ],
+    "validationRules": [
+      "flangeRadius > shaftRadius.",
+      "flangeThickness > 0."
+    ],
+    "example_prompt": "Flanged standoff 0.5 inch shaft 2 inches tall with 1 inch diameter base flange 0.25 inch thick"
+  },
+  {
+    "title": "Differential Housing Or Gear Box Plate",
+    "summary": "A gearbox plate is a rectangular or circular plate with precision bores for bearing/shaft locations. Each bore is at a specific center-to-center distance (C-C). Expose all bore positions as parameters.",
+    "tags": ["gearbox", "housing", "differential", "bore pattern", "shaft spacing", "FRC"],
+    "keywords": ["gearbox", "differential", "housing", "shaft spacing", "center distance", "gear plate", "FRC"],
+    "parameterHints": [
+      "For meshing gears: center distance = pitchRadius1 + pitchRadius2.",
+      "Expose inputBoreRadius, outputBoreRadius, centerDistance, and plate dimensions.",
+      "Typical FRC gearbox plate: 4x4 inch, 0.25 inch thick."
+    ],
+    "modelingNotes": [
+      "Plate sketch: outer rectangle + input bore circle (at origin) + output bore circle (at centerDistance from origin).",
+      "Additional mounting holes around the perimeter.",
+      "Center distance is fixed by the gear pair — not adjustable.",
+      "Bore clearance for a bearing: bearingOD + 0 to -0.001 inch (light press).",
+      "Add lightening holes or pockets to reduce weight."
+    ],
+    "featurePattern": "Rectangle + input bore at (0,0) + output bore at (C-C, 0) + mounting holes, qSketchRegion(true), opExtrude.",
+    "failureModes": [
+      "Center distance wrong — gears won't mesh.",
+      "Bore too large — bearing won't press fit."
+    ],
+    "validationRules": [
+      "centerDistance = pitchRadius1 + pitchRadius2.",
+      "Bore radius = bearingOD / 2 (press fit)."
+    ],
+    "example_prompt": "FRC gearbox plate for 8:1 reduction with 20DP gears"
+  },
+  {
+    "title": "Knurled Or Textured Cylinder Approximation",
+    "summary": "True knurl geometry is very complex. In FeatureScript, approximate a knurled surface as a plain cylinder with a note about knurl callout, or add shallow circumferential grooves using a for-loop of torus-slice subtractions.",
+    "tags": ["knurl", "texture", "grip", "surface", "cylinder"],
+    "keywords": ["knurl", "texture", "grip", "serrated", "diamond knurl", "grooves", "surface finish"],
+    "parameterHints": [
+      "Expose cylinderRadius, cylinderLength, and optionally grooveCount and grooveDepth.",
+      "Circumferential grooves: grooveSpacing = cylinderLength / grooveCount."
+    ],
+    "modelingNotes": [
+      "Simple approach: generate a plain cylinder and note that knurling is a machining callout.",
+      "Groove approximation: subtract thin annular rings using a for loop of revolve-rectangle tools.",
+      "Each groove: revolve a small rectangle at (R - depth/2, grooveY) — creates a circumferential groove.",
+      "10-30 grooves is typical; more grooves slow regeneration significantly.",
+      "True diamond knurl would require 3D patterning beyond standard FS primitives."
+    ],
+    "featurePattern": "Cylinder body + for loop of circumferential groove subtractions (revolve rectangle tool at each groove position).",
+    "failureModes": [
+      "Too many grooves (>50) causes very slow regeneration.",
+      "Groove too deep — weakens the part."
+    ],
+    "validationRules": [
+      "grooveDepth < 0.02 * cylinderRadius (shallow).",
+      "grooveCount < 50 for reasonable performance."
+    ],
+    "example_prompt": "Knurled grip cylinder 0.75 inch diameter 2 inches long with 20 grooves"
+  },
+  {
+    "title": "Hook Or Cantilever Shape",
+    "summary": "A hook is an extruded arc swept profile — a rectangular or circular cross-section following a C or J arc path. Use opSweep with an arc path and rectangular or circular profile.",
+    "tags": ["hook", "cantilever", "curved", "hanger", "J-hook", "C-hook"],
+    "keywords": ["hook", "cantilever", "hanger", "J-hook", "C-hook", "bent bracket", "curved arm"],
+    "parameterHints": [
+      "Expose hookRadius (arc bend radius), hookAngle (arc sweep angle), profileWidth, profileHeight, and stemLength.",
+      "For a J-hook: 180° arc + straight stem. For a C-hook: 180° arc only."
+    ],
+    "modelingNotes": [
+      "Path sketch: skArc for the curved section, connected to a skLineSegment for the straight stem.",
+      "Profile: skRectangle (rectangular cross-section) on a perpendicular plane.",
+      "Perpendicular plane for profile: plane(arcStartPoint, pathTangentAtStart).",
+      "opSweep: profiles = qSketchRegion(id+'prof'), path = qCreatedBy(id+'path', EntityType.EDGE).",
+      "For a circular rod hook: profile = skCircle."
+    ],
+    "featurePattern": "Arc + line path sketch + perpendicular rectangular or circular profile sketch, opSweep.",
+    "failureModes": [
+      "Profile plane not perpendicular to path tangent — produces twisted hook.",
+      "Path not fully connected — sweep fails on open/disconnected path."
+    ],
+    "validationRules": [
+      "hookRadius > profileWidth to avoid self-intersection.",
+      "hookAngle > 0 (positive sweep)."
+    ],
+    "example_prompt": "J-hook 1 inch bend radius 0.25 inch square rod profile 3 inch stem"
+  },
+  {
+    "title": "Rib Or Stiffening Wall",
+    "summary": "Ribs are thin vertical walls added to strengthen flat plates or box walls. Sketch the rib profile directly (thin rectangle) and extrude, or use the rib profile at the junction of two faces.",
+    "tags": ["rib", "stiffener", "wall", "support", "structural"],
+    "keywords": ["rib", "stiffener", "wall", "structural rib", "web", "fin", "gusset"],
+    "parameterHints": [
+      "Expose ribHeight, ribThickness, and ribLength.",
+      "Multiple parallel ribs: use a for loop with ribSpacing parameter.",
+      "Rib thickness is typically 0.5x to 1x the wall thickness it supports."
+    ],
+    "modelingNotes": [
+      "Sketch a thin rectangle (ribLength x ribThickness) perpendicular to the main wall.",
+      "Extrude to ribHeight.",
+      "opBoolean UNION with the main body.",
+      "For multiple ribs: for loop of sketch placements at different y offsets.",
+      "Alternatively: extrude all ribs from a multi-rectangle sketch simultaneously."
+    ],
+    "featurePattern": "Thin rectangle sketch for rib profile, opExtrude to ribHeight, opBoolean UNION into main body.",
+    "failureModes": [
+      "Rib not unioned with main body — leaves separate floating wall.",
+      "ribThickness < 0.01 inch — too thin for most printing/machining."
+    ],
+    "validationRules": [
+      "ribThickness > 0.",
+      "ribHeight < parent wall height."
+    ],
+    "example_prompt": "Three parallel reinforcing ribs 0.1 inch thick 1 inch tall on a plate"
+  },
+  {
+    "title": "Waffle Or Egg-Crate Structure",
+    "summary": "A waffle structure is a grid of intersecting ribs forming pockets. Build as a solid block, subtract rectangular pockets in a grid pattern, or extrude the waffle profile from a sketch.",
+    "tags": ["waffle", "egg-crate", "grid", "pockets", "lightweight", "structural"],
+    "keywords": ["waffle", "egg-crate", "grid pockets", "lightweight", "rib grid", "structural cutout"],
+    "parameterHints": [
+      "Expose gridSpacing, ribThickness, pocketDepth, gridCountX, and gridCountY.",
+      "pocketDepth = plateThickness - bottomWall.",
+      "Grid repeat: ribThickness + pocketWidth = gridSpacing."
+    ],
+    "modelingNotes": [
+      "Method 1: Sketch both X and Y ribs as a series of rectangles in one sketch, extrude.",
+      "Method 2: Solid plate, then subtract a grid of rectangular pockets with a for loop.",
+      "For-loop double nested: for k_x in range: for k_y in range: create pocket at (kx*spacing, ky*spacing).",
+      "Pocket sketch: rectangle at each grid position, all in one sketch → one subtract.",
+      "Keep gridSpacing and ribThickness as parameters."
+    ],
+    "featurePattern": "Double for-loop placing pocket rectangles in a grid sketch, qSketchRegion(true), opExtrude for pocket depth as subtract, or direct rib profile sketch.",
+    "failureModes": [
+      "Pocket depth > plateThickness — cuts through the bottom.",
+      "Rib too thin to print or machine — keep > 0.04 inch."
+    ],
+    "validationRules": [
+      "pocketDepth < plateThickness.",
+      "ribThickness > 0.04 inch for manufacturability."
+    ],
+    "example_prompt": "6x4 inch waffle plate 0.25 inch thick 0.5 inch grid 0.05 inch ribs"
+  },
+  {
+    "title": "Involute Spline Or Hex Bore",
+    "summary": "For hex bores (hex shaft interface): use skRegularPolygon with sides=6 as the inner cutout. For square bores: use a square skRectangle. Involute splines are too complex for custom features — use a simplified polygon approximation.",
+    "tags": ["hex bore", "spline", "hex shaft", "square bore", "keyway", "FRC"],
+    "keywords": ["hex bore", "spline", "hex shaft", "square bore", "broach", "1/2 hex", "10mm hex"],
+    "parameterHints": [
+      "1/2 inch hex shaft: across-flats = 0.5in, circumradius = 0.5/(sqrt(3)) = 0.2887in.",
+      "10mm hex: AF=10mm, circumradius = 10/sqrt(3) = 5.774mm = 0.227in.",
+      "For square bore: side = acrossFlats, circumradius = side * sqrt(2)/2."
+    ],
+    "modelingNotes": [
+      "Hex bore: skRegularPolygon with sides=6 and firstVertex at circumradius, centered at (0,0).",
+      "The bore polygon is inside the outer shaft circle — use qSketchRegion(true) to subtract.",
+      "Square bore: two overlapping skRectangles rotated 45° — or use skRegularPolygon with sides=4 and 45° vertex.",
+      "For 1/2 inch hex bore: circumradius = 0.2887 inch; skRegularPolygon sides=6 firstVertex=(0.2887, 0)*inch."
+    ],
+    "featurePattern": "Outer circle + inner skRegularPolygon (hex), qSketchRegion(true), opExtrude.",
+    "failureModes": [
+      "acrossFlats ≠ circumradius — circumradius = AF / sqrt(3) for hex.",
+      "Polygon too large — removes all shaft material.",
+      "Using skPolygon — it does not exist in FS, use skRegularPolygon."
+    ],
+    "validationRules": [
+      "circumradius < outerShaftRadius.",
+      "sides = 6 for hex, sides = 4 for square bore."
+    ],
+    "example_prompt": "Hub with 1/2 inch hex bore for FRC hex shaft"
+  },
+  {
+    "title": "Chamfered Entry Hole Or Counterbore",
+    "summary": "A counterbore is a stepped hole: wide bore at the top for screw head, narrow bore through the bottom for the shank. Build with a concentric two-circle sketch and extrude at two depths, or use boolean subtract in two passes.",
+    "tags": ["counterbore", "countersink", "screw head", "fastener", "stepped bore"],
+    "keywords": ["counterbore", "countersink", "screw hole", "stepped bore", "cap screw", "socket head"],
+    "parameterHints": [
+      "Socket head cap screws (metric): M3 head OD=5.5mm, head height=3mm. M4: OD=7mm H=4mm. M5: OD=8.5mm H=5mm.",
+      "Socket head cap screws (imperial): 1/4-20 head OD=0.375in, head height=0.25in.",
+      "Expose clearanceBoreRadius, cboreRadius, cboreDepth, and throughBoreRadius."
+    ],
+    "modelingNotes": [
+      "Sketch 1 on top face: large circle (cboreRadius), extrude DOWN cboreDepth.",
+      "Sketch 2 at bottom of cbore: small circle (clearanceBoreRadius), extrude DOWN remaining thickness.",
+      "Or: one sketch with two concentric circles, two separate extrude depth calls.",
+      "For countersink: revolve a V-notch profile or use the concentric sketch with 90° chamfer geometry.",
+      "opBoolean SUBTRACT both from the main body."
+    ],
+    "featurePattern": "Two separate bore circles + two-depth extrude subtract ops — cbore at top depth, clearance bore through bottom.",
+    "failureModes": [
+      "cboreRadius < clearanceBoreRadius — invalid, head bore must be larger.",
+      "cboreDepth >= plateThickness — countersinks through the entire plate."
+    ],
+    "validationRules": [
+      "cboreRadius > clearanceBoreRadius.",
+      "cboreDepth < plateThickness."
+    ],
+    "example_prompt": "Counterbore for M4 socket head cap screw in 0.5 inch plate"
   }
 ]

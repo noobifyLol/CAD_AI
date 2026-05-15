@@ -327,8 +327,8 @@ function tPlateHoles(d) {
     body: `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skRectangle(sketch1, "plate", {
-            "firstCorner"  : vector(-0.5, -0.5) * definition.width,
-            "secondCorner" : vector( 0.5,  0.5) * definition.height
+            "firstCorner"  : vector(-definition.width  / (2 * inch), -definition.height / (2 * inch)) * inch,
+            "secondCorner" : vector( definition.width  / (2 * inch),  definition.height / (2 * inch)) * inch
         });${circles}
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
@@ -519,7 +519,101 @@ function tHitchPeg(d) {
   };
 }
 
-// Spur gear with involute tooth profile-------------------- THIS SHOUODN"T BE a template
+// ── CONE / FRUSTUM / TAPERED ─────────────────────────────────────────────────
+// Covers: cone, funnel, nozzle, tapered shaft tip, carrot-approximation (frustum).
+function tCone(d) {
+  const botR = Math.max(0.05, d.radiusInches || d.widthInches / 2 || 0.5);
+  const topR = Math.max(0, d.holeRadiusInches || 0);
+  const ht   = Math.max(0.05, d.heightInches || d.depthInches || 2.0);
+  return {
+    precondition: [
+      preconditionPlane(),
+      preconditionLength("bottomRadius", "Base Radius",          0.01, botR, 24),
+      preconditionLength("topRadius",    "Top Radius (0 = tip)", 0,    topR, 24),
+      preconditionLength("height",       "Height",               0.01, ht,   48),
+    ].join("\n"),
+    body: `${planeVar()}
+        var bRv = definition.bottomRadius / inch;
+        var tRv = definition.topRadius    / inch;
+        var htv = definition.height       / inch;
+        var profileSketch = newSketchOnPlane(context, id + "profile", { "sketchPlane" : skPlane });
+        skLineSegment(profileSketch, "axis", { "start" : vector(0,   0  ) * inch, "end" : vector(0,   htv) * inch });
+        skLineSegment(profileSketch, "base", { "start" : vector(0,   0  ) * inch, "end" : vector(bRv, 0  ) * inch });
+        skLineSegment(profileSketch, "side", { "start" : vector(bRv, 0  ) * inch, "end" : vector(tRv, htv) * inch });
+        skLineSegment(profileSketch, "top",  { "start" : vector(tRv, htv) * inch, "end" : vector(0,   htv) * inch });
+        skSolve(profileSketch);
+        opRevolve(context, id + "cone", {
+            "entities"     : qSketchRegion(id + "profile"),
+            "axis"         : line(skPlane.origin, skPlane.normal),
+            "angleForward" : 2 * PI * radian
+        });`,
+  };
+}
+
+// ── STEPPED SHAFT ─────────────────────────────────────────────────────────────
+function tSteppedShaft(d) {
+  const r1 = Math.max(0.05, d.radiusInches || 0.5);
+  const r2 = Math.max(0.02, r1 * 0.6);
+  const h1 = Math.max(0.05, d.depthInches || 1.0);
+  const h2 = Math.max(0.05, h1 * 0.6);
+  return {
+    precondition: [
+      preconditionPlane(),
+      preconditionLength("radius1", "Large Radius",       0.01, r1, 12),
+      preconditionLength("radius2", "Small Radius",       0.01, r2, 12),
+      preconditionLength("length1", "Large Section",      0.01, h1, 48),
+      preconditionLength("length2", "Small Section",      0.01, h2, 48),
+    ].join("\n"),
+    body: `${planeVar()}
+        opCylinder(context, id + "seg1", {
+            "bottomCenter"  : skPlane.origin,
+            "topCenter"     : skPlane.origin + skPlane.normal * definition.length1,
+            "radius"        : definition.radius1,
+            "operationType" : NewBodyOperationType.NEW
+        });
+        opCylinder(context, id + "seg2", {
+            "bottomCenter"  : skPlane.origin + skPlane.normal * definition.length1,
+            "topCenter"     : skPlane.origin + skPlane.normal * (definition.length1 + definition.length2),
+            "radius"        : definition.radius2,
+            "operationType" : NewBodyOperationType.NEW
+        });
+        opBoolean(context, id + "join", {
+            "tools"         : qCreatedBy(id + "seg2", EntityType.BODY),
+            "targets"       : qCreatedBy(id + "seg1", EntityType.BODY),
+            "operationType" : BooleanOperationType.UNION
+        });`,
+  };
+}
+
+// ── PIPE ─────────────────────────────────────────────────────────────────────
+function tPipe(d) {
+  const outerR = Math.max(0.1, d.radiusInches || 0.5);
+  const wallT  = Math.max(0.01, d.wallThicknessInches || outerR * 0.2);
+  const len    = Math.max(0.1, d.shaftLengthInches || d.depthInches || 4.0);
+  return {
+    precondition: [
+      preconditionPlane(),
+      preconditionLength("outerRadius",   "Outer Radius",   0.01,  outerR, 24),
+      preconditionLength("wallThickness", "Wall Thickness", 0.005, wallT,   4),
+      preconditionLength("length",        "Length",         0.01,  len,   120),
+    ].join("\n"),
+    body: `${planeVar()}
+        var innerR = definition.outerRadius - definition.wallThickness;
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+        skCircle(sketch1, "outer", { "center" : vector(0, 0) * inch, "radius" : definition.outerRadius });
+        skCircle(sketch1, "inner", { "center" : vector(0, 0) * inch, "radius" : innerR });
+        skSolve(sketch1);
+        opExtrude(context, id + "extrude1", {
+            "entities"  : qSketchRegion(id + "sketch1", true),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.length
+        });`,
+  };
+}
+
+
+// Spur gear with involute tooth profile
 function tGear(d) {
   const radiusDefault = d.radiusInches || 1.0;
   const toothCountDefault = Math.max(6, Math.round(d.numTeeth || 20));
@@ -646,10 +740,13 @@ function buildFeatureScript(d) {
     case "L_BRACKET":
     case "T_BRACKET":   template = tLBracket(d);    break;
     case "FLANGE":      template = tFlange(d);      break;
-    case "HEX_NUT":     template = tHexNut(d);      break;
-    case "WASHER":      template = tWasher(d);      break;
-    case "BUSHING":     template = tBushing(d);     break;
-    case "HITCH_PEG":   template = tHitchPeg(d);   break;
+    case "HEX_NUT":       template = tHexNut(d);       break;
+    case "WASHER":        template = tWasher(d);       break;
+    case "BUSHING":       template = tBushing(d);      break;
+    case "HITCH_PEG":     template = tHitchPeg(d);    break;
+    case "CONE":          template = tCone(d);         break;
+    case "STEPPED_SHAFT": template = tSteppedShaft(d); break;
+    case "PIPE":          template = tPipe(d);         break;
     case "GEAR_SPUR":   template = tGear(d);        break;
     case "BOX":
     default:
@@ -1160,31 +1257,44 @@ Schema (ALL fields required, use sensible defaults for anything not stated):
 
 SHAPE LIST (choose the closest match — never output "UNKNOWN"):
 BOX, ROBOT_MECH, CYLINDER, PLATE, POLYGON, LINKAGE, PLATE_HOLES, L_BRACKET, T_BRACKET,
-FLANGE, HEX_NUT, WASHER, BUSHING, HITCH_PEG, GEAR_SPUR, CUSTOM
+FLANGE, HEX_NUT, WASHER, BUSHING, HITCH_PEG, GEAR_SPUR,
+CONE, STEPPED_SHAFT, PIPE,
+CUSTOM
 
 Shape classification:
-ROBOT_MECH   — robotic mech, mecha, blocky robot, android, humanoid robot,
-               robot made with cubes or cuboids; choose this over BOX if robot/mech appears
-BOX          — cube, block, rectangular solid, billet, slab (no holes)
-CYLINDER     — cylinder, rod, shaft, tube, dowel, pin, post, standoff, barrel, peg, boss
-PLATE        — flat plate, sheet, panel (no holes; use PLATE_HOLES if holes present)
-POLYGON      — triangle, pentagon, hexagon, N-sided prism; set sides field
-LINKAGE      — connecting rod, link bar, rocker arm, crank arm, pitman arm, tie rod,
-               coupler, push rod, clevis rod, train link, drive rod, lever arm;
-               elongated bar with pin hole at each end
-PLATE_HOLES  — mounting plate, bracket face; flat rectangle with multiple holes
-L_BRACKET    — L-bracket, angle bracket, shelf bracket, corner bracket
-T_BRACKET    — T-bracket, T-plate
-FLANGE       — pipe flange, weld flange, bolt flange, circular plate with bolt circle
-HEX_NUT      — hex nut, jam nut, lock nut, castle nut
-WASHER       — washer, spacer disk, shim, flat ring
-BUSHING      — bushing, sleeve, hollow tube, liner, journal bearing
-HITCH_PEG    — hitch peg, mushroom head pin, thumb peg, lollipop pin,
-               any pin with a domed or spherical head on a cylindrical shaft
-GEAR_SPUR    — spur gear, gear wheel, pinion, drive gear, driven gear,
-               any gear described by tooth count or gear ratio
-CUSTOM       — organic, sculpted, tapered, or unsupported single-part geometry such as carrots,
-               props, freeform silhouettes, or shapes that need spline, loft, or revolve logic
+ROBOT_MECH    — robotic mech, mecha, blocky robot, android, humanoid robot,
+                robot made with cubes or cuboids; choose this over BOX if robot/mech appears
+BOX           — cube, block, rectangular solid, billet, slab (no holes)
+CYLINDER      — solid cylinder, rod, shaft, dowel, pin, post, standoff, peg, boss (no bore unless requested)
+PLATE         — flat plate, sheet, panel (no holes; use PLATE_HOLES if holes present)
+POLYGON       — triangle, pentagon, hexagon, N-sided prism; set sides field
+LINKAGE       — connecting rod, link bar, rocker arm, crank arm, pitman arm, tie rod,
+                coupler, push rod, clevis rod, train link, drive rod, lever arm;
+                elongated bar with pin hole at each end
+PLATE_HOLES   — mounting plate, bracket face; flat rectangle with multiple holes
+L_BRACKET     — L-bracket, angle bracket, shelf bracket, corner bracket
+T_BRACKET     — T-bracket, T-plate
+FLANGE        — pipe flange, weld flange, bolt flange, circular plate with bolt circle
+HEX_NUT       — hex nut, jam nut, lock nut, castle nut
+WASHER        — washer, spacer disk, shim, flat ring
+BUSHING       — bushing, sleeve, journal bearing, short hollow cylinder (length ≈ diameter)
+HITCH_PEG     — hitch peg, mushroom head pin, thumb peg, lollipop pin,
+                any pin with a domed or spherical head on a cylindrical shaft
+GEAR_SPUR     — spur gear, gear wheel, pinion, drive gear, driven gear,
+                any gear described by tooth count or gear ratio
+CONE          — cone, frustum, funnel, nozzle, tapered tip, hopper, carrot-shape (approximate),
+                any shape that is wide at one end and narrows to a point or smaller circle.
+                Use radiusInches for base radius, holeRadiusInches for top radius (0 = sharp tip),
+                heightInches for total height.
+STEPPED_SHAFT — stepped shaft, shoulder bolt, counter-shaft, transmission shaft, drive shaft,
+                any shaft with two or more distinct diameter sections along its axis.
+                Use radiusInches for the larger diameter, holeRadiusInches for the smaller,
+                depthInches for the larger section length, shaftLengthInches for the smaller.
+PIPE          — pipe, tube, hollow tube, conduit, duct, barrel, sleeve — thin-walled cylinder
+                where the length is significantly greater than the diameter. Use wallThicknessInches.
+CUSTOM        — organic, sculpted, multi-lofted, or geometry that genuinely cannot be approximated
+                by any shape above. Use for things like nuts and bolts together, propellers,
+                complex bracket assemblies, springs, threads, or true freeform surfaces.
 
 Mechanical engineering defaults:
 GEARS — pressure angle 20deg standard; "8:1 ratio" → numTeeth=40, radiusInches=2.5 (8 DP);
@@ -1196,7 +1306,8 @@ GEARS — pressure angle is normally 20°, use 14.5° for older gears and 25° f
 HITCH PEG — shaft diameter from widthInches, head radius from radiusInches, shaft height from depthInches
 ROBOT MECH — default widthInches=12, heightInches=12, depthInches=6; expose all as editable parameters
 CYLINDER WITH HOLE — keep shape as CYLINDER; if no bore is specified, set holeRadiusInches to roughly 30% to 45% of outer radius; never let holeRadiusInches >= radiusInches
-CARROT / ORGANIC ROOT — usually shape CUSTOM; use widthInches as max diameter, heightInches as full tapered length, and keep confidence LOW or MEDIUM if dimensions are inferred
+CONE/CARROT — use CONE shape (not CUSTOM); set holeRadiusInches=0 for a sharp tip; carrot = tall narrow cone
+PIPE vs BUSHING — PIPE when length > 2× outer diameter; BUSHING when length ≤ 2× outer diameter
 
 Unit rules:
 - All output in INCHES. Divide mm by 25.4.
@@ -1435,8 +1546,108 @@ Every file must follow this exact structure:
 8. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
 9. Organic profiles with only two spline points — these collapse into straight or trivial geometry and do not look realistic.
 
+═══ ADVANCED OPERATIONS ═══
+Use these when the shape genuinely needs them — do not force them onto simple geometry.
+
+opLoft — creates a solid by transitioning between two or more profile sketches:
+  // Each profile must be a separate sketch on a different plane.
+  var sk1 = newSketchOnPlane(context, id + "prof1", { "sketchPlane" : planeA });
+  skCircle(sk1, "c", { "center" : vector(0,0)*inch, "radius" : definition.baseRadius });
+  skSolve(sk1);
+  var sk2 = newSketchOnPlane(context, id + "prof2", { "sketchPlane" : planeB });
+  skCircle(sk2, "c", { "center" : vector(0,0)*inch, "radius" : definition.topRadius });
+  skSolve(sk2);
+  opLoft(context, id + "loft1", {
+      "vertices"  : [],
+      "edges"     : [qSketchRegion(id + "prof1"), qSketchRegion(id + "prof2")]
+  });
+  // For 3+ profiles, add more entries to "edges". Profiles must be in order along the path.
+  // NEVER add "sections" key — FS opLoft only uses "edges" and "vertices".
+
+opSweep — extrudes a profile sketch along a path sketch:
+  // Path sketch: a single open wire (skLineSegment, skArc, or skFitSpline curve)
+  var pathSk = newSketchOnPlane(context, id + "path", { "sketchPlane" : skPlane });
+  skFitSpline(pathSk, "spine", { "points" : [vector(0,0)*inch, vector(1,0.5)*inch, vector(2,0)*inch] });
+  skSolve(pathSk);
+  // Profile sketch on a plane perpendicular to the path start
+  var profPlane = plane(skPlane.origin, skPlane.x);  // perpendicular to skPlane
+  var profSk = newSketchOnPlane(context, id + "prof", { "sketchPlane" : profPlane });
+  skCircle(profSk, "c", { "center" : vector(0,0)*inch, "radius" : definition.radius });
+  skSolve(profSk);
+  opSweep(context, id + "sweep1", {
+      "profiles" : qSketchRegion(id + "prof"),
+      "path"     : qCreatedBy(id + "path", EntityType.EDGE)
+  });
+
+opShell — hollows a solid body, leaving a specified wall thickness:
+  // Must be called AFTER the solid body exists (after opExtrude or opRevolve).
+  opShell(context, id + "shell1", {
+      "entities"   : qCreatedBy(id + "extrude1", EntityType.BODY),
+      "thickness"  : definition.wallThickness,
+      "excludeFaces" : qCapEntity(id + "extrude1", CapType.START)  // open face (leave it open)
+  });
+
+opFillet — rounds selected edges:
+  opFillet(context, id + "fillet1", {
+      "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "body1", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+      "radius"   : definition.filletRadius
+  });
+
+opChamfer — bevels selected edges:
+  opChamfer(context, id + "cham1", {
+      "entities"  : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "body1", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+      "chamferType" : ChamferType.EQUAL_OFFSETS,
+      "width"     : definition.chamferWidth
+  });
+
+Intermediate plane construction — how to make a plane at an offset or angle:
+  var offsetPlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal);
+  var sidePlane   = plane(skPlane.origin, skPlane.x);  // perpendicular to sketch plane
+
+═══ MECH / MULTI-BODY STRATEGY ═══
+Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
+Build each section as its own opExtrude or opCylinder call, then union adjacent bodies:
+
+  // Pattern: build body, build part, union them
+  opCylinder(context, id + "leg1", { "bottomCenter": ..., "topCenter": ..., "radius": ..., "operationType": NewBodyOperationType.NEW });
+  opExtrude(context, id + "foot1", { "entities": qSketchRegion(id + "footSk"), ... });
+  opBoolean(context, id + "joinLeg1", {
+      "tools": qCreatedBy(id + "foot1", EntityType.BODY),
+      "targets": qCreatedBy(id + "leg1", EntityType.BODY),
+      "operationType": BooleanOperationType.UNION
+  });
+
+For robot/mech shapes:
+- Build the torso first as a BOX (opExtrude of a rectangle)
+- Add limbs as cylinders (opCylinder) positioned relative to the torso
+- Use vector arithmetic for positioning: skPlane.origin + skPlane.normal * offset + skPlane.x * sideOffset
+- UNION all parts that should be one body; leave separate bodies as separate if they are distinct parts
+
+═══ ORGANIC SHAPES (CARROTS, ROOTS, PODS, BLOBS) ═══
+Use a revolved spline profile for any organic tapered shape:
+  var sk = newSketchOnPlane(context, id + "profile", { "sketchPlane" : skPlane });
+  // 5-7 control points on the right side of the axis (x > 0), axis on x=0
+  // Taper from wide at bottom to narrow at top for a carrot/root shape
+  skLineSegment(sk, "axis", { "start" : vector(0, 0)*inch, "end" : vector(0, htv)*inch });
+  skFitSpline(sk, "profile", { "points" : [
+      vector(bRv, 0)*inch,
+      vector(bRv * 0.9, htv * 0.2)*inch,
+      vector(bRv * 0.7, htv * 0.45)*inch,
+      vector(bRv * 0.4, htv * 0.7)*inch,
+      vector(0.02, htv)*inch
+  ] });
+  skLineSegment(sk, "top",  { "start" : vector(0.02, htv)*inch, "end" : vector(0, htv)*inch });
+  skLineSegment(sk, "base", { "start" : vector(0, 0)*inch, "end" : vector(bRv, 0)*inch });
+  skSolve(sk);
+  opRevolve(context, id + "body", {
+      "entities"     : qSketchRegion(id + "profile"),
+      "axis"         : line(skPlane.origin, skPlane.normal),
+      "angleForward" : 2 * PI * radian
+  });
+  // The axis line must connect to the profile edges to close the region.
+  // A 2-point spline or a simple line is NOT sufficient for realistic organic shapes.
+
 ═══ GOAL ═══
-- Author a fresh FeatureScript design from the request and the context below. Do not default to a canned box, plate, or gear template unless the request is extremely simple.
 - Build exactly what the user asked for, with sensible parametric defaults.
 - Every parameter must be editable in the Onshape feature dialog.
 - Prefer simple, robust geometry over clever but brittle geometry.
