@@ -3,7 +3,7 @@ const FAST_MODEL = process.env.OLLAMA_FAST_MODEL || TEXT_MODEL;
 const COMPLEX_MODEL = process.env.OLLAMA_COMPLEX_MODEL || TEXT_MODEL;
 const DIM_MODEL = process.env.OLLAMA_DIM_MODEL || COMPLEX_MODEL;
 const FALLBACK_MODEL = process.env.OLLAMA_FALLBACK_MODEL || TEXT_MODEL;
-const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || TEXT_MODEL;
+const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // Templates stay available as a safety net, but AI-first generation is now the default path.
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
@@ -16,8 +16,9 @@ import Groq from "groq-sdk";
 // ------------------------------
 const LOCAL_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
 const CLOUD_MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1";
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 9000);
+const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
+const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
 
 // ------------------------------
 // Environment detection
@@ -88,34 +89,21 @@ function normalizeMessageContent(content) {
   return "";
 }
 
-function isOpenRouterBillingError(err) {
-  return Number(err?.details?.status) === 402 || /\b402\b/.test(String(err?.message || ""));
-}
-
-function shouldFallbackToGroq(err) {
-  return Boolean(process.env.GROQ_API_KEY) && (
-    isOpenRouterBillingError(err) ||
-    err?.name === "FetchError" ||
-    err?.name === "AbortError" ||
-    /Invalid OpenRouter response/i.test(String(err?.message || ""))
-  );
-}
-
-async function callGroqLLM(prompt, model = GROQ_MODEL) {
+async function callGroqVisionLLM(messages, model = VISION_MODEL) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("Missing GROQ_API_KEY");
 
   const client = new Groq({
     apiKey,
-    timeout: LLM_TIMEOUT_MS,
+    timeout: VISION_TIMEOUT_MS,
     maxRetries: 0,
   });
 
   try {
     const completion = await client.chat.completions.create({
       model,
-      messages: [{ role: "user", content: prompt }],
-      max_completion_tokens: 4096,
+      messages,
+      max_completion_tokens: VISION_MAX_TOKENS,
     });
 
     const content = normalizeMessageContent(completion?.choices?.[0]?.message?.content);
@@ -127,7 +115,7 @@ async function callGroqLLM(prompt, model = GROQ_MODEL) {
 
     return content;
   } catch (err) {
-    console.error("[Groq] request failed", {
+    console.error("[Groq Vision] request failed", {
       message: err?.message || String(err),
       name: err?.name,
       status: err?.status,
@@ -221,26 +209,10 @@ export async function callLLM(prompt, model = LOCAL_MODEL) {
     try {
       return await callLocalLLM(prompt, model);
     } catch {
-      try {
-        return await callCloudLLM(prompt, cloudModel);
-      } catch (cloudErr) {
-        if (shouldFallbackToGroq(cloudErr)) {
-          console.warn(`[AI] OpenRouter failed (${cloudErr.message}); falling back to Groq ${GROQ_MODEL}`);
-          return await callGroqLLM(prompt, GROQ_MODEL);
-        }
-        throw cloudErr;
-      }
+      return await callCloudLLM(prompt, cloudModel);
     }
   } else {
-    try {
-      return await callCloudLLM(prompt, cloudModel);
-    } catch (cloudErr) {
-      if (shouldFallbackToGroq(cloudErr)) {
-        console.warn(`[AI] OpenRouter failed (${cloudErr.message}); falling back to Groq ${GROQ_MODEL}`);
-        return await callGroqLLM(prompt, GROQ_MODEL);
-      }
-      throw cloudErr;
-    }
+    return await callCloudLLM(prompt, cloudModel);
   }
 }
 
@@ -1574,8 +1546,8 @@ async function extractDims(prompt, learningContext = {}, history = []) {
   messages.push({ role: "user", content: prompt.trim() });
 
   const extractorModel = promptNeedsHighFidelityModel(prompt) ? DIM_MODEL : FAST_MODEL;
-  const raw = await chat(messages, extractorModel, [DIM_MODEL, TEXT_MODEL, FALLBACK_MODEL]);
   try {
+    const raw = await chat(messages, extractorModel, [DIM_MODEL, TEXT_MODEL, FALLBACK_MODEL]);
     const parsed = JSON.parse(stripJson(raw));
     const d = normalizeDims({
       featureName:         String(parsed.featureName         ?? "aiShape").replace(/[^a-zA-Z0-9_]/g,""),
@@ -1598,7 +1570,8 @@ async function extractDims(prompt, learningContext = {}, history = []) {
       parseFailed: false,
     });
     return d;
-  } catch {
+  } catch (err) {
+    console.warn(`[AI] Dimension extraction fallback used: ${err.message}`);
     return normalizeDims({
       featureName:"customFeature", featureLabel:"Custom Feature", shape:"CUSTOM", confidence:"LOW",
       widthInches:2, heightInches:2, depthInches:2, radiusInches:1,
@@ -1997,37 +1970,52 @@ export async function generateFeatureScript(prompt, options = {}) {
   if (generationMode === "template") {
     code = buildFeatureScript(dims);
   } else {
-    const custom = await generateCustomFeatureScript(prompt, dims, learningContext, history);
-    featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
-    featureLabel = custom.featureLabel || featureLabel;
-    customReasoning = custom.reasoning;
+    try {
+      const custom = await generateCustomFeatureScript(prompt, dims, learningContext, history);
+      featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
+      featureLabel = custom.featureLabel || featureLabel;
+      customReasoning = custom.reasoning;
 
-    const repaired = await debugFeatureScript(custom.code, "", {
-      learningContext,
-    });
-    code = sanitizeFeatureScript(repaired.fixed);
-
-    const validationIssues = validateFeatureScript(code);
-    if (validationIssues.length) {
-      const issueText = validationIssues
-        .slice(0, 12)
-        .map(issue => `Line ${issue.line || "?"}: ${issue.message}${issue.text ? ` [${issue.text}]` : ""}`)
-        .join("\n");
-      const repairedAgain = await debugFeatureScript(code, issueText, {
+      const repaired = await debugFeatureScript(custom.code, "", {
         learningContext,
       });
-      code = sanitizeFeatureScript(repairedAgain.fixed);
-      customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validator triggered a second repair pass for ${validationIssues.length} issue(s).`;
-    }
+      code = sanitizeFeatureScript(repaired.fixed);
 
-    if (hasFatalFeatureScriptPatterns(code) && canUseTemplateFallback(dims)) {
-      console.warn("[AI] Fatal FeatureScript patterns remained after repair; falling back to validated template.");
+      const validationIssues = validateFeatureScript(code);
+      if (validationIssues.length) {
+        const issueText = validationIssues
+          .slice(0, 12)
+          .map(issue => `Line ${issue.line || "?"}: ${issue.message}${issue.text ? ` [${issue.text}]` : ""}`)
+          .join("\n");
+        const repairedAgain = await debugFeatureScript(code, issueText, {
+          learningContext,
+        });
+        code = sanitizeFeatureScript(repairedAgain.fixed);
+        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validator triggered a second repair pass for ${validationIssues.length} issue(s).`;
+      }
+
+      if (hasFatalFeatureScriptPatterns(code) && canUseTemplateFallback(dims)) {
+        console.warn("[AI] Fatal FeatureScript patterns remained after repair; falling back to validated template.");
+        code = buildFeatureScript({
+          ...dims,
+          shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
+        });
+        generationMode = "template_fallback";
+        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Fallback used because the AI-authored code still contained invalid FeatureScript type or bounds syntax.`;
+      }
+    } catch (err) {
+      console.warn(`[AI] Text generation fallback used: ${err.message}`);
+      const fallbackShape = canUseTemplateFallback(dims) ? dims.shape : "BOX";
       code = buildFeatureScript({
         ...dims,
-        shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
+        shape: fallbackShape,
+        featureName: featureName || "customFeature",
+        featureLabel: featureLabel || "Custom Feature",
       });
       generationMode = "template_fallback";
-      customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Fallback used because the AI-authored code still contained invalid FeatureScript type or bounds syntax.`;
+      featureName = featureName || "customFeature";
+      featureLabel = featureLabel || "Custom Feature";
+      customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validated template fallback used because text generation was unavailable: ${err.message}`;
     }
   }
 
@@ -2295,17 +2283,17 @@ export async function debugFeatureScript(code, errors, options = {}) {
   const learningContext = normalizeLearningContext(options.learningContext);
   console.log(`[AI] Debugging (${sanitizedInput.length} chars)`);
 
-  const raw = await chat([
-    { role: "system", content: withLearningContext(DEBUG_SYSTEM, learningContext) },
-    { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
-  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
-
   try {
+    const raw = await chat([
+      { role: "system", content: withLearningContext(DEBUG_SYSTEM, learningContext) },
+      { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
+    ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
     const parsed = JSON.parse(stripJson(raw));
     const fixed = sanitizeFeatureScript(parsed.fixed || sanitizedInput);
     return { fixed, explanation: parsed.explanation || "Fixed." };
-  } catch {
-    return { fixed: sanitizedInput, explanation: "Could not parse the AI response. The sanitized original code is returned unchanged." };
+  } catch (err) {
+    console.warn(`[AI] Debug fallback used: ${err.message}`);
+    return { fixed: sanitizedInput, explanation: `Debug assistant unavailable. Returned sanitized original code unchanged. Reason: ${err.message}` };
   }
 }
 
@@ -2448,7 +2436,17 @@ ${extraPrompt ? `User instructions: "${extraPrompt}"` : ""}
 Describe: part name and function, shape type, all visible dimensions in inches, holes, fillets, chamfers, material if visible, and how the images relate (e.g. drawing + 3D view). Plain text, no bullet points.`
   });
 
-  const descRaw = await chat([{ role: "user", content }], VISION_MODEL);
+  let descRaw = "";
+  try {
+    descRaw = await callGroqVisionLLM([{ role: "user", content }], VISION_MODEL);
+  } catch (err) {
+    console.warn(`[AI] Vision analysis fallback used: ${err.message}`);
+    if (!String(extraPrompt || "").trim()) {
+      descRaw = "Vision analysis unavailable. Falling back to a conservative placeholder interpretation of the uploaded reference images.";
+    } else {
+      descRaw = `Vision analysis unavailable. Using the user's text prompt only. Reason: ${err.message}`;
+    }
+  }
 
   // Cap the description so the downstream generateFeatureScript calls stay within TPM limits.
   // Vision descriptions can be very long; 600 chars is plenty for dimension extraction.
