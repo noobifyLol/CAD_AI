@@ -17,6 +17,10 @@ import Groq from "groq-sdk";
 const LOCAL_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
 const CLOUD_MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 9000);
+const LOCAL_LLM_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || (/deepseek-r1/i.test(LOCAL_MODEL) ? 120000 : Math.max(LLM_TIMEOUT_MS, 30000)));
+const CLOUD_LLM_TIMEOUT_MS = Number(process.env.OPENROUTER_TIMEOUT_MS || LLM_TIMEOUT_MS);
+const CLOUD_MAX_TOKENS = Number(process.env.OPENROUTER_MAX_TOKENS || 1024);
+const LOCAL_THINK_ENABLED = String(process.env.OLLAMA_THINK || "false").toLowerCase() === "true";
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
 
@@ -29,6 +33,7 @@ export function getModelConfig() {
     dimensions: DIM_MODEL,
     fallback: FALLBACK_MODEL,
     cloud: CLOUD_MODEL,
+    localThinking: LOCAL_THINK_ENABLED,
     vision: VISION_MODEL,
   };
 }
@@ -145,7 +150,8 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL) {
 // ------------------------------
 async function callLocalLLM(prompt, model = LOCAL_MODEL) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  const startedAt = Date.now();
+  const timeout = setTimeout(() => controller.abort(), LOCAL_LLM_TIMEOUT_MS);
   try {
     const response = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
@@ -154,19 +160,24 @@ async function callLocalLLM(prompt, model = LOCAL_MODEL) {
       body: JSON.stringify({
         model,
         prompt,
+        think: LOCAL_THINK_ENABLED,
         stream: false
       })
     });
 
     const data = await parseJsonResponse(response, "Local LLM");
     if (!data || !data.response) throw new Error("Invalid local LLM response");
+    console.log(`[Local LLM] model=${model} completed in ${Date.now() - startedAt}ms`);
     return data.response;
   } catch (err) {
+    if (err?.name === "AbortError") {
+      err.message = `Local Ollama model '${model}' timed out after ${LOCAL_LLM_TIMEOUT_MS}ms.`;
+    }
     const modelError = String(err?.details?.data?.error || "");
     if (err?.details?.status === 404 && /model .* not found/i.test(modelError)) {
       err.message = `Ollama model '${model}' is not installed. Run 'ollama pull ${model}' or set OLLAMA_MODEL to an installed model.`;
     }
-    logFetchError("Local LLM", err, { model });
+    logFetchError("Local LLM", err, { model, durationMs: Date.now() - startedAt, timeoutMs: LOCAL_LLM_TIMEOUT_MS });
     console.warn("Local LLM unavailable, falling back to OpenRouter");
     throw err;
   } finally {
@@ -183,7 +194,8 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
   if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  const startedAt = Date.now();
+  const timeout = setTimeout(() => controller.abort(), CLOUD_LLM_TIMEOUT_MS);
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -195,7 +207,7 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 4096
+        max_tokens: CLOUD_MAX_TOKENS
       })
     });
 
@@ -207,9 +219,13 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
       throw error;
     }
 
+    console.log(`[OpenRouter] model=${model} completed in ${Date.now() - startedAt}ms`);
     return content;
   } catch (err) {
-    logFetchError("OpenRouter", err, { model });
+    if (err?.name === "AbortError") {
+      err.message = `OpenRouter model '${model}' timed out after ${CLOUD_LLM_TIMEOUT_MS}ms.`;
+    }
+    logFetchError("OpenRouter", err, { model, durationMs: Date.now() - startedAt, timeoutMs: CLOUD_LLM_TIMEOUT_MS, maxTokens: CLOUD_MAX_TOKENS });
     throw err;
   } finally {
     clearTimeout(timeout);
@@ -1988,22 +2004,33 @@ export async function generateFeatureScript(prompt, options = {}) {
     code = buildFeatureScript(dims);
   } else {
     try {
+      console.log("[AI] Authoring custom FeatureScript...");
       const custom = await generateCustomFeatureScript(prompt, dims, learningContext, history);
       featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
       featureLabel = custom.featureLabel || featureLabel;
       customReasoning = custom.reasoning;
+      code = sanitizeFeatureScript(custom.code);
 
-      const repaired = await debugFeatureScript(custom.code, "", {
-        learningContext,
-      });
-      code = sanitizeFeatureScript(repaired.fixed);
+      let validationIssues = validateFeatureScript(code);
+      if (validationIssues.length || hasFatalFeatureScriptPatterns(code)) {
+        if (validationIssues.length) {
+          console.log(`[AI] Initial validator issues: ${validationIssues.map(issue => issue.message).slice(0, 3).join(" | ")}`);
+        }
+        console.log(`[AI] Running repair pass for ${validationIssues.length} validator issue(s)...`);
+        const repaired = await debugFeatureScript(code, "", {
+          learningContext,
+        });
+        code = sanitizeFeatureScript(repaired.fixed);
+        validationIssues = validateFeatureScript(code);
+      }
 
-      const validationIssues = validateFeatureScript(code);
       if (validationIssues.length) {
         const issueText = validationIssues
           .slice(0, 12)
           .map(issue => `Line ${issue.line || "?"}: ${issue.message}${issue.text ? ` [${issue.text}]` : ""}`)
           .join("\n");
+        console.log(`[AI] Remaining validator issues: ${validationIssues.map(issue => issue.message).slice(0, 3).join(" | ")}`);
+        console.log(`[AI] Running second repair pass for ${validationIssues.length} remaining validator issue(s)...`);
         const repairedAgain = await debugFeatureScript(code, issueText, {
           learningContext,
         });

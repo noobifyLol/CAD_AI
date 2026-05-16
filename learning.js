@@ -68,6 +68,38 @@ function dbErrorResult(table, action, error) {
   });
 }
 
+async function updateOrInsertByTitle(client, table, payload, warned, warnKeyPrefix = table) {
+  const lookup = await client
+    .from(table)
+    .select("id,created_at")
+    .eq("title", payload.title)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (lookup.error) {
+    if (!isMissingDbObject(lookup.error)) {
+      warnOnce(warned, `${warnKeyPrefix}_lookup`, `[DB] Failed to look up ${table} by title: ${lookup.error.message}`);
+    }
+    return { data: null, error: lookup.error };
+  }
+
+  const existing = Array.isArray(lookup.data) ? lookup.data[0] : null;
+  if (existing?.id) {
+    return client
+      .from(table)
+      .update(payload)
+      .eq("id", existing.id)
+      .select("id,created_at")
+      .single();
+  }
+
+  return client
+    .from(table)
+    .insert([payload])
+    .select("id,created_at")
+    .single();
+}
+
 function safeTextArray(value, limit = 8) {
   return (Array.isArray(value) ? value : [])
     .map(item => normalizeText(item))
@@ -1186,18 +1218,16 @@ export function createLearningService({
     const summary = normalizeText(gen.thinking || "").slice(0, 280) || `Confirmed FeatureScript for: ${title}`;
 
     // ── Grow cad_knowledge with the confirmed working code ─────────────────────
-    const { error: kErr } = await supabase
-      .from("cad_knowledge")
-      .upsert([{
-        title,
-        summary,
-        tags: [shapeType, "confirmed", "user_approved"].filter(Boolean),
-        keywords,
-        parameter_hints: [],
-        modeling_notes: [`User confirmed this generation works. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`],
-        example_prompt: normalizeText(gen.prompt || "").slice(0, 200),
-        feature_pattern: (gen.featurescript || "").slice(0, 1000),
-      }], { onConflict: "title" });
+    const { error: kErr } = await updateOrInsertByTitle(supabase, "cad_knowledge", {
+      title,
+      summary,
+      tags: [shapeType, "confirmed", "user_approved"].filter(Boolean),
+      keywords,
+      parameter_hints: [],
+      modeling_notes: [`User confirmed this generation works. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`],
+      example_prompt: normalizeText(gen.prompt || "").slice(0, 200),
+      feature_pattern: (gen.featurescript || "").slice(0, 1000),
+    }, warned, "promote_knowledge");
 
     if (kErr && !isMissingDbObject(kErr)) {
       warnOnce(warned, "promote_knowledge", `[DB] Could not promote to cad_knowledge: ${kErr.message}`);
@@ -1338,13 +1368,11 @@ export function createLearningService({
       });
     }
 
+    const candidateIds = rows.map(row => row.id).filter(Boolean);
     const deactivate = await supabase
       .from("cad_memory")
-      .upsert(rows.map(row => ({
-        id: row.id,
-        is_active: false,
-        updated_at: new Date().toISOString(),
-      })), { onConflict: "id" });
+      .update({ is_active: false })
+      .in("id", candidateIds);
 
     if (deactivate.error) {
       if (!isMissingDbObject(deactivate.error)) {
@@ -1584,11 +1612,7 @@ export function createLearningService({
       return dbErrorResult("cad_memory", "upsert", error);
     }
 
-    const knowledge = await supabase
-      .from("cad_knowledge")
-      .upsert([knowledgePayload], { onConflict: "title" })
-      .select("id,created_at")
-      .single();
+    const knowledge = await updateOrInsertByTitle(supabase, "cad_knowledge", knowledgePayload, warned, "save_learning_analysis_knowledge");
 
     if (knowledge.error && !isMissingDbObject(knowledge.error)) {
       warnOnce(warned, "save_learning_analysis_knowledge", `[DB] Failed to save AI learning knowledge: ${knowledge.error.message}`);
