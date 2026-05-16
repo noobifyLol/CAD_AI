@@ -87,6 +87,15 @@ app.get("/health", (_req, res) => {
     models: getModelConfig(),
   });
 });
+app.get("/_test_ollama", async (req, res) => {
+  try {
+    const r = await fetch(process.env.OLLAMA_URL + "/api/tags");
+    res.type("text").send(await r.text());
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
 
 app.post("/auth/signup", authRoutes.signup);
 app.post("/auth/login", authRoutes.login);

@@ -18,8 +18,11 @@ const LOCAL_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
 const CLOUD_MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 9000);
 const LOCAL_LLM_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || (/deepseek-r1/i.test(LOCAL_MODEL) ? 120000 : Math.max(LLM_TIMEOUT_MS, 30000)));
-const CLOUD_LLM_TIMEOUT_MS = Number(process.env.OPENROUTER_TIMEOUT_MS || LLM_TIMEOUT_MS);
-const CLOUD_MAX_TOKENS = Number(process.env.OPENROUTER_MAX_TOKENS || 1024);
+// DeepSeek R1 needs thinking time — default 180s for R1, 60s for other cloud models.
+const _isDeepSeekR1Cloud = /deepseek.*r1|deepseek-r1/i.test(process.env.OPENROUTER_MODEL || CLOUD_MODEL);
+const CLOUD_LLM_TIMEOUT_MS = Number(process.env.OPENROUTER_TIMEOUT_MS || (_isDeepSeekR1Cloud ? 180000 : 60000));
+// 1024 is far too small for FeatureScript — need 4000-8192 tokens for complex shapes.
+const CLOUD_MAX_TOKENS = Number(process.env.OPENROUTER_MAX_TOKENS || 8192);
 const LOCAL_THINK_ENABLED = String(process.env.OLLAMA_THINK || "false").toLowerCase() === "true";
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
@@ -107,6 +110,23 @@ function normalizeMessageContent(content) {
   return "";
 }
 
+/**
+ * DeepSeek R1 (and some other reasoning models) wrap their internal chain-of-thought
+ * inside <think>...</think> tags.  We log the thinking for debugging but strip it from
+ * the text returned to the rest of the application so FeatureScript parsing is clean.
+ */
+function stripThinkTags(text) {
+  const raw = String(text || "");
+  const thinkMatch = raw.match(/<think>([\s\S]*?)<\/think>/i);
+  if (thinkMatch) {
+    console.log(`[DeepSeek R1] reasoning block (${thinkMatch[1].length} chars) stripped from output.`);
+  }
+  return raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/^\s+/, "")
+    .trim();
+}
+
 async function callGroqVisionLLM(messages, model = VISION_MODEL) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("Missing GROQ_API_KEY");
@@ -189,43 +209,89 @@ async function callLocalLLM(prompt, model = LOCAL_MODEL) {
 // ------------------------------
 // 2. Cloud DeepSeek R1 via OpenRouter
 // ------------------------------
-async function callCloudLLM(prompt, model = CLOUD_MODEL) {
+/**
+ * callCloudLLM accepts either:
+ *   - an array of {role, content} message objects  (preferred — preserves system/user structure)
+ *   - a plain string prompt  (wrapped into a single user message)
+ *
+ * DeepSeek R1 on OpenRouter returns <think>…</think> reasoning blocks.
+ * These are stripped before returning so downstream parsers only see the answer.
+ */
+async function callCloudLLM(messagesOrPrompt, model = CLOUD_MODEL) {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
+  if (!apiKey) {
+    throw new Error(
+      "Missing OPENROUTER_API_KEY. " +
+      "Add this env var on Render under Environment → Add Environment Variable."
+    );
+  }
+
+  // Normalise input: string → single user message, array passed through as-is.
+  const messages = Array.isArray(messagesOrPrompt)
+    ? messagesOrPrompt
+    : [{ role: "user", content: String(messagesOrPrompt) }];
 
   const controller = new AbortController();
   const startedAt = Date.now();
   const timeout = setTimeout(() => controller.abort(), CLOUD_LLM_TIMEOUT_MS);
+
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        // OpenRouter requires these for routing and analytics — without HTTP-Referer
+        // some models may be blocked or incorrectly attributed.
+        "HTTP-Referer": process.env.APP_URL || "https://cad-ai-0o9s.onrender.com",
+        "X-Title": "CAD AI Generator",
       },
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: CLOUD_MAX_TOKENS
-      })
+        messages,
+        max_tokens: CLOUD_MAX_TOKENS,
+        // DeepSeek R1 recommended temperature; 0 gives deterministic but sometimes
+        // repetitive FeatureScript — 0.6 balances creativity vs. structure.
+        temperature: Number(process.env.OPENROUTER_TEMPERATURE || 0.6),
+      }),
     });
 
     const data = await parseJsonResponse(response, "OpenRouter");
-    const content = normalizeMessageContent(data?.choices?.[0]?.message?.content);
-    if (!content) {
-      const error = new Error("Invalid OpenRouter response");
-      error.details = { body: truncateForLog(data) };
-      throw error;
+
+    // Check for API-level errors returned with HTTP 200 (OpenRouter quirk)
+    if (data?.error) {
+      const err = new Error(`OpenRouter API error: ${data.error.message || JSON.stringify(data.error)}`);
+      err.details = { body: truncateForLog(data), model };
+      throw err;
     }
 
-    console.log(`[OpenRouter] model=${model} completed in ${Date.now() - startedAt}ms`);
+    const rawContent = normalizeMessageContent(data?.choices?.[0]?.message?.content);
+    if (!rawContent) {
+      const err = new Error("OpenRouter returned an empty response — model may have timed out or hit a content filter.");
+      err.details = { body: truncateForLog(data), model, maxTokens: CLOUD_MAX_TOKENS };
+      throw err;
+    }
+
+    // Strip DeepSeek R1 reasoning block so parsers only see FeatureScript / JSON.
+    const content = stripThinkTags(rawContent);
+
+    const durationMs = Date.now() - startedAt;
+    const usage = data?.usage ? `in=${data.usage.prompt_tokens} out=${data.usage.completion_tokens}` : "";
+    console.log(`[OpenRouter] model=${model} completed in ${durationMs}ms ${usage}`);
+
     return content;
   } catch (err) {
     if (err?.name === "AbortError") {
-      err.message = `OpenRouter model '${model}' timed out after ${CLOUD_LLM_TIMEOUT_MS}ms.`;
+      err.message = `OpenRouter model '${model}' timed out after ${CLOUD_LLM_TIMEOUT_MS}ms. ` +
+        `Set OPENROUTER_TIMEOUT_MS env var to increase the limit.`;
     }
-    logFetchError("OpenRouter", err, { model, durationMs: Date.now() - startedAt, timeoutMs: CLOUD_LLM_TIMEOUT_MS, maxTokens: CLOUD_MAX_TOKENS });
+    logFetchError("OpenRouter", err, {
+      model,
+      durationMs: Date.now() - startedAt,
+      timeoutMs: CLOUD_LLM_TIMEOUT_MS,
+      maxTokens: CLOUD_MAX_TOKENS,
+    });
     throw err;
   } finally {
     clearTimeout(timeout);
@@ -236,20 +302,72 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
 // ------------------------------
 // 3. Universal LLM router
 // ------------------------------
-export async function callLLM(prompt, model = LOCAL_MODEL) {
+/**
+ * callLLM accepts either a plain string (used by legacy callers) or a messages array.
+ * On Render (cloud), always uses OpenRouter.  Locally, tries Ollama first then falls back.
+ */
+export async function callLLM(promptOrMessages, model = LOCAL_MODEL) {
   const cloudModel = process.env.OPENROUTER_MODEL || CLOUD_MODEL;
   if (isLocalEnvironment()) {
+    // Local: Ollama first, OpenRouter fallback
+    const prompt = Array.isArray(promptOrMessages)
+      ? messagesToPrompt(promptOrMessages)
+      : promptOrMessages;
     try {
       return await callLocalLLM(prompt, model);
     } catch {
-      return await callCloudLLM(prompt, cloudModel);
+      return await callCloudLLM(promptOrMessages, cloudModel);
     }
   } else {
-    return await callCloudLLM(prompt, cloudModel);
+    // Cloud (Render): always use OpenRouter with full message array when available
+    return await callCloudLLM(promptOrMessages, cloudModel);
   }
 }
 
+/**
+ * chat() is the primary entry point for multi-turn conversations.
+ * On cloud it passes the messages array directly to OpenRouter (preserving system/user roles).
+ * On local it converts to a flat prompt for Ollama compatibility.
+ */
+async function chat(messages, model = TEXT_MODEL, fallbackModels = null, _options = {}) {
+  const cloudModel = process.env.OPENROUTER_MODEL || CLOUD_MODEL;
 
+  // Cloud path: pass messages directly — OpenRouter/DeepSeek R1 handles system messages natively.
+  if (!isLocalEnvironment()) {
+    try {
+      return await callCloudLLM(messages, cloudModel);
+    } catch (err) {
+      console.error("[chat] Cloud LLM failed:", err.message);
+      throw err;
+    }
+  }
+
+  // Local path: flatten messages for Ollama, try model list with fallbacks.
+  const fallbackList = Array.isArray(fallbackModels)
+    ? fallbackModels
+    : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
+  const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
+  const prompt = messagesToPrompt(messages);
+
+  let lastError = null;
+  for (const candidate of modelsToTry) {
+    try {
+      const text = await callLocalLLM(prompt, candidate);
+      if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate}`);
+      return text;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  // Local exhausted — try cloud as last resort
+  console.warn("[chat] All local models failed, falling back to OpenRouter cloud.");
+  try {
+    return await callCloudLLM(messages, cloudModel);
+  } catch (cloudErr) {
+    throw lastError || cloudErr;
+  }
+}
 
 export const CAD_MLLM_PLAN_PROMPT = `CAD-MLLM planning pass:
 1. Classify the requested shape and extract editable parameters.
@@ -2500,5 +2618,3 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
   const generated = await generateFeatureScript(combinedPrompt, options);
   return { description: descRaw, ...generated };
 }
-
-
