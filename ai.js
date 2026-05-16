@@ -47,6 +47,7 @@ async function callLocalLLM(prompt, model = LOCAL_MODEL) {
   }
 }
 
+
 // ------------------------------
 // 2. Cloud DeepSeek R1 via OpenRouter
 // ------------------------------
@@ -74,6 +75,7 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
 
   return data.choices[0].message.content;
 }
+
 
 // ------------------------------
 // 3. Universal LLM router
