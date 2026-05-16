@@ -90,31 +90,7 @@ export async function callLLM(prompt, model = LOCAL_MODEL) {
   }
 }
 
-// ------------------------------
-// 4. CAD Agent Functions
-// ------------------------------
-export async function generateFeatureScript(prompt) {
-  return await callLLM(prompt);
-}
 
-export async function debugFeatureScript(prompt) {
-  return await callLLM(prompt);
-}
-
-export async function analyzeImage(prompt) {
-  return await callLLM(prompt);
-}
-
-export async function analyzeLearningOutcome(prompt) {
-  return await callLLM(prompt);
-}
-
-// ------------------------------
-// 5. Health check
-// ------------------------------
-export async function testLocalLLM() {
-  return await callLLM("Say 'DeepSeek R1 is connected'");
-}
 
 export const CAD_MLLM_PLAN_PROMPT = `CAD-MLLM planning pass:
 1. Classify the requested shape and extract editable parameters.
@@ -2329,6 +2305,4 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
   return { description: descRaw, ...generated };
 }
 
-export async function testLocalLLM() {
-  return await callLLM("Say 'DeepSeek R1 is connected'");
-}
+
