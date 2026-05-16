@@ -26,6 +26,9 @@ const CLOUD_MAX_TOKENS = Number(process.env.OPENROUTER_MAX_TOKENS || 8192);
 const LOCAL_THINK_ENABLED = String(process.env.OLLAMA_THINK || "false").toLowerCase() === "true";
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
+const OLLAMA_URL = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
+const USE_OLLAMA_ON_RENDER = String(process.env.USE_OLLAMA_ON_RENDER || "false").toLowerCase() === "true";
+const HAS_REMOTE_OLLAMA = Boolean(process.env.OLLAMA_URL);
 
 export function getModelConfig() {
   return {
@@ -37,6 +40,9 @@ export function getModelConfig() {
     fallback: FALLBACK_MODEL,
     cloud: CLOUD_MODEL,
     localThinking: LOCAL_THINK_ENABLED,
+    ollamaUrl: OLLAMA_URL,
+    useOllamaOnRender: USE_OLLAMA_ON_RENDER,
+    hasRemoteOllama: HAS_REMOTE_OLLAMA,
     vision: VISION_MODEL,
   };
 }
@@ -44,8 +50,9 @@ export function getModelConfig() {
 // ------------------------------
 // Environment detection
 // ------------------------------
-function isLocalEnvironment() {
-  return process.env.RENDER === undefined; // Render sets env vars automatically
+function shouldPreferOllama() {
+  if (!process.env.RENDER) return true;
+  return USE_OLLAMA_ON_RENDER && HAS_REMOTE_OLLAMA;
 }
 
 function truncateForLog(text, max = 800) {
@@ -172,17 +179,20 @@ async function callLocalLLM(prompt, model = LOCAL_MODEL) {
   const controller = new AbortController();
   const startedAt = Date.now();
   const timeout = setTimeout(() => controller.abort(), LOCAL_LLM_TIMEOUT_MS);
+  const requestBody = {
+    model,
+    prompt,
+    think: LOCAL_THINK_ENABLED,
+    stream: false
+  };
   try {
-    const response = await fetch("http://localhost:11434/api/generate", {
+    console.log(`[Local LLM] url=${OLLAMA_URL}/api/generate timeoutMs=${LOCAL_LLM_TIMEOUT_MS}`);
+    console.log(`[Local LLM] outgoing=${truncateForLog(requestBody, 800)}`);
+    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        prompt,
-        think: LOCAL_THINK_ENABLED,
-        stream: false
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const data = await parseJsonResponse(response, "Local LLM");
@@ -357,11 +367,11 @@ async function callCloudLLM(messagesOrPrompt, model = process.env.OPENROUTER_MOD
  */
 export async function callLLM(promptOrMessages, model = process.env.OLLAMA_MODEL || LOCAL_MODEL) {
   const cloudModel = process.env.OPENROUTER_MODEL || CLOUD_MODEL;
-  const runningLocal = !process.env.RENDER;
+  const preferOllama = shouldPreferOllama();
 
-  if (runningLocal) {
+  if (preferOllama) {
     try {
-      console.log("[LLM Router] running local; trying Ollama");
+      console.log(`[LLM Router] trying Ollama first render=${Boolean(process.env.RENDER)} ollamaUrl=${OLLAMA_URL}`);
       const prompt = Array.isArray(promptOrMessages) ? messagesToPrompt(promptOrMessages) : promptOrMessages;
       return await callLocalLLM(prompt, model);
     } catch (localErr) {
@@ -369,7 +379,7 @@ export async function callLLM(promptOrMessages, model = process.env.OLLAMA_MODEL
       return await callCloudLLM(promptOrMessages, cloudModel);
     }
   } else {
-    console.log("[LLM Router] running in cloud; using OpenRouter");
+    console.log(`[LLM Router] using OpenRouter render=${Boolean(process.env.RENDER)} useOllamaOnRender=${USE_OLLAMA_ON_RENDER} hasRemoteOllama=${HAS_REMOTE_OLLAMA}`);
     return await callCloudLLM(promptOrMessages, cloudModel);
   }
 }

@@ -265,6 +265,7 @@ function sendToDebug() {
 async function generate() {
   const prompt = document.getElementById('gen-prompt').value.trim();
   if (!prompt) return;
+  const body = { prompt };
 
   const btn = document.getElementById('gen-btn');
   btn.innerHTML = '<div class="spinner"></div><span>Generating</span>';
@@ -273,10 +274,11 @@ async function generate() {
   setThinking('gen', '');
 
   try {
+    console.log('[generate] outgoing body', body);
     const r = await fetch('/generate', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify(body)
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Generation failed');

@@ -17,7 +17,13 @@ const app = express();
 const PORT = Number(process.env.PORT || 10000);
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_KEY ||
+  process.env.SUPABASE_ANON_KEY;
+const supabaseKeyMode = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
+  ? "service_role"
+  : (process.env.SUPABASE_ANON_KEY ? "anon" : "missing");
 const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -39,6 +45,11 @@ app.use(express.static("public"));
 
 if (!supabase) {
   console.warn("[DB] Supabase is disabled. Set SUPABASE_URL and SUPABASE_ANON_KEY to enable adaptive memory.");
+}
+
+function truncateForLog(text, max = 2000) {
+  const normalized = typeof text === "string" ? text : JSON.stringify(text);
+  return normalized.length > max ? `${normalized.slice(0, max)}...<truncated>` : normalized;
 }
 
 function normalizeDbLog(log) {
@@ -84,12 +95,15 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     supabaseEnabled: Boolean(supabase),
+    supabaseKeyMode,
     models: getModelConfig(),
   });
 });
 app.get("/_test_ollama", async (req, res) => {
   try {
-    const r = await fetch(process.env.OLLAMA_URL + "/api/tags");
+    const baseUrl = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
+    console.log(`[/_test_ollama] testing ${baseUrl}/api/tags`);
+    const r = await fetch(`${baseUrl}/api/tags`);
     res.type("text").send(await r.text());
   } catch (err) {
     res.status(500).send(err.message);
@@ -155,6 +169,7 @@ app.post("/generate", async (req, res) => {
   if (!prompt) return res.status(400).json({ error: "No prompt provided." });
 
   try {
+    console.log(`[/generate] body=${truncateForLog(req.body, 2000)}`);
     const learningContext = await learning.fetchLearningContext(prompt, history);
     const result = await generateFeatureScript(prompt, { learningContext, history });
     const generationLog = await learning.logGeneration(prompt, result, {
@@ -162,6 +177,12 @@ app.post("/generate", async (req, res) => {
       userId: req.user?.id || null,
     });
     const diagnostics = await learning.diagnostics();
+    console.log(`[/generate] resultMeta=${truncateForLog({
+      featureName: result.featureName,
+      featureLabel: result.featureLabel,
+      generationMode: result.generationMode,
+      database: generationLog,
+    }, 1500)}`);
     res.json(generationResponse(result, generationLog, learningContext, diagnostics));
   } catch (err) {
     console.error("[/generate]", err.message);
@@ -176,6 +197,7 @@ app.post("/debug", async (req, res) => {
   if (!code) return res.status(400).json({ error: "No FeatureScript provided." });
 
   try {
+    console.log(`[/debug] body=${truncateForLog({ ...req.body, code: code.slice(0, 1200) }, 2000)}`);
     const learningContext = await learning.fetchLearningContext(`${errors}\n${code.slice(0, 400)}`);
     const { fixed, explanation } = await debugFeatureScript(code, errors, { learningContext });
 
@@ -303,6 +325,7 @@ app.post("/learning/analyze", async (req, res) => {
   }
 
   try {
+    console.log(`[/learning/analyze] body=${truncateForLog(req.body, 2000)}`);
     let feedbackResult = null;
     if (generationId) {
       feedbackResult = await learning.recordFeedback({
@@ -350,4 +373,6 @@ app.post("/learning/analyze", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`[Server] Listening on http://localhost:${PORT}`);
+  console.log(`[Server] Render=${Boolean(process.env.RENDER)} SupabaseKeyMode=${supabaseKeyMode}`);
+  console.log(`[Server] OLLAMA_URL=${process.env.OLLAMA_URL || "http://localhost:11434"} USE_OLLAMA_ON_RENDER=${process.env.USE_OLLAMA_ON_RENDER || "false"}`);
 });
