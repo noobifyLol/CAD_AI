@@ -15,6 +15,7 @@ import fetch from "node-fetch";
 // ------------------------------
 const LOCAL_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
 const CLOUD_MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1";
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 9000);
 
 // ------------------------------
 // Environment detection
@@ -23,14 +24,63 @@ function isLocalEnvironment() {
   return process.env.RENDER === undefined; // Render sets env vars automatically
 }
 
+function truncateForLog(text, max = 800) {
+  const normalized = typeof text === "string" ? text : JSON.stringify(text);
+  return normalized.length > max ? `${normalized.slice(0, max)}...<truncated>` : normalized;
+}
+
+async function parseJsonResponse(response, label) {
+  const rawText = await response.text();
+  let data;
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch (err) {
+    const error = new Error(`${label} returned invalid JSON (status ${response.status})`);
+    error.cause = err;
+    error.details = {
+      status: response.status,
+      statusText: response.statusText,
+      body: truncateForLog(rawText),
+    };
+    throw error;
+  }
+
+  if (!response.ok) {
+    const error = new Error(`${label} request failed with status ${response.status}`);
+    error.details = {
+      status: response.status,
+      statusText: response.statusText,
+      body: truncateForLog(rawText),
+      data,
+    };
+    throw error;
+  }
+
+  return data;
+}
+
+function logFetchError(label, err, extra = {}) {
+  console.error(`[${label}] request failed`, {
+    message: err?.message || String(err),
+    name: err?.name,
+    cause: err?.cause?.message,
+    stack: err?.stack,
+    details: err?.details || null,
+    ...extra,
+  });
+}
+
 // ------------------------------
 // 1. Local DeepSeek R1 via Ollama
 // ------------------------------
 async function callLocalLLM(prompt, model = LOCAL_MODEL) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
     const response = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({
         model,
         prompt,
@@ -38,12 +88,15 @@ async function callLocalLLM(prompt, model = LOCAL_MODEL) {
       })
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse(response, "Local LLM");
     if (!data || !data.response) throw new Error("Invalid local LLM response");
     return data.response;
   } catch (err) {
+    logFetchError("Local LLM", err, { model });
     console.warn("Local LLM unavailable, falling back to OpenRouter");
     throw err;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -55,25 +108,37 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 4096
-    })
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 4096
+      })
+    });
 
-  const data = await response.json();
-  if (!data.choices?.[0]?.message?.content) {
-    throw new Error("Invalid OpenRouter response");
+    const data = await parseJsonResponse(response, "OpenRouter");
+    if (!data.choices?.[0]?.message?.content) {
+      const error = new Error("Invalid OpenRouter response");
+      error.details = { body: truncateForLog(data) };
+      throw error;
+    }
+
+    return data.choices[0].message.content;
+  } catch (err) {
+    logFetchError("OpenRouter", err, { model });
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return data.choices[0].message.content;
 }
 
 
@@ -81,14 +146,15 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
 // 3. Universal LLM router
 // ------------------------------
 export async function callLLM(prompt, model = LOCAL_MODEL) {
+  const cloudModel = process.env.OPENROUTER_MODEL || CLOUD_MODEL;
   if (isLocalEnvironment()) {
     try {
       return await callLocalLLM(prompt, model);
     } catch {
-      return await callCloudLLM(prompt, CLOUD_MODEL);
+      return await callCloudLLM(prompt, cloudModel);
     }
   } else {
-    return await callCloudLLM(prompt, CLOUD_MODEL);
+    return await callCloudLLM(prompt, cloudModel);
   }
 }
 
