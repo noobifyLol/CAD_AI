@@ -1,16 +1,30 @@
-import Groq from "groq-sdk";
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "missing-groq-api-key" });
-const TEXT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
-const FAST_MODEL = process.env.GROQ_FAST_MODEL || "openai/gpt-oss-20b";
-const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || TEXT_MODEL;
-const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
-const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "llama-3.3-70b-versatile";
-const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
-const MAX_COMPLETION_TOKENS = Math.max(512, Number(process.env.GROQ_MAX_COMPLETION_TOKENS) || 4096);
+const TEXT_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
+const FAST_MODEL = process.env.OLLAMA_FAST_MODEL || TEXT_MODEL;
+const COMPLEX_MODEL = process.env.OLLAMA_COMPLEX_MODEL || TEXT_MODEL;
+const DIM_MODEL = process.env.OLLAMA_DIM_MODEL || COMPLEX_MODEL;
+const FALLBACK_MODEL = process.env.OLLAMA_FALLBACK_MODEL || TEXT_MODEL;
+const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || TEXT_MODEL;
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // Templates stay available as a safety net, but AI-first generation is now the default path.
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
+
+export async function callLLM(prompt, model = "deepseek-r1") {
+  const response = await fetch("http://localhost:11434/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      prompt,
+      stream: false
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `Ollama generate failed with status ${response.status}`);
+  }
+  return data.response;
+}
 
 export const CAD_MLLM_PLAN_PROMPT = `CAD-MLLM planning pass:
 1. Classify the requested shape and extract editable parameters.
@@ -28,8 +42,6 @@ function stripJson(text) {
   return (m ? m[1] : (text || "{}")).trim();
 }
 
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 function promptRequestsAxialHole(prompt = "") {
   return /\b(bore|through hole|center hole|centre hole|axial hole|hole down the center|hole down the centre|hollow|inner diameter|\bid\b|hole on (the )?top|hole in the top|top hole)\b/i.test(prompt);
 }
@@ -38,44 +50,42 @@ function promptNeedsHighFidelityModel(prompt = "") {
   return /\b(organic|realistic|carrot|freeform|smooth|curved|spline|loft|sweep|sculpt|detailed|gear|involute|helical|complex)\b/i.test(prompt);
 }
 
-async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
+function contentPartToText(part) {
+  if (typeof part === "string") return part;
+  if (!part || typeof part !== "object") return String(part ?? "");
+  if (part.type === "text") return part.text || "";
+  if (part.type === "image_url") return `[image: ${part.image_url?.url ? "attached" : "missing"}]`;
+  return JSON.stringify(part);
+}
+
+function messagesToPrompt(messages = []) {
+  return messages.map(message => {
+    const role = String(message?.role || "user").toUpperCase();
+    const content = Array.isArray(message?.content)
+      ? message.content.map(contentPartToText).join("\n")
+      : contentPartToText(message?.content);
+    return `${role}:\n${content}`;
+  }).join("\n\n");
+}
+
+async function chat(messages, model = TEXT_MODEL, fallbackModels = null, _options = {}) {
   const fallbackList = Array.isArray(fallbackModels)
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
   const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
-  const maxCompletionTokens = Number.isFinite(Number(options.maxCompletionTokens))
-    ? Math.max(256, Math.round(Number(options.maxCompletionTokens)))
-    : MAX_COMPLETION_TOKENS;
-  const temperature = Number.isFinite(Number(options.temperature))
-    ? Number(options.temperature)
-    : 0.0;
+  const prompt = messagesToPrompt(messages);
 
-  for (const m of modelsToTry) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const res = await groq.chat.completions.create({
-          model: m,
-          temperature,
-          max_completion_tokens: maxCompletionTokens,
-          messages,
-        });
-        const text = res?.choices?.[0]?.message?.content ?? "";
-        if (m !== model) console.warn(`[AI] Used fallback model ${m}`);
-        return text;
-      } catch (err) {
-        const is429 = err?.status === 429 || String(err?.message || "").includes("rate_limit");
-        if (is429 && attempt < 2) {
-          const wait = 8000 * (attempt + 1);   // 8 s, then 16 s
-          console.warn(`[AI] TPM rate-limit on ${m}, retrying in ${wait / 1000}s…`);
-          await sleep(wait);
-          continue;
-        }
-        if (is429 && m === TEXT_MODEL) break;  // try fallback model next
-        throw err;
-      }
+  let lastError = null;
+  for (const candidate of modelsToTry) {
+    try {
+      const text = await callLLM(prompt, candidate);
+      if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate}`);
+      return text;
+    } catch (err) {
+      lastError = err;
     }
   }
-  throw new Error("All Groq models are rate-limited. Please wait a moment and try again.");
+  throw lastError || new Error("All local Ollama model calls failed.");
 }
 
 // ─── FeatureScript building blocks ───────────────────────────────────────────
@@ -1747,7 +1757,6 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
 // ─── Public: Generate ─────────────────────────────────────────────────────────
 
 export async function generateFeatureScript(prompt, options = {}) {
-  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   console.log(`[AI] Generating: "${prompt}"`);
 
   const learningContext = normalizeLearningContext(options.learningContext);
@@ -2062,7 +2071,6 @@ function hasFatalFeatureScriptPatterns(code) {
 }
 
 export async function debugFeatureScript(code, errors, options = {}) {
-  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   const sanitizedInput = sanitizeFeatureScript(code);
   const learningContext = normalizeLearningContext(options.learningContext);
   console.log(`[AI] Debugging (${sanitizedInput.length} chars)`);
@@ -2159,8 +2167,6 @@ function compactLearningSnapshot(snapshot = {}) {
 }
 
 export async function analyzeLearningOutcome({ prompt, signal, rating, feedback, errorMessages, snapshot } = {}) {
-  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
-
   const userPayload = {
     prompt,
     signal,
@@ -2208,7 +2214,6 @@ export async function analyzeImage(imageBase64, mimeType, extraPrompt, options =
 }
 
 export async function analyzeImages(images, extraPrompt, options = {}) {
-  if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not set in .env");
   console.log(`[AI] Analyzing ${images.length} image(s)`);
 
   const content = [];
@@ -2232,4 +2237,8 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
 
   const generated = await generateFeatureScript(combinedPrompt, options);
   return { description: descRaw, ...generated };
+}
+
+export async function testLocalLLM() {
+  return await callLLM("Say 'DeepSeek R1 is connected'");
 }
