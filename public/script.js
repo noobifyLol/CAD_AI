@@ -251,7 +251,7 @@ async function generate() {
   const btn = document.getElementById('gen-btn');
   btn.innerHTML = '<div class="spinner"></div><span>Generating</span>';
   btn.disabled = true;
-  setStatus('gen-status', 'Calling Groq AI...', 'loading');
+  setStatus('gen-status', 'Calling CAD AI...', 'loading');
   setThinking('gen', '');
 
   try {
