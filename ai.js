@@ -1,4 +1,4 @@
-const TEXT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+const TEXT_MODEL = process.env.GROQ_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const FAST_MODEL = process.env.GROQ_FAST_MODEL || TEXT_MODEL;
 const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || TEXT_MODEL;
 const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
@@ -6,7 +6,8 @@ const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || TEXT_MODEL;
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // Templates stay available as a safety net, but AI-first generation is now the default path.
-const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
+const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "false").toLowerCase() === "true";
+const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
 
 import Groq from "groq-sdk";
 
@@ -27,6 +28,8 @@ export function getModelConfig() {
     complex: COMPLEX_MODEL,
     dimensions: DIM_MODEL,
     fallback: FALLBACK_MODEL,
+    validatedTemplates: USE_VALIDATED_TEMPLATES,
+    allowTemplateFallback: ALLOW_TEMPLATE_FALLBACK,
     vision: VISION_MODEL,
   };
 }
@@ -1981,28 +1984,39 @@ export async function generateFeatureScript(prompt, options = {}) {
         customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validator triggered a second repair pass for ${validationIssues.length} issue(s).`;
       }
 
-      if (hasFatalFeatureScriptPatterns(code) && canUseTemplateFallback(dims)) {
-        console.warn("[AI] Fatal FeatureScript patterns remained after repair; falling back to validated template.");
-        code = buildFeatureScript({
-          ...dims,
-          shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
-        });
-        generationMode = "template_fallback";
-        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Fallback used because the AI-authored code still contained invalid FeatureScript type or bounds syntax.`;
+      if (hasFatalFeatureScriptPatterns(code)) {
+        if (ALLOW_TEMPLATE_FALLBACK && canUseTemplateFallback(dims)) {
+          console.warn("[AI] Fatal FeatureScript patterns remained after repair; falling back to validated template.");
+          code = buildFeatureScript({
+            ...dims,
+            shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
+          });
+          generationMode = "template_fallback";
+          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Fallback used because the AI-authored code still contained invalid FeatureScript type or bounds syntax.`;
+        } else {
+          console.warn("[AI] Fatal FeatureScript patterns remained after repair; preserving Groq-authored output because template fallback is disabled.");
+          generationMode = "custom_unverified";
+          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Groq-authored output was preserved even though validator warnings remain, because template fallback is disabled.`;
+        }
       }
     } catch (err) {
-      console.warn(`[AI] Text generation fallback used: ${err.message}`);
-      const fallbackShape = canUseTemplateFallback(dims) ? dims.shape : "BOX";
-      code = buildFeatureScript({
-        ...dims,
-        shape: fallbackShape,
-        featureName: featureName || "customFeature",
-        featureLabel: featureLabel || "Custom Feature",
-      });
-      generationMode = "template_fallback";
-      featureName = featureName || "customFeature";
-      featureLabel = featureLabel || "Custom Feature";
-      customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validated template fallback used because text generation was unavailable: ${err.message}`;
+      if (ALLOW_TEMPLATE_FALLBACK) {
+        console.warn(`[AI] Text generation fallback used: ${err.message}`);
+        const fallbackShape = canUseTemplateFallback(dims) ? dims.shape : "BOX";
+        code = buildFeatureScript({
+          ...dims,
+          shape: fallbackShape,
+          featureName: featureName || "customFeature",
+          featureLabel: featureLabel || "Custom Feature",
+        });
+        generationMode = "template_fallback";
+        featureName = featureName || "customFeature";
+        featureLabel = featureLabel || "Custom Feature";
+        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validated template fallback used because text generation was unavailable: ${err.message}`;
+      } else {
+        console.error("[AI] Groq generation failed and template fallback is disabled.", err?.message || String(err));
+        throw err;
+      }
     }
   }
 

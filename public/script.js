@@ -23,7 +23,7 @@ async function loadRuntimeConfig() {
     if (!response.ok) throw new Error(data.error || 'Health check failed');
 
     const provider = data?.models?.provider || 'Groq';
-    const textModel = data?.models?.text || 'openai/gpt-oss-120b';
+    const textModel = data?.models?.text || 'meta-llama/llama-4-scout-17b-16e-instruct';
     const vision = data?.models?.vision ? ' + Groq Vision' : '';
     label.textContent = `${provider} ${textModel}${vision}`;
   } catch {

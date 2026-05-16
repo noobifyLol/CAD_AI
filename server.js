@@ -363,5 +363,5 @@ app.post("/learning/analyze", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`[Server] Listening on http://localhost:${PORT}`);
   console.log(`[Server] Render=${Boolean(process.env.RENDER)} SupabaseKeyMode=${supabaseKeyMode}`);
-  console.log(`[Server] GroqModel=${process.env.GROQ_MODEL || "openai/gpt-oss-120b"} VisionModel=${process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"}`);
+  console.log(`[Server] GroqModel=${process.env.GROQ_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"} VisionModel=${process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"}`);
 });
