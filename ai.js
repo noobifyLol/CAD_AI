@@ -8,22 +8,112 @@ const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first"
 // Templates stay available as a safety net, but AI-first generation is now the default path.
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
 
-export async function callLLM(prompt, model = "deepseek-r1") {
-  const response = await fetch("http://localhost:11434/api/generate", {
+import fetch from "node-fetch";
+
+// ------------------------------
+// Model configuration
+// ------------------------------
+const LOCAL_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
+const CLOUD_MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1";
+
+// ------------------------------
+// Environment detection
+// ------------------------------
+function isLocalEnvironment() {
+  return process.env.RENDER === undefined; // Render sets env vars automatically
+}
+
+// ------------------------------
+// 1. Local DeepSeek R1 via Ollama
+// ------------------------------
+async function callLocalLLM(prompt, model = LOCAL_MODEL) {
+  try {
+    const response = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        prompt,
+        stream: false
+      })
+    });
+
+    const data = await response.json();
+    if (!data || !data.response) throw new Error("Invalid local LLM response");
+    return data.response;
+  } catch (err) {
+    console.warn("Local LLM unavailable, falling back to OpenRouter");
+    throw err;
+  }
+}
+
+// ------------------------------
+// 2. Cloud DeepSeek R1 via OpenRouter
+// ------------------------------
+async function callCloudLLM(prompt, model = CLOUD_MODEL) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify({
       model,
-      prompt,
-      stream: false
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 4096
     })
   });
 
   const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || `Ollama generate failed with status ${response.status}`);
+  if (!data.choices?.[0]?.message?.content) {
+    throw new Error("Invalid OpenRouter response");
   }
-  return data.response;
+
+  return data.choices[0].message.content;
+}
+
+// ------------------------------
+// 3. Universal LLM router
+// ------------------------------
+export async function callLLM(prompt, model = LOCAL_MODEL) {
+  if (isLocalEnvironment()) {
+    try {
+      return await callLocalLLM(prompt, model);
+    } catch {
+      return await callCloudLLM(prompt, CLOUD_MODEL);
+    }
+  } else {
+    return await callCloudLLM(prompt, CLOUD_MODEL);
+  }
+}
+
+// ------------------------------
+// 4. CAD Agent Functions
+// ------------------------------
+export async function generateFeatureScript(prompt) {
+  return await callLLM(prompt);
+}
+
+export async function debugFeatureScript(prompt) {
+  return await callLLM(prompt);
+}
+
+export async function analyzeImage(prompt) {
+  return await callLLM(prompt);
+}
+
+export async function analyzeLearningOutcome(prompt) {
+  return await callLLM(prompt);
+}
+
+// ------------------------------
+// 5. Health check
+// ------------------------------
+export async function testLocalLLM() {
+  return await callLLM("Say 'DeepSeek R1 is connected'");
 }
 
 export const CAD_MLLM_PLAN_PROMPT = `CAD-MLLM planning pass:
