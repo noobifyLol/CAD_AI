@@ -315,6 +315,55 @@ function siblingPath(pathOrUrl, fileName) {
   return filePath ? join(dirname(filePath), fileName) : null;
 }
 
+function inferShapeFromExampleName(name) {
+  const hint = inferShapeFromPrompt(name);
+  if (hint) return hint;
+  const text = normalizeText(name).toLowerCase();
+  if (/\b(shell|enclosure|housing)\b/.test(text)) return "BOX";
+  if (/\b(loft|sweep|carrot|organic|flange|airfoil)\b/.test(text)) return "CUSTOM";
+  return "CUSTOM";
+}
+
+function loadFeatureScriptExamples(dirPathOrUrl) {
+  const dirPath = toFsPath(dirPathOrUrl);
+  if (!dirPath || !existsSync(dirPath) || !statSync(dirPath).isDirectory()) return [];
+
+  return readdirSync(dirPath, { withFileTypes: true })
+    .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith(".fs"))
+    .map(entry => {
+      const filePath = join(dirPath, entry.name);
+      const raw = readFileSync(filePath, "utf8").replace(/\r/g, "").trim();
+      const stem = basename(entry.name, ".fs").replace(/[_-]/g, " ");
+      const examplePrompt = normalizeText(stem);
+      const shapeType = inferShapeFromExampleName(stem);
+      return {
+        title: `FeatureScript Example ${stem}`,
+        summary: `Compile-safe FeatureScript example loaded from ${entry.name}.`,
+        tags: ["featurescript", "example", ...extractKeywords(stem, 6)],
+        keywords: extractKeywords(`${stem} ${raw.slice(0, 600)}`, 16),
+        parameterHints: ["See precondition parameters in feature_pattern."],
+        modelingNotes: [
+          "Use as a local retrieval snippet.",
+          "Keep FeatureScript 2931 header and geometry import.",
+          "Preserve skSolve before downstream operations.",
+        ],
+        featurePattern: raw,
+        failureModes: [],
+        validationRules: [
+          "Use exactly one exported feature.",
+          "Call skSolve before downstream operations.",
+          "Keep qSketchRegion queries tied to sketch ids.",
+        ],
+        examplePrompt,
+        shapeType,
+        memoryType: "fs_example",
+        qualityScore: 0.9,
+        sourceTable: "cad_memory",
+        memoryOnly: true,
+      };
+    });
+}
+
 function loadLocalAdaptiveStateFile() {
   const statePath = fileURLToPath(new URL("./data/adaptive_state.json", import.meta.url));
   if (!existsSync(statePath)) return null;
@@ -600,6 +649,7 @@ export function createLearningService({
       sourceTable: "cad_memory",
       memoryOnly: true,
     }),
+    ...loadFeatureScriptExamples(siblingPath(cadKnowledgeCsvPath, "fs_examples")),
   ]);
   const featureScriptDocIndex = buildFeatureScriptDocIndex(fsDocsPath);
   let adaptiveStateCache = null;

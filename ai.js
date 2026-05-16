@@ -1029,6 +1029,12 @@ function summarizeFeatureScript(code, maxLines = 12) {
       .join(" ")
   );
 }
+
+function compactFeaturePattern(code, maxChars = 1600) {
+  const normalized = String(code || "").replace(/\r/g, "").trim();
+  if (!normalized) return "";
+  return normalized.length > maxChars ? `${normalized.slice(0, maxChars)}\n...` : normalized;
+}
 // Thinking 
 function buildLearningContextText(learningContext = {}) {
   const lines = [];
@@ -1037,6 +1043,15 @@ function buildLearningContextText(learningContext = {}) {
   const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
   const featureScriptDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
   const promptKeywords = extractPromptKeywords(learningContext.prompt || "");
+  const compileSafePatterns = knowledge
+    .filter(entry => {
+      const memoryType = normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase();
+      const featurePattern = String(entry.feature_pattern || entry.featurePattern || "");
+      return memoryType.includes("fs_example")
+        || /^FeatureScript Example\b/i.test(String(entry.title || ""))
+        || featurePattern.startsWith("FeatureScript 2931;");
+    })
+    .slice(0, 2);
 
   if (promptKeywords.length) {
     lines.push(`User prompt keywords: ${promptKeywords.join(", ")}`);
@@ -1087,6 +1102,16 @@ function buildLearningContextText(learningContext = {}) {
     });
   }
 
+  if (compileSafePatterns.length) {
+    lines.push("Compile-safe FeatureScript examples to imitate structurally:");
+    compileSafePatterns.forEach((entry, index) => {
+      const title = normalizeText(entry.title || `Pattern ${index + 1}`);
+      const featurePattern = compactFeaturePattern(entry.feature_pattern || entry.featurePattern || "");
+      lines.push(`${index + 1}. ${title}`);
+      if (featurePattern) lines.push(featurePattern);
+    });
+  }
+
   if (knowledge.length) {
     lines.push("CAD modeling knowledge to apply:");
     knowledge.slice(0, 6).forEach((entry, index) => {
@@ -1099,7 +1124,7 @@ function buildLearningContextText(learningContext = {}) {
       const validationRules = Array.isArray(entry.validation_rules || entry.validationRules) ? (entry.validation_rules || entry.validationRules) : [];
       const memoryType = normalizeText(entry.memory_type || entry.memoryType || "");
       const quality = Number.isFinite(Number(entry.quality_score)) ? Number(entry.quality_score).toFixed(2) : "";
-      const featurePattern = normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 300);
+      const featurePattern = normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 420);
 
       lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}${memoryType || quality ? ` (${[memoryType, quality && `q=${quality}`].filter(Boolean).join(", ")})` : ""}`);
       if (keywords.length) lines.push(`   keywords=${keywords.slice(0, 6).join(", ")}`);
@@ -1337,7 +1362,8 @@ function sanitizeFeatureScript(code) {
       const normalizedBefore = before.replace(/,\s*$/, "").trim();
       const normalizedAfter = after.replace(/^\s*,\s*/, "").trim();
       return `function(${[normalizedBefore, normalizedAfter].filter(Boolean).join(", ")})`;
-    });
+    })
+    .replace(/\bvar\s+([A-Za-z_]\w*)\s*=\s*function\s*\(/g, 'const $1 = function(');
 
   // ── Structural fix: named typed functions inside feature body → const lambdas ──
   // Matches: function name(args) returns type { ... }
@@ -1417,6 +1443,33 @@ function sanitizeFeatureScript(code) {
 
   if (!cleaned.startsWith("FeatureScript") && /annotation\s*\{\s*"Feature Type Name"\s*:/.test(cleaned)) {
     cleaned = `FeatureScript 2931;\nimport(path : "onshape/std/geometry.fs", version : "2931.0");\n\n${cleaned}`;
+  }
+
+  const defineFeatureIndex = cleaned.indexOf("defineFeature(");
+  if (defineFeatureIndex !== -1) {
+    let parenDepth = 0;
+    let seenOpen = false;
+    let endIndex = -1;
+    for (let i = defineFeatureIndex; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      if (ch === "(") {
+        parenDepth++;
+        seenOpen = true;
+      } else if (ch === ")") {
+        parenDepth--;
+        if (seenOpen && parenDepth === 0) {
+          endIndex = i;
+          break;
+        }
+      }
+    }
+    if (endIndex !== -1) {
+      let trimAt = endIndex + 1;
+      while (trimAt < cleaned.length && /\s/.test(cleaned[trimAt])) trimAt++;
+      if (cleaned[trimAt] === ";") trimAt++;
+      const trailing = cleaned.slice(trimAt).trim();
+      if (trailing) cleaned = cleaned.slice(0, trimAt).trim();
+    }
   }
 
   return cleaned.trim();
@@ -1746,8 +1799,11 @@ Every file must follow this exact structure:
    Modify the existing FeatureScript to reflect the new request while keeping valid parameters.
 2. SCOPE: The feature body is a LAMBDA. Named top-level functions (function foo(...) {}) are ILLEGAL inside.
    USE: const myFunc = function(x) { ... }; inside the body.
+   NEVER use var myFunc = function(...) { ... }; for helper lambdas.
 3. UNITS: definition.param is already a Length if declared with isLength. 
    NEVER write: definition.param * inch. This doubles units and fails.
+4. The file must end immediately after the exported feature closes with });.
+   NEVER append template libraries, helper examples, or backup code after the main feature.
 
 ═══ SKETCH API ═══
 - skLineSegment(sk, "line1", { "start": vector(0,0) * inch, "end": vector(1,0) * inch });
@@ -1769,6 +1825,17 @@ Every file must follow this exact structure:
 7. Keeping helper variables that are computed but never used — remove them before returning code.
 8. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
 9. Organic profiles with only two spline points — these collapse into straight or trivial geometry and do not look realistic.
+
+═══ GEARS / TOOTHED PARTS ═══
+- For gear helper lambdas, write: const toothProfile = function(sketch, pitchRadius, addendum, dedendum) { ... };
+- Never use var toothProfile = function(...).
+- Tooth sketches must create CLOSED regions before extrusion.
+- Keep all user-facing values editable: tooth count, module or pitch radius, face width, pressure angle, and bore.
+- Never represent a finished spur gear as only concentric circles for root, pitch, and tip diameters.
+- Use sampled involute-style left and right tooth flanks plus tip/root arcs, or closely follow a robust spur gear example structure.
+- Use vector(0, 0) * inch for sketch centers when sketch entities need an explicit origin point.
+- For a gear pair, keep the gears as separate bodies and offset their centers by pitchRadius1 + pitchRadius2.
+- Do not boolean-union two different gears together unless the prompt explicitly asks for one merged body.
 
 ═══ ADVANCED OPERATIONS ═══
 Use these when the shape genuinely needs them — do not force them onto simple geometry.
@@ -2139,7 +2206,9 @@ FIX RULES:
 11. skSolve missing after sketch entities → add skSolve(sketch1); before opExtrude/opRevolve
 12. qSketchRegion(sketchVariable) → replace with qSketchRegion(id + "sketch1", optionalTrueForInnerLoops)
 13. qSketchEntity(...) or qCreatedBy(...) used as an opRevolve axis → replace with a Line value
-14. variable set but not used → remove the variable and any dead helper math`;
+14. variable set but not used → remove the variable and any dead helper math
+15. gear generated with only concentric circles and no tooth flanks/arcs → replace with a closed tooth-profile strategy using splines/arcs or a robust spur gear example
+16. two gears boolean-unioned into one body by default → keep them as separate bodies unless the prompt explicitly asks for a merged solid`;
 
 export function validateFeatureScript(code) {
   const text = String(code || "");
@@ -2197,6 +2266,23 @@ export function validateFeatureScript(code) {
   const hasSolve = /\bskSolve\s*\(/.test(text);
   if (hasSketch && !hasSolve) {
     addIssue(0, "Sketch created without any skSolve() call.", "(global)");
+  }
+
+  const usesRevolveRegion = /\bopRevolve\s*\([\s\S]*?\bqSketchRegion\s*\(\s*id\s*\+\s*"[^"]+"\s*\)/.test(text);
+  const hasSplineProfile = /\bskFitSpline\s*\(/.test(text);
+  const lineSegmentCount = (text.match(/\bskLineSegment\s*\(/g) || []).length;
+  if (usesRevolveRegion && hasSplineProfile && lineSegmentCount < 3) {
+    addIssue(0, "Revolve profile likely open. Add explicit closing lines from the spline endpoints back to the axis so qSketchRegion(id + \"profile\") is non-empty.", "(global)");
+  }
+
+  const looksLikeGear = /\bgear\b/i.test(text) || /\bnumTeeth\w*\b/.test(text) || /\bpressureAngle\w*\b/.test(text);
+  const circleCount = (text.match(/\bskCircle\s*\(/g) || []).length;
+  const arcCount = (text.match(/\bskArc\s*\(/g) || []).length;
+  if (looksLikeGear && circleCount >= 3 && !hasSplineProfile && arcCount === 0) {
+    addIssue(0, "Gear geometry is over-simplified: concentric circles alone are not a valid finished spur gear tooth profile. Use involute-style flank splines with tip/root arcs or a robust gear example.", "(global)");
+  }
+  if (looksLikeGear && /\bopBoolean\s*\([\s\S]*?BooleanOperationType\.UNION/.test(text) && /\bid\s+\+\s*"ext1"/.test(text) && /\bid\s+\+\s*"ext2"/.test(text)) {
+    addIssue(0, "Two generated gears were unioned into one body. Gear pairs should stay as separate bodies unless the prompt explicitly asks for a merged solid.", "(global)");
   }
 
   const declarationRegex = /^\s*(?:const|var)\s+([A-Za-z_]\w*)\s*=/;
