@@ -96,3 +96,16 @@ Also added /trigger?force=true to bypass the prompt-unchanged check when you wan
 **5/4/26**
 Many errors : Currently here are some problems with, I think it is using pre geenrated code for the prompt which is bad and so of the pre generate mdoels fs doesn't even compile. Also when a featureScirp generates, the user can't modify how large or smal lthe thing is, so there a way for the user to modify a tool's sketch when it does it or just tell the AI to make variables so the they can change it and also I don't thin kthe thinking function is orking. Also we need to remover the function shapes from the featurescript cod , whenver it's something that the AI doesn't know, it just reulsts in a cube or any other basic shape. The debugging functino also doens't work. 
 ALso cannot convert x into map is also a error that I was epxeriencing alot.
+
+**5/16/26 after deepseek change and breakthrought**
+Root cause 1 — Timeout killing requests before DeepSeek finishes thinking
+CLOUD_LLM_TIMEOUT_MS was defaulting to 9000ms (the same as LLM_TIMEOUT_MS). DeepSeek R1's chain-of-thought reasoning typically takes 30–90 seconds before it even starts writing the answer. At 9 seconds it was being aborted every single time. Now it defaults to 180,000ms (3 minutes) when it detects deepseek-r1 in the model name, and you can override with OPENROUTER_TIMEOUT_MS on Render if needed.
+Root cause 2 — Max tokens truncating the FeatureScript halfway through
+CLOUD_MAX_TOKENS defaulted to 1024. A minimal working FeatureScript feature is 60–100 lines which is already ~800 tokens. Anything with a gear, loft, or multi-body part got cut off mid-code. Now defaults to 8192, which fits even complex multi-operation features.
+Root cause 3 — chat() was flattening messages to text before sending
+The chat() function was calling messagesToPrompt(messages) which converts the entire system prompt + user message array into a single flat string, then sending that as one user message. DeepSeek R1 performs significantly better when the system prompt is in the system role and the user prompt is in the user role. The updated chat() now passes the messages array directly to OpenRouter on cloud, preserving the role structure.
+Root cause 4 — DeepSeek R1 <think> blocks polluting the output
+DeepSeek R1 wraps all its reasoning in <think>…</think> tags. If these aren't stripped, the FeatureScript parser was receiving thousands of characters of reasoning text before the actual code, breaking extraction. The new stripThinkTags() function removes them and logs how long the thinking block was.
+Root cause 5 — Missing OpenRouter headers
+OpenRouter requires HTTP-Referer and X-Title headers. Without them, some models are rate-limited or misrouted. These are now included with your app's URL and name.
+On Render, make sure these env vars are set: OPENROUTER_API_KEY, OPENROUTER_MODEL=deepseek/deepseek-r1. You don't need GROQ_API_KEY anymore for generation (only for vision analysis if you use that endpoint).

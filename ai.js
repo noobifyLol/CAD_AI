@@ -217,86 +217,135 @@ async function callLocalLLM(prompt, model = LOCAL_MODEL) {
  * DeepSeek R1 on OpenRouter returns <think>…</think> reasoning blocks.
  * These are stripped before returning so downstream parsers only see the answer.
  */
-async function callCloudLLM(messagesOrPrompt, model = CLOUD_MODEL) {
+async function callCloudLLM(messagesOrPrompt, model = process.env.OPENROUTER_MODEL || CLOUD_MODEL) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    throw new Error(
-      "Missing OPENROUTER_API_KEY. " +
-      "Add this env var on Render under Environment → Add Environment Variable."
-    );
+    throw new Error("Missing OPENROUTER_API_KEY. Add this env var on Render.");
   }
 
-  // Normalise input: string → single user message, array passed through as-is.
+  const host = process.env.OPENROUTER_HOST || "https://openrouter.ai";
+  const url = `${host.replace(/\/$/, "")}/api/v1/chat/completions`;
+
   const messages = Array.isArray(messagesOrPrompt)
     ? messagesOrPrompt
     : [{ role: "user", content: String(messagesOrPrompt) }];
 
+  const body = {
+    model,
+    messages,
+    max_tokens: Number(process.env.OPENROUTER_MAX_TOKENS || CLOUD_MAX_TOKENS || 8192),
+    temperature: Number(process.env.OPENROUTER_TEMPERATURE || 0.6),
+  };
+
+  const headers = {
+    "Authorization": `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    "User-Agent": process.env.APP_USER_AGENT || "cad-ai-backend/1.0",
+    "Referer": process.env.APP_URL || "https://cad-ai-0o9s.onrender.com",
+    "X-Title": "CAD AI Generator",
+  };
+
   const controller = new AbortController();
-  const startedAt = Date.now();
-  const timeout = setTimeout(() => controller.abort(), CLOUD_LLM_TIMEOUT_MS);
+  const timeoutMs = Number(process.env.OPENROUTER_TIMEOUT_MS || CLOUD_LLM_TIMEOUT_MS || 60000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const maxRetries = Number(process.env.OPENROUTER_RETRIES || 2);
+  let lastErr = null;
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        // OpenRouter requires these for routing and analytics — without HTTP-Referer
-        // some models may be blocked or incorrectly attributed.
-        "HTTP-Referer": process.env.APP_URL || "https://cad-ai-0o9s.onrender.com",
-        "X-Title": "CAD AI Generator",
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: CLOUD_MAX_TOKENS,
-        // DeepSeek R1 recommended temperature; 0 gives deterministic but sometimes
-        // repetitive FeatureScript — 0.6 balances creativity vs. structure.
-        temperature: Number(process.env.OPENROUTER_TEMPERATURE || 0.6),
-      }),
-    });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const attemptStart = Date.now();
+      try {
+        console.log(`[OpenRouter] attempt=${attempt} url=${url} model=${model} timeoutMs=${timeoutMs}`);
+        console.log(`[OpenRouter] body=${truncateForLog(body, 800)}`);
 
-    const data = await parseJsonResponse(response, "OpenRouter");
+        const resp = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
 
-    // Check for API-level errors returned with HTTP 200 (OpenRouter quirk)
-    if (data?.error) {
-      const err = new Error(`OpenRouter API error: ${data.error.message || JSON.stringify(data.error)}`);
-      err.details = { body: truncateForLog(data), model };
-      throw err;
+        const status = resp.status;
+        const text = await resp.text();
+        let data;
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch (parseErr) {
+          const parseError = new Error("OpenRouter returned non-JSON response");
+          parseError.status = status;
+          parseError.raw = truncateForLog(text, 2000);
+          throw parseError;
+        }
+
+        console.log(`[OpenRouter] status=${status} durationMs=${Date.now() - attemptStart} body=${truncateForLog(data, 800)}`);
+
+        if (!resp.ok) {
+          const err = new Error(`OpenRouter HTTP ${status}`);
+          err.status = status;
+          err.body = data;
+          if (status === 404 || (data?.error && /model .* not found/i.test(JSON.stringify(data.error)))) {
+            err.message = `Model '${model}' not found on OpenRouter. Check OPENROUTER_MODEL.`;
+            throw err;
+          }
+          if (status === 429 || (status >= 500 && status < 600)) {
+            throw err;
+          }
+          throw err;
+        }
+
+        if (data?.error) {
+          const err = new Error("OpenRouter API error");
+          err.details = data.error;
+          throw err;
+        }
+
+        const rawContent = Array.isArray(data?.choices) && data.choices[0]?.message?.content
+          ? data.choices[0].message.content
+          : (data?.choices?.[0]?.text || "");
+
+        const normalized = typeof rawContent === "string"
+          ? rawContent
+          : (Array.isArray(rawContent) ? rawContent.map(p => p?.text || "").join("\n") : String(rawContent));
+
+        const stripped = stripThinkTags(normalized);
+
+        if (!stripped || stripped.length === 0) {
+          const err = new Error("OpenRouter returned empty content");
+          err.details = { data: truncateForLog(data, 2000) };
+          throw err;
+        }
+
+        console.log(`[OpenRouter] success model=${model} durationMs=${Date.now() - attemptStart}`);
+        return stripped;
+      } catch (err) {
+        lastErr = err;
+        if (err.name === "AbortError") {
+          err.message = `OpenRouter request aborted after ${timeoutMs}ms`;
+          console.error("[OpenRouter] abort", err.message);
+          throw err;
+        }
+
+        const status = err?.status || null;
+        const isRetryable = !status || status === 429 || (status >= 500 && status < 600) || /rate_limit|timeout|ECONNRESET|ENOTFOUND/i.test(err.message || "");
+        console.warn(`[OpenRouter] attempt failed retryable=${isRetryable} message=${truncateForLog(err.message, 400)}`);
+
+        if (!isRetryable || attempt >= maxRetries) {
+          console.error("[OpenRouter] final error", { attempt: attempt, message: err.message, status: err.status || null });
+          throw err;
+        }
+
+        const backoffMs = Math.min(2000 * Math.pow(2, attempt), 10000);
+        await new Promise(r => setTimeout(r, backoffMs));
+        continue;
+      }
     }
-
-    const rawContent = normalizeMessageContent(data?.choices?.[0]?.message?.content);
-    if (!rawContent) {
-      const err = new Error("OpenRouter returned an empty response — model may have timed out or hit a content filter.");
-      err.details = { body: truncateForLog(data), model, maxTokens: CLOUD_MAX_TOKENS };
-      throw err;
-    }
-
-    // Strip DeepSeek R1 reasoning block so parsers only see FeatureScript / JSON.
-    const content = stripThinkTags(rawContent);
-
-    const durationMs = Date.now() - startedAt;
-    const usage = data?.usage ? `in=${data.usage.prompt_tokens} out=${data.usage.completion_tokens}` : "";
-    console.log(`[OpenRouter] model=${model} completed in ${durationMs}ms ${usage}`);
-
-    return content;
-  } catch (err) {
-    if (err?.name === "AbortError") {
-      err.message = `OpenRouter model '${model}' timed out after ${CLOUD_LLM_TIMEOUT_MS}ms. ` +
-        `Set OPENROUTER_TIMEOUT_MS env var to increase the limit.`;
-    }
-    logFetchError("OpenRouter", err, {
-      model,
-      durationMs: Date.now() - startedAt,
-      timeoutMs: CLOUD_LLM_TIMEOUT_MS,
-      maxTokens: CLOUD_MAX_TOKENS,
-    });
-    throw err;
+    throw lastErr || new Error("OpenRouter unknown failure");
   } finally {
     clearTimeout(timeout);
   }
 }
+
 
 
 // ------------------------------
@@ -306,23 +355,25 @@ async function callCloudLLM(messagesOrPrompt, model = CLOUD_MODEL) {
  * callLLM accepts either a plain string (used by legacy callers) or a messages array.
  * On Render (cloud), always uses OpenRouter.  Locally, tries Ollama first then falls back.
  */
-export async function callLLM(promptOrMessages, model = LOCAL_MODEL) {
+export async function callLLM(promptOrMessages, model = process.env.OLLAMA_MODEL || LOCAL_MODEL) {
   const cloudModel = process.env.OPENROUTER_MODEL || CLOUD_MODEL;
-  if (isLocalEnvironment()) {
-    // Local: Ollama first, OpenRouter fallback
-    const prompt = Array.isArray(promptOrMessages)
-      ? messagesToPrompt(promptOrMessages)
-      : promptOrMessages;
+  const runningLocal = !process.env.RENDER;
+
+  if (runningLocal) {
     try {
+      console.log("[LLM Router] running local; trying Ollama");
+      const prompt = Array.isArray(promptOrMessages) ? messagesToPrompt(promptOrMessages) : promptOrMessages;
       return await callLocalLLM(prompt, model);
-    } catch {
+    } catch (localErr) {
+      console.warn("[LLM Router] local Ollama failed, falling back to OpenRouter", truncateForLog(localErr.message, 400));
       return await callCloudLLM(promptOrMessages, cloudModel);
     }
   } else {
-    // Cloud (Render): always use OpenRouter with full message array when available
+    console.log("[LLM Router] running in cloud; using OpenRouter");
     return await callCloudLLM(promptOrMessages, cloudModel);
   }
 }
+
 
 
 
