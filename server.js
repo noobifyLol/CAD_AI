@@ -1,7 +1,14 @@
 import "dotenv/config";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
-import { analyzeImage, analyzeLearningOutcome, debugFeatureScript, generateFeatureScript } from "./ai.js";
+import {
+  analyzeImage,
+  analyzeImages,
+  analyzeLearningOutcome,
+  debugFeatureScript,
+  generateFeatureScript,
+  getModelConfig,
+} from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
 import { createAgentRouter } from "./agent.js";
 import { createLearningService } from "./learning.js";
@@ -77,6 +84,7 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     supabaseEnabled: Boolean(supabase),
+    models: getModelConfig(),
   });
 });
 

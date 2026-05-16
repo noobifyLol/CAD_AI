@@ -13,6 +13,24 @@ function setStatus(id, msg, type) {
   el.className = `status show ${type}`;
 }
 
+async function loadRuntimeConfig() {
+  const label = document.getElementById('powered-by-label');
+  if (!label) return;
+
+  try {
+    const response = await fetch('/health');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Health check failed');
+
+    const local = data?.models?.local || 'Ollama';
+    const cloud = data?.models?.cloud || 'OpenRouter';
+    const vision = data?.models?.vision ? ' + Groq Vision' : '';
+    label.textContent = `Ollama ${local} / OpenRouter ${cloud}${vision}`;
+  } catch {
+    label.textContent = 'Ollama/OpenRouter DeepSeek + Groq Vision';
+  }
+}
+
 const outputGenerationIds = {};
 let debugSourceGenerationId = null;
 let runModalContext = null;
@@ -551,6 +569,8 @@ document.addEventListener('DOMContentLoaded', () => {
   syncSlotLabels();
   const firstSlot = document.querySelector('#image-slots-container .image-slot');
   if (firstSlot) firstSlot.classList.add('slot-visible');
+
+  loadRuntimeConfig();
 
   // Restore auth state on load
   authInit();

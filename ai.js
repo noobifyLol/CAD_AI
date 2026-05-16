@@ -20,6 +20,19 @@ const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 9000);
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
 
+export function getModelConfig() {
+  return {
+    local: LOCAL_MODEL,
+    text: TEXT_MODEL,
+    fast: FAST_MODEL,
+    complex: COMPLEX_MODEL,
+    dimensions: DIM_MODEL,
+    fallback: FALLBACK_MODEL,
+    cloud: CLOUD_MODEL,
+    vision: VISION_MODEL,
+  };
+}
+
 // ------------------------------
 // Environment detection
 // ------------------------------
@@ -149,6 +162,10 @@ async function callLocalLLM(prompt, model = LOCAL_MODEL) {
     if (!data || !data.response) throw new Error("Invalid local LLM response");
     return data.response;
   } catch (err) {
+    const modelError = String(err?.details?.data?.error || "");
+    if (err?.details?.status === 404 && /model .* not found/i.test(modelError)) {
+      err.message = `Ollama model '${model}' is not installed. Run 'ollama pull ${model}' or set OLLAMA_MODEL to an installed model.`;
+    }
     logFetchError("Local LLM", err, { model });
     console.warn("Local LLM unavailable, falling back to OpenRouter");
     throw err;
