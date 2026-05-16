@@ -1,58 +1,34 @@
-const TEXT_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
-const FAST_MODEL = process.env.OLLAMA_FAST_MODEL || TEXT_MODEL;
-const COMPLEX_MODEL = process.env.OLLAMA_COMPLEX_MODEL || TEXT_MODEL;
-const DIM_MODEL = process.env.OLLAMA_DIM_MODEL || COMPLEX_MODEL;
-const FALLBACK_MODEL = process.env.OLLAMA_FALLBACK_MODEL || TEXT_MODEL;
+const TEXT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+const FAST_MODEL = process.env.GROQ_FAST_MODEL || TEXT_MODEL;
+const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || TEXT_MODEL;
+const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
+const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || TEXT_MODEL;
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // Templates stay available as a safety net, but AI-first generation is now the default path.
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
 
-import fetch from "node-fetch";
 import Groq from "groq-sdk";
 
 // ------------------------------
 // Model configuration
 // ------------------------------
-const LOCAL_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
-const CLOUD_MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1";
-const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 9000);
-const LOCAL_LLM_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || (/deepseek-r1/i.test(LOCAL_MODEL) ? 120000 : Math.max(LLM_TIMEOUT_MS, 30000)));
-// DeepSeek R1 needs thinking time — default 180s for R1, 60s for other cloud models.
-const _isDeepSeekR1Cloud = /deepseek.*r1|deepseek-r1/i.test(process.env.OPENROUTER_MODEL || CLOUD_MODEL);
-const CLOUD_LLM_TIMEOUT_MS = Number(process.env.OPENROUTER_TIMEOUT_MS || (_isDeepSeekR1Cloud ? 180000 : 60000));
-// 1024 is far too small for FeatureScript — need 4000-8192 tokens for complex shapes.
-const CLOUD_MAX_TOKENS = Number(process.env.OPENROUTER_MAX_TOKENS || 8192);
-const LOCAL_THINK_ENABLED = String(process.env.OLLAMA_THINK || "false").toLowerCase() === "true";
+const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS || 120000);
+const GROQ_MAX_COMPLETION_TOKENS = Number(process.env.GROQ_MAX_COMPLETION_TOKENS || 8192);
+const GROQ_TEMPERATURE = Number(process.env.GROQ_TEMPERATURE || 0.2);
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
-const OLLAMA_URL = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
-const USE_OLLAMA_ON_RENDER = String(process.env.USE_OLLAMA_ON_RENDER || "false").toLowerCase() === "true";
-const HAS_REMOTE_OLLAMA = Boolean(process.env.OLLAMA_URL);
 
 export function getModelConfig() {
   return {
-    local: LOCAL_MODEL,
+    provider: "groq",
     text: TEXT_MODEL,
     fast: FAST_MODEL,
     complex: COMPLEX_MODEL,
     dimensions: DIM_MODEL,
     fallback: FALLBACK_MODEL,
-    cloud: CLOUD_MODEL,
-    localThinking: LOCAL_THINK_ENABLED,
-    ollamaUrl: OLLAMA_URL,
-    useOllamaOnRender: USE_OLLAMA_ON_RENDER,
-    hasRemoteOllama: HAS_REMOTE_OLLAMA,
     vision: VISION_MODEL,
   };
-}
-
-// ------------------------------
-// Environment detection
-// ------------------------------
-function shouldPreferOllama() {
-  if (!process.env.RENDER) return true;
-  return USE_OLLAMA_ON_RENDER && HAS_REMOTE_OLLAMA;
 }
 
 function truncateForLog(text, max = 800) {
@@ -117,23 +93,6 @@ function normalizeMessageContent(content) {
   return "";
 }
 
-/**
- * DeepSeek R1 (and some other reasoning models) wrap their internal chain-of-thought
- * inside <think>...</think> tags.  We log the thinking for debugging but strip it from
- * the text returned to the rest of the application so FeatureScript parsing is clean.
- */
-function stripThinkTags(text) {
-  const raw = String(text || "");
-  const thinkMatch = raw.match(/<think>([\s\S]*?)<\/think>/i);
-  if (thinkMatch) {
-    console.log(`[DeepSeek R1] reasoning block (${thinkMatch[1].length} chars) stripped from output.`);
-  }
-  return raw
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/^\s+/, "")
-    .trim();
-}
-
 async function callGroqVisionLLM(messages, model = VISION_MODEL) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("Missing GROQ_API_KEY");
@@ -173,215 +132,64 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL) {
 }
 
 // ------------------------------
-// 1. Local DeepSeek R1 via Ollama
+// 1. Text LLM via Groq
 // ------------------------------
-async function callLocalLLM(prompt, model = LOCAL_MODEL) {
-  const controller = new AbortController();
-  const startedAt = Date.now();
-  const timeout = setTimeout(() => controller.abort(), LOCAL_LLM_TIMEOUT_MS);
-  const requestBody = {
-    model,
-    prompt,
-    think: LOCAL_THINK_ENABLED,
-    stream: false
-  };
-  try {
-    console.log(`[Local LLM] url=${OLLAMA_URL}/api/generate timeoutMs=${LOCAL_LLM_TIMEOUT_MS}`);
-    console.log(`[Local LLM] outgoing=${truncateForLog(requestBody, 800)}`);
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify(requestBody)
-    });
-
-    const data = await parseJsonResponse(response, "Local LLM");
-    if (!data || !data.response) throw new Error("Invalid local LLM response");
-    console.log(`[Local LLM] model=${model} completed in ${Date.now() - startedAt}ms`);
-    return data.response;
-  } catch (err) {
-    if (err?.name === "AbortError") {
-      err.message = `Local Ollama model '${model}' timed out after ${LOCAL_LLM_TIMEOUT_MS}ms.`;
-    }
-    const modelError = String(err?.details?.data?.error || "");
-    if (err?.details?.status === 404 && /model .* not found/i.test(modelError)) {
-      err.message = `Ollama model '${model}' is not installed. Run 'ollama pull ${model}' or set OLLAMA_MODEL to an installed model.`;
-    }
-    logFetchError("Local LLM", err, { model, durationMs: Date.now() - startedAt, timeoutMs: LOCAL_LLM_TIMEOUT_MS });
-    console.warn("Local LLM unavailable, falling back to OpenRouter");
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-
-// ------------------------------
-// 2. Cloud DeepSeek R1 via OpenRouter
-// ------------------------------
-/**
- * callCloudLLM accepts either:
- *   - an array of {role, content} message objects  (preferred — preserves system/user structure)
- *   - a plain string prompt  (wrapped into a single user message)
- *
- * DeepSeek R1 on OpenRouter returns <think>…</think> reasoning blocks.
- * These are stripped before returning so downstream parsers only see the answer.
- */
-async function callCloudLLM(messagesOrPrompt, model = process.env.OPENROUTER_MODEL || CLOUD_MODEL) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing OPENROUTER_API_KEY. Add this env var on Render.");
-  }
-
-  const host = process.env.OPENROUTER_HOST || "https://openrouter.ai";
-  const url = `${host.replace(/\/$/, "")}/api/v1/chat/completions`;
+async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("Missing GROQ_API_KEY");
 
   const messages = Array.isArray(messagesOrPrompt)
     ? messagesOrPrompt
     : [{ role: "user", content: String(messagesOrPrompt) }];
 
-  const body = {
+  const requestBody = {
     model,
     messages,
-    max_tokens: Number(process.env.OPENROUTER_MAX_TOKENS || CLOUD_MAX_TOKENS || 8192),
-    temperature: Number(process.env.OPENROUTER_TEMPERATURE || 0.6),
+    max_completion_tokens: GROQ_MAX_COMPLETION_TOKENS,
+    temperature: GROQ_TEMPERATURE,
   };
 
-  const headers = {
-    "Authorization": `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    "User-Agent": process.env.APP_USER_AGENT || "cad-ai-backend/1.0",
-    "Referer": process.env.APP_URL || "https://cad-ai-0o9s.onrender.com",
-    "X-Title": "CAD AI Generator",
-  };
-
-  const controller = new AbortController();
-  const timeoutMs = Number(process.env.OPENROUTER_TIMEOUT_MS || CLOUD_LLM_TIMEOUT_MS || 60000);
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  const maxRetries = Number(process.env.OPENROUTER_RETRIES || 2);
-  let lastErr = null;
+  const client = new Groq({
+    apiKey,
+    timeout: GROQ_TIMEOUT_MS,
+    maxRetries: 0,
+  });
+  const startedAt = Date.now();
 
   try {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const attemptStart = Date.now();
-      try {
-        console.log(`[OpenRouter] attempt=${attempt} url=${url} model=${model} timeoutMs=${timeoutMs}`);
-        console.log(`[OpenRouter] body=${truncateForLog(body, 800)}`);
+    console.log(`[Groq Text] model=${model} timeoutMs=${GROQ_TIMEOUT_MS}`);
+    console.log(`[Groq Text] outgoing=${truncateForLog(requestBody, 800)}`);
+    const completion = await client.chat.completions.create({
+      model,
+      messages,
+      max_completion_tokens: GROQ_MAX_COMPLETION_TOKENS,
+      temperature: GROQ_TEMPERATURE,
+    });
 
-        const resp = await fetch(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        const status = resp.status;
-        const text = await resp.text();
-        let data;
-        try {
-          data = text ? JSON.parse(text) : {};
-        } catch (parseErr) {
-          const parseError = new Error("OpenRouter returned non-JSON response");
-          parseError.status = status;
-          parseError.raw = truncateForLog(text, 2000);
-          throw parseError;
-        }
-
-        console.log(`[OpenRouter] status=${status} durationMs=${Date.now() - attemptStart} body=${truncateForLog(data, 800)}`);
-
-        if (!resp.ok) {
-          const err = new Error(`OpenRouter HTTP ${status}`);
-          err.status = status;
-          err.body = data;
-          if (status === 404 || (data?.error && /model .* not found/i.test(JSON.stringify(data.error)))) {
-            err.message = `Model '${model}' not found on OpenRouter. Check OPENROUTER_MODEL.`;
-            throw err;
-          }
-          if (status === 429 || (status >= 500 && status < 600)) {
-            throw err;
-          }
-          throw err;
-        }
-
-        if (data?.error) {
-          const err = new Error("OpenRouter API error");
-          err.details = data.error;
-          throw err;
-        }
-
-        const rawContent = Array.isArray(data?.choices) && data.choices[0]?.message?.content
-          ? data.choices[0].message.content
-          : (data?.choices?.[0]?.text || "");
-
-        const normalized = typeof rawContent === "string"
-          ? rawContent
-          : (Array.isArray(rawContent) ? rawContent.map(p => p?.text || "").join("\n") : String(rawContent));
-
-        const stripped = stripThinkTags(normalized);
-
-        if (!stripped || stripped.length === 0) {
-          const err = new Error("OpenRouter returned empty content");
-          err.details = { data: truncateForLog(data, 2000) };
-          throw err;
-        }
-
-        console.log(`[OpenRouter] success model=${model} durationMs=${Date.now() - attemptStart}`);
-        return stripped;
-      } catch (err) {
-        lastErr = err;
-        if (err.name === "AbortError") {
-          err.message = `OpenRouter request aborted after ${timeoutMs}ms`;
-          console.error("[OpenRouter] abort", err.message);
-          throw err;
-        }
-
-        const status = err?.status || null;
-        const isRetryable = !status || status === 429 || (status >= 500 && status < 600) || /rate_limit|timeout|ECONNRESET|ENOTFOUND/i.test(err.message || "");
-        console.warn(`[OpenRouter] attempt failed retryable=${isRetryable} message=${truncateForLog(err.message, 400)}`);
-
-        if (!isRetryable || attempt >= maxRetries) {
-          console.error("[OpenRouter] final error", { attempt: attempt, message: err.message, status: err.status || null });
-          throw err;
-        }
-
-        const backoffMs = Math.min(2000 * Math.pow(2, attempt), 10000);
-        await new Promise(r => setTimeout(r, backoffMs));
-        continue;
-      }
+    const content = normalizeMessageContent(completion?.choices?.[0]?.message?.content);
+    if (!content) {
+      const error = new Error("Invalid Groq text response");
+      error.details = { body: truncateForLog(completion, 1200) };
+      throw error;
     }
-    throw lastErr || new Error("OpenRouter unknown failure");
-  } finally {
-    clearTimeout(timeout);
+
+    console.log(`[Groq Text] success model=${model} durationMs=${Date.now() - startedAt}`);
+    return content;
+  } catch (err) {
+    logFetchError("Groq Text", err, { model, durationMs: Date.now() - startedAt, timeoutMs: GROQ_TIMEOUT_MS });
+    throw err;
   }
 }
-
-
-
 // ------------------------------
-// 3. Universal LLM router
+// 2. Universal LLM router
 // ------------------------------
 /**
- * callLLM accepts either a plain string (used by legacy callers) or a messages array.
- * On Render (cloud), always uses OpenRouter.  Locally, tries Ollama first then falls back.
+ * callLLM accepts either a plain string or a messages array and always routes
+ * text generation through Groq.
  */
-export async function callLLM(promptOrMessages, model = process.env.OLLAMA_MODEL || LOCAL_MODEL) {
-  const cloudModel = process.env.OPENROUTER_MODEL || CLOUD_MODEL;
-  const preferOllama = shouldPreferOllama();
-
-  if (preferOllama) {
-    try {
-      console.log(`[LLM Router] trying Ollama first render=${Boolean(process.env.RENDER)} ollamaUrl=${OLLAMA_URL}`);
-      const prompt = Array.isArray(promptOrMessages) ? messagesToPrompt(promptOrMessages) : promptOrMessages;
-      return await callLocalLLM(prompt, model);
-    } catch (localErr) {
-      console.warn("[LLM Router] local Ollama failed, falling back to OpenRouter", truncateForLog(localErr.message, 400));
-      return await callCloudLLM(promptOrMessages, cloudModel);
-    }
-  } else {
-    console.log(`[LLM Router] using OpenRouter render=${Boolean(process.env.RENDER)} useOllamaOnRender=${USE_OLLAMA_ON_RENDER} hasRemoteOllama=${HAS_REMOTE_OLLAMA}`);
-    return await callCloudLLM(promptOrMessages, cloudModel);
-  }
+export async function callLLM(promptOrMessages, model = TEXT_MODEL) {
+  console.log(`[LLM Router] using Groq model=${model} render=${Boolean(process.env.RENDER)}`);
+  return await callGroqTextLLM(promptOrMessages, model);
 }
 
 
@@ -434,19 +242,18 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, _option
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
   const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
-  const prompt = messagesToPrompt(messages);
 
   let lastError = null;
   for (const candidate of modelsToTry) {
     try {
-      const text = await callLLM(prompt, candidate);
+      const text = await callLLM(messages, candidate);
       if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate}`);
       return text;
     } catch (err) {
       lastError = err;
     }
   }
-  throw lastError || new Error("All local Ollama model calls failed.");
+  throw lastError || new Error("All Groq model calls failed.");
 }
 
 // ─── FeatureScript building blocks ───────────────────────────────────────────

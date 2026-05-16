@@ -99,17 +99,6 @@ app.get("/health", (_req, res) => {
     models: getModelConfig(),
   });
 });
-app.get("/_test_ollama", async (req, res) => {
-  try {
-    const baseUrl = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
-    console.log(`[/_test_ollama] testing ${baseUrl}/api/tags`);
-    const r = await fetch(`${baseUrl}/api/tags`);
-    res.type("text").send(await r.text());
-  } catch (err) {
-    res.status(500).send(err.message);
-  }
-});
-
 
 app.post("/auth/signup", authRoutes.signup);
 app.post("/auth/login", authRoutes.login);
@@ -374,5 +363,5 @@ app.post("/learning/analyze", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`[Server] Listening on http://localhost:${PORT}`);
   console.log(`[Server] Render=${Boolean(process.env.RENDER)} SupabaseKeyMode=${supabaseKeyMode}`);
-  console.log(`[Server] OLLAMA_URL=${process.env.OLLAMA_URL || "http://localhost:11434"} USE_OLLAMA_ON_RENDER=${process.env.USE_OLLAMA_ON_RENDER || "false"}`);
+  console.log(`[Server] GroqModel=${process.env.GROQ_MODEL || "openai/gpt-oss-120b"} VisionModel=${process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct"}`);
 });

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateFeatureScript } from "../AI.js";
+import { validateFeatureScript } from "../ai.js";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const LOG_DIR = join(ROOT, "logs");

@@ -22,12 +22,12 @@ async function loadRuntimeConfig() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Health check failed');
 
-    const local = data?.models?.local || 'Ollama';
-    const cloud = data?.models?.cloud || 'OpenRouter';
+    const provider = data?.models?.provider || 'Groq';
+    const textModel = data?.models?.text || 'openai/gpt-oss-120b';
     const vision = data?.models?.vision ? ' + Groq Vision' : '';
-    label.textContent = `Ollama ${local} / OpenRouter ${cloud}${vision}`;
+    label.textContent = `${provider} ${textModel}${vision}`;
   } catch {
-    label.textContent = 'Ollama/OpenRouter DeepSeek + Groq Vision';
+    label.textContent = 'Groq text + Groq Vision';
   }
 }
 
