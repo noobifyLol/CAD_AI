@@ -324,50 +324,7 @@ export async function callLLM(promptOrMessages, model = LOCAL_MODEL) {
   }
 }
 
-/**
- * chat() is the primary entry point for multi-turn conversations.
- * On cloud it passes the messages array directly to OpenRouter (preserving system/user roles).
- * On local it converts to a flat prompt for Ollama compatibility.
- */
-async function chat(messages, model = TEXT_MODEL, fallbackModels = null, _options = {}) {
-  const cloudModel = process.env.OPENROUTER_MODEL || CLOUD_MODEL;
 
-  // Cloud path: pass messages directly — OpenRouter/DeepSeek R1 handles system messages natively.
-  if (!isLocalEnvironment()) {
-    try {
-      return await callCloudLLM(messages, cloudModel);
-    } catch (err) {
-      console.error("[chat] Cloud LLM failed:", err.message);
-      throw err;
-    }
-  }
-
-  // Local path: flatten messages for Ollama, try model list with fallbacks.
-  const fallbackList = Array.isArray(fallbackModels)
-    ? fallbackModels
-    : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
-  const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
-  const prompt = messagesToPrompt(messages);
-
-  let lastError = null;
-  for (const candidate of modelsToTry) {
-    try {
-      const text = await callLocalLLM(prompt, candidate);
-      if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate}`);
-      return text;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  // Local exhausted — try cloud as last resort
-  console.warn("[chat] All local models failed, falling back to OpenRouter cloud.");
-  try {
-    return await callCloudLLM(messages, cloudModel);
-  } catch (cloudErr) {
-    throw lastError || cloudErr;
-  }
-}
 
 export const CAD_MLLM_PLAN_PROMPT = `CAD-MLLM planning pass:
 1. Classify the requested shape and extract editable parameters.
