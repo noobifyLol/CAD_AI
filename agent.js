@@ -9,7 +9,7 @@ import {
   debugFeatureScript,
   generateFeatureScript,
   validateFeatureScript,
-} from "./AI.js";
+} from "./ai.js";
 import { candidateFeatureVector } from "./adaptiveNetwork.js";
 import { extractMultimodalConditioning } from "./multimodalConditioning.js";
 
