@@ -1,0 +1,278 @@
+{
+  "prompt": "Create a 90-degree elbow pipe with 0.5 inch outer radius and 2 inch bend radius using opSweep.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "sweep",
+    "operations": [
+      "sweep"
+    ],
+    "parameters": [
+      {
+        "name": "outerRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "bendRadius",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=sweep_path",
+    "subtasks": [
+      {
+        "id": "step_1_sweep",
+        "operation": "sweep",
+        "goal": "sweep a circular or custom profile along a connected wire path",
+        "retrievalKeywords": [
+          "sweep",
+          "degree",
+          "elbow",
+          "pipe",
+          "outer",
+          "radius",
+          "bend",
+          "opsweep",
+          "shapeclass",
+          "sweep_path"
+        ],
+        "validationFocus": [
+          "connected path",
+          "profile plane perpendicular to tangent",
+          "skSolve before opSweep"
+        ]
+      }
+    ],
+    "fallbackTemplate": "sweep_pipe_elbow.fs"
+  },
+  "multimodal": {
+    "shapeClass": "sweep_path",
+    "controlPoints": [],
+    "descriptors": [],
+    "plannerHints": [],
+    "hasMultimodalInput": false,
+    "summary": "shapeClass=sweep_path"
+  },
+  "generationStrategy": {
+    "requested": "ai_then_fallback",
+    "aiAvailable": true,
+    "used": "agent_template",
+    "preferTemplate": false,
+    "forceAi": false,
+    "initialTemplateFile": "sweep_pipe_elbow.fs",
+    "generationError": "Connection error."
+  },
+  "retrieval": {
+    "keywords": [
+      "degree",
+      "elbow",
+      "pipe",
+      "outer",
+      "radius",
+      "bend",
+      "opsweep",
+      "sweep"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: sweep_pipe_elbow.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.2,
+        "keywords": [
+          "sweep_pipe_elbow",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: flange_pattern.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.2,
+        "keywords": [
+          "flange_pattern",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: hybrid_organic_flange.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.2,
+        "keywords": [
+          "hybrid_organic_flange",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: bottle_revolve_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.1,
+        "keywords": [
+          "bottle_revolve_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript Example sweep pipe elbow",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 1.1424569410396748,
+        "keywords": [
+          "sweep",
+          "pipe",
+          "elbow",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      },
+      {
+        "title": "Sweep Along Connected Tube Path",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 1.1414201474713914,
+        "keywords": [
+          "opSweep",
+          "profile",
+          "path",
+          "arc",
+          "wire",
+          "perpendicular",
+          "pipe elbow"
+        ]
+      },
+      {
+        "title": "Pipe Along Arc Or L-Path",
+        "memory_type": "local_seed",
+        "source_table": null,
+        "quality_score": 0.65,
+        "score": 1.1355228911371735,
+        "keywords": [
+          "pipe elbow",
+          "bent pipe",
+          "tube",
+          "sweep",
+          "arc",
+          "90 degree",
+          "elbow",
+          "conduit",
+          "hose"
+        ]
+      },
+      {
+        "title": "Sweep Path Must Be A Connected Wire",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.1072052599397528,
+        "keywords": [
+          "opSweep",
+          "path",
+          "wire",
+          "connected",
+          "arc",
+          "edge"
+        ]
+      }
+    ],
+    "pruningRows": [
+      {
+        "title": "Sweep Path Must Be A Connected Wire",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.1072052599397528,
+        "keywords": [
+          "opSweep",
+          "path",
+          "wire",
+          "connected",
+          "arc",
+          "edge"
+        ]
+      }
+    ],
+    "featureScriptSnippets": [
+      {
+        "file": "sweep_pipe_elbow.fs",
+        "score": 12
+      },
+      {
+        "file": "flange_pattern.fs",
+        "score": 2
+      },
+      {
+        "file": "hybrid_organic_flange.fs",
+        "score": 2
+      },
+      {
+        "file": "bottle_revolve_loft.fs",
+        "score": 1
+      }
+    ],
+    "memoryMatches": []
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "repairs": [],
+    "fallbackTemplate": false,
+    "fallbackFile": null
+  },
+  "generationId": null
+}

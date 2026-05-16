@@ -1,0 +1,520 @@
+{
+  "prompt": "Create an open-top electronics enclosure 4x3x1.5 inches with 0.1 inch walls using opShell after extrude. Expose wallThickness and openFace boolean.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "shell",
+    "operations": [
+      "shell"
+    ],
+    "parameters": [
+      {
+        "name": "width",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "depth",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "height",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "wallThickness",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "openTop",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=shell_enclosure",
+    "subtasks": [
+      {
+        "id": "step_1_shell",
+        "operation": "shell",
+        "goal": "hollow a valid solid body after the base extrude exists",
+        "retrievalKeywords": [
+          "shell",
+          "open",
+          "top",
+          "electronics",
+          "enclosure",
+          "4x3x1",
+          "walls",
+          "opshell",
+          "after",
+          "extrude"
+        ],
+        "validationFocus": [
+          "wall thickness less than half minimum span",
+          "opShell after solid body"
+        ]
+      }
+    ],
+    "fallbackTemplate": "shell_enclosure_open_top.fs"
+  },
+  "multimodal": {
+    "shapeClass": "shell_enclosure",
+    "controlPoints": [],
+    "descriptors": [],
+    "plannerHints": [],
+    "hasMultimodalInput": false,
+    "summary": "shapeClass=shell_enclosure"
+  },
+  "retrieval": {
+    "keywords": [
+      "open",
+      "top",
+      "electronics",
+      "enclosure",
+      "4x3x1",
+      "walls",
+      "opshell",
+      "after"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: shell_enclosure_open_top.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.3,
+        "keywords": [
+          "shell_enclosure_open_top",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: hybrid_organic_flange.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.3,
+        "keywords": [
+          "hybrid_organic_flange",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: fillet_and_chamfer_example.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.2,
+        "keywords": [
+          "fillet_and_chamfer_example",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: flange_pattern.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.2,
+        "keywords": [
+          "flange_pattern",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "Shell First Enclosure Workflow",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 0.8199257128651024,
+        "keywords": [
+          "opShell",
+          "enclosure",
+          "wall thickness",
+          "open face",
+          "electronics housing"
+        ]
+      },
+      {
+        "title": "Shell Thickness Must Preserve Interior Volume",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.91,
+        "score": 0.8056065000146949,
+        "keywords": [
+          "opShell",
+          "wall thickness",
+          "enclosure",
+          "open top",
+          "cavity"
+        ]
+      },
+      {
+        "title": "opShell Hollow Body",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.7942892804829196,
+        "keywords": [
+          "shell",
+          "opShell",
+          "hollow",
+          "thin wall",
+          "enclosure",
+          "housing",
+          "cup"
+        ]
+      },
+      {
+        "title": "Electronics Enclosure Shell Strategy",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.76,
+        "score": 0.7924897786450749,
+        "keywords": [
+          "enclosure",
+          "speaker",
+          "computer tower",
+          "case",
+          "housing",
+          "shell",
+          "wall thickness",
+          "opening"
+        ]
+      },
+      {
+        "title": "Enclosure Prompts Default To A Simple Open-Top Shell",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.8,
+        "score": 0.773641694433864,
+        "keywords": [
+          "enclosure",
+          "housing",
+          "shell",
+          "open top",
+          "wall thickness",
+          "case"
+        ]
+      },
+      {
+        "title": "FeatureScript Example shell enclosure open top",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 0.7620918060196209,
+        "keywords": [
+          "shell",
+          "enclosure",
+          "open",
+          "top",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      },
+      {
+        "title": "U-Channel Or C-Channel",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.7467132097919813,
+        "keywords": [
+          "u-channel",
+          "c-channel",
+          "aluminum extrusion",
+          "structural",
+          "rail",
+          "box tube",
+          "maxtube"
+        ]
+      },
+      {
+        "title": "Shell Or Enclosure",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.7465942515580151,
+        "keywords": [
+          "enclosure",
+          "shell",
+          "case",
+          "housing",
+          "box",
+          "wall thickness"
+        ]
+      }
+    ],
+    "pruningRows": [
+      {
+        "title": "Shell Thickness Must Preserve Interior Volume",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.91,
+        "score": 0.8056065000146949,
+        "keywords": [
+          "opShell",
+          "wall thickness",
+          "enclosure",
+          "open top",
+          "cavity"
+        ]
+      },
+      {
+        "title": "Enclosure Prompts Default To A Simple Open-Top Shell",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.8,
+        "score": 0.773641694433864,
+        "keywords": [
+          "enclosure",
+          "housing",
+          "shell",
+          "open top",
+          "wall thickness",
+          "case"
+        ]
+      }
+    ],
+    "featureScriptSnippets": [
+      {
+        "file": "shell_enclosure_open_top.fs",
+        "score": 13
+      },
+      {
+        "file": "hybrid_organic_flange.fs",
+        "score": 3
+      },
+      {
+        "file": "fillet_and_chamfer_example.fs",
+        "score": 2
+      },
+      {
+        "file": "flange_pattern.fs",
+        "score": 2
+      }
+    ],
+    "memoryMatches": [
+      {
+        "memory_id": "5dd011f1-f8f0-41d0-b944-dd937062ca83",
+        "score_rank": 1,
+        "score_snapshot": 0.8199257128651024,
+        "neural_score": 0.8338195818960441,
+        "feature_vector": [
+          0.75,
+          0,
+          0.86,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "b4321953-6eff-4aea-9d12-4b7df0900636",
+        "score_rank": 2,
+        "score_snapshot": 0.8056065000146949,
+        "neural_score": 0.8331616774856337,
+        "feature_vector": [
+          0.625,
+          0,
+          0.91,
+          1,
+          0.5,
+          0,
+          0.55,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "4ec38c87-5546-4d37-834a-6dcd74f409a4",
+        "score_rank": 3,
+        "score_snapshot": 0.7942892804829196,
+        "neural_score": 0.8338810656398914,
+        "feature_vector": [
+          0.625,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "d4781c21-1d30-4832-aa26-dfbe674f7890",
+        "score_rank": 4,
+        "score_snapshot": 0.7924897786450749,
+        "neural_score": 0.8298796851165332,
+        "feature_vector": [
+          0.625,
+          0,
+          0.76,
+          1,
+          0.16666666666666666,
+          0.8333333333333334,
+          0.48,
+          0.45,
+          0.3003809664473759,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "4634a58c-d5ce-4ae7-a4be-488b863b6d82",
+        "score_rank": 5,
+        "score_snapshot": 0.773641694433864,
+        "neural_score": 0.8296538838925712,
+        "feature_vector": [
+          0.5,
+          0,
+          0.8,
+          1,
+          0.16666666666666666,
+          0.8333333333333334,
+          0.55,
+          0.45,
+          0.3003809664473759,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "d5c4b512-2faa-4980-b697-5cc5a96daf3a",
+        "score_rank": 6,
+        "score_snapshot": 0.7620918060196209,
+        "neural_score": 0.8326093032748401,
+        "feature_vector": [
+          0.5,
+          0,
+          0.9,
+          1,
+          0.5,
+          0,
+          0.75,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "aca4b3a7-0cbd-42f2-982d-cebb8f251e11",
+        "score_rank": 7,
+        "score_snapshot": 0.7467132097919813,
+        "neural_score": 0.8330747542565695,
+        "feature_vector": [
+          0.375,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "be9270ff-4051-4c51-b0e6-0c559752ae15",
+        "score_rank": 8,
+        "score_snapshot": 0.7465942515580151,
+        "neural_score": 0.8328998156772075,
+        "feature_vector": [
+          0.375,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      }
+    ]
+  },
+  "validation": {
+    "passed": false,
+    "issues": [
+      {
+        "line": 0,
+        "message": "opShell must run after a solid body operation.",
+        "text": ""
+      }
+    ],
+    "repairs": [],
+    "fallbackTemplate": true,
+    "fallbackFile": "shell_enclosure_open_top.fs"
+  },
+  "generationId": "7bd80fdb-5534-4c13-bf40-8f16a331ea5d"
+}

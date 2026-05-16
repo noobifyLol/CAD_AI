@@ -1,0 +1,499 @@
+{
+  "prompt": "Attempt to loft a circle to a rectangle; if profiles are too dissimilar, apply pruning rule to insert intermediate profile or fallback to multi-profile loft.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "loft",
+    "operations": [
+      "loft"
+    ],
+    "parameters": [
+      {
+        "name": "height",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "squareSize",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "circleRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "profileOffset",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=loft_transition",
+    "subtasks": [
+      {
+        "id": "step_1_loft",
+        "operation": "loft",
+        "goal": "transition between solved profile sketches on ordered offset planes",
+        "retrievalKeywords": [
+          "loft",
+          "attempt",
+          "circle",
+          "rectangle",
+          "profiles",
+          "are",
+          "too",
+          "dissimilar",
+          "apply",
+          "pruning"
+        ],
+        "validationFocus": [
+          "profile topology similarity",
+          "profileSubqueries",
+          "ordered planes",
+          "skSolve for every profile"
+        ]
+      }
+    ],
+    "fallbackTemplate": "loft_transition_square_to_circle.fs"
+  },
+  "multimodal": {
+    "shapeClass": "loft_transition",
+    "controlPoints": [],
+    "descriptors": [],
+    "plannerHints": [],
+    "hasMultimodalInput": false,
+    "summary": "shapeClass=loft_transition"
+  },
+  "retrieval": {
+    "keywords": [
+      "attempt",
+      "loft",
+      "circle",
+      "rectangle",
+      "profiles",
+      "are",
+      "too",
+      "dissimilar"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: loft_transition_square_to_circle.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.1,
+        "keywords": [
+          "loft_transition_square_to_circle",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: vase_multi_profile_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.5,
+        "keywords": [
+          "vase_multi_profile_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: hybrid_organic_flange.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.3,
+        "keywords": [
+          "hybrid_organic_flange",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: lofted_airfoil.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.3,
+        "keywords": [
+          "lofted_airfoil",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "opLoft Between Two Profiles",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.8125281311809358,
+        "keywords": [
+          "loft",
+          "opLoft",
+          "transition",
+          "profile",
+          "cross-section",
+          "airfoil",
+          "taper",
+          "blend"
+        ]
+      },
+      {
+        "title": "Loft Profiles Must Be Topologically Similar",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.94,
+        "score": 0.8071128723720622,
+        "keywords": [
+          "loft",
+          "profile similarity",
+          "circle rectangle",
+          "intermediate profile",
+          "fallback"
+        ]
+      },
+      {
+        "title": "Multi Profile Loft Transition",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 0.8029532941748956,
+        "keywords": [
+          "opLoft",
+          "profileSubqueries",
+          "square",
+          "circle",
+          "intermediate",
+          "topology"
+        ]
+      },
+      {
+        "title": "Involute Spline Or Hex Bore",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.7724026121701527,
+        "keywords": [
+          "hex bore",
+          "spline",
+          "hex shaft",
+          "square bore",
+          "broach",
+          "1/2 hex",
+          "10mm hex"
+        ]
+      },
+      {
+        "title": "FeatureScript Example loft transition square to circle",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 0.7622695382030042,
+        "keywords": [
+          "loft",
+          "transition",
+          "square",
+          "to",
+          "circle",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      },
+      {
+        "title": "Lofted Airfoil Section Stack",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 0.7590002719839233,
+        "keywords": [
+          "airfoil",
+          "loft",
+          "chord",
+          "thickness",
+          "span",
+          "skFitSpline"
+        ]
+      },
+      {
+        "title": "Nozzle Or Spout Shape",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.7468909419753647,
+        "keywords": [
+          "nozzle",
+          "spout",
+          "injector",
+          "tip",
+          "spray nozzle",
+          "cone tip",
+          "transition fitting"
+        ]
+      },
+      {
+        "title": "Mounting Bracket With Slots",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.7467132097919813,
+        "keywords": [
+          "slot",
+          "adjustment slot",
+          "mounting slot",
+          "elongated hole",
+          "adjustment",
+          "slotted bracket"
+        ]
+      }
+    ],
+    "pruningRows": [
+      {
+        "title": "Loft Profiles Must Be Topologically Similar",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.94,
+        "score": 0.8071128723720622,
+        "keywords": [
+          "loft",
+          "profile similarity",
+          "circle rectangle",
+          "intermediate profile",
+          "fallback"
+        ]
+      }
+    ],
+    "featureScriptSnippets": [
+      {
+        "file": "loft_transition_square_to_circle.fs",
+        "score": 11
+      },
+      {
+        "file": "vase_multi_profile_loft.fs",
+        "score": 5
+      },
+      {
+        "file": "hybrid_organic_flange.fs",
+        "score": 3
+      },
+      {
+        "file": "lofted_airfoil.fs",
+        "score": 3
+      }
+    ],
+    "memoryMatches": [
+      {
+        "memory_id": "a3a98eeb-9ef5-464d-a8aa-511aff6fb309",
+        "score_rank": 1,
+        "score_snapshot": 0.8125281311809358,
+        "neural_score": 0.834050046241272,
+        "feature_vector": [
+          0.75,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "ba411df4-73c3-4a0e-b22e-33b4d05e30c9",
+        "score_rank": 2,
+        "score_snapshot": 0.8071128723720622,
+        "neural_score": 0.8330569833908192,
+        "feature_vector": [
+          0.625,
+          0,
+          0.94,
+          1,
+          0.5,
+          0,
+          0.55,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "d1cd85ef-02f2-47df-9390-feed438f8a29",
+        "score_rank": 3,
+        "score_snapshot": 0.8029532941748956,
+        "neural_score": 0.8332140660460877,
+        "feature_vector": [
+          0.625,
+          0,
+          0.86,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "b249103f-51bf-4c24-a519-add581fca221",
+        "score_rank": 4,
+        "score_snapshot": 0.7724026121701527,
+        "neural_score": 0.8335110636938485,
+        "feature_vector": [
+          0.5,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "a8f25cf2-1007-4257-bfee-77e7f560fa33",
+        "score_rank": 5,
+        "score_snapshot": 0.7622695382030042,
+        "neural_score": 0.8328706741327567,
+        "feature_vector": [
+          0.625,
+          0,
+          0.9,
+          1,
+          0.5,
+          0,
+          0.75,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "136fb31b-41a1-4f71-b8d1-36d6671d024a",
+        "score_rank": 6,
+        "score_snapshot": 0.7590002719839233,
+        "neural_score": 0.832516385750892,
+        "feature_vector": [
+          0.375,
+          0,
+          0.86,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "f2fa02f6-645c-4b00-bac8-b00339f03da3",
+        "score_rank": 7,
+        "score_snapshot": 0.7468909419753647,
+        "neural_score": 0.8333361251144863,
+        "feature_vector": [
+          0.5,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "e28e68f0-6b29-4fc7-9f84-2272e7edc438",
+        "score_rank": 8,
+        "score_snapshot": 0.7467132097919813,
+        "neural_score": 0.8330747542565695,
+        "feature_vector": [
+          0.375,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      }
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "repairs": [],
+    "fallbackTemplate": false,
+    "fallbackFile": null
+  },
+  "generationId": "81019820-59c0-4618-9b8f-d63f78ed3ae8"
+}

@@ -1,6 +1,6 @@
 import Groq from "groq-sdk";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "missing-groq-api-key" });
 const TEXT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const FAST_MODEL = process.env.GROQ_FAST_MODEL || "openai/gpt-oss-20b";
 const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || TEXT_MODEL;
@@ -11,6 +11,17 @@ const MAX_COMPLETION_TOKENS = Math.max(512, Number(process.env.GROQ_MAX_COMPLETI
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // Templates stay available as a safety net, but AI-first generation is now the default path.
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
+
+export const CAD_MLLM_PLAN_PROMPT = `CAD-MLLM planning pass:
+1. Classify the requested shape and extract editable parameters.
+2. Decompose the model into revolve, loft, sweep, extrude, shell, boolean, fillet, chamfer, or pattern subtasks.
+3. Retrieve matching cad_knowledge, cad_pruning_table, cad_memory, dataset examples, and FeatureScript snippets for each subtask.
+4. Prefer command-sequence style construction: solved sketch/profile first, then a downstream solid operation.
+5. Emit a short ordered plan with operation, parameters, validation rules, and fallback template for each subtask.`;
+
+export const CAD_MLLM_EXECUTE_PROMPT = `CAD-MLLM execution pass:
+Use retrieved examples and pruning rules to write one complete FeatureScript 2931 file.
+Expose all user-editable dimensions in precondition, call skSolve before downstream operations, use real Line axes for revolves, use profileSubqueries for opLoft, use connected edge paths for opSweep, validate the static rules, repair once if needed, then return compile-safe FeatureScript only.`;
 
 function stripJson(text) {
   const m = text?.match(/```json?\s*([\s\S]*?)```/i);
@@ -542,9 +553,10 @@ function tCone(d) {
         skLineSegment(profileSketch, "side", { "start" : vector(bRv, 0  ) * inch, "end" : vector(tRv, htv) * inch });
         skLineSegment(profileSketch, "top",  { "start" : vector(tRv, htv) * inch, "end" : vector(0,   htv) * inch });
         skSolve(profileSketch);
+        var revolveAxis = line(skPlane.origin, cross(skPlane.normal, skPlane.x));
         opRevolve(context, id + "cone", {
             "entities"     : qSketchRegion(id + "profile"),
-            "axis"         : line(skPlane.origin, skPlane.normal),
+            "axis"         : revolveAxis,
             "angleForward" : 2 * PI * radian
         });`,
   };
@@ -1426,6 +1438,36 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   return lines.join("\n");
 }
 // -----------------------------------MAIN PROMPT FOR THE AI--------------------------------------------------------------
+export const CAD_MLLM_PLAN_PROMPT_TEMPLATE = `You are the planner in a CAD-MLLM-style CAD generation loop.
+Given a user prompt plus optional multimodal descriptors, return a concise JSON plan:
+{
+  "shapeClass": "organic | loft | sweep | enclosure | flange | hybrid | prismatic | custom",
+  "parameters": [{"name":"param","value":"default or parsed value","unit":"inch|degree|unitless|boolean"}],
+  "subtasks": [
+    {
+      "id": "short-id",
+      "operation": "revolve | loft | sweep | extrude | shell | fillet | chamfer | boolean | pattern",
+      "goal": "what this step creates",
+      "retrievalKeywords": ["keywords for cad_knowledge/cad_pruning_table/cad_memory"],
+      "validationFocus": ["skSolve", "closed profile", "axis is Line"]
+    }
+  ],
+  "fallbackTemplate": "revolve_carrot | loft_transition | sweep_pipe | shell_enclosure | hybrid_organic_flange | box"
+}
+Prefer explicit decomposition, editable parameters, and robust primitive choices over brittle single-shot geometry.`;
+
+export const CAD_MLLM_EXECUTE_PROMPT_TEMPLATE = `You are the executor in a CAD-MLLM-style FeatureScript generation loop.
+Use the plan, retrieved cad_knowledge rows, pruning rules, cad_memory examples, and any multimodal descriptors.
+Return only compile-safe FeatureScript 2931 with this invariant set:
+- import onshape/std/geometry.fs version 2931.0
+- every user-editable value is exposed in precondition using isLength, isInteger, boolean, or Query selection
+- every sketch is solved with skSolve before opExtrude/opRevolve/opLoft/opSweep
+- opRevolve axis is a Line value, not a Query
+- opLoft uses profileSubqueries in ordered profile sketches
+- opSweep uses profiles and a connected path query
+- no unused helper variables
+- if validation fails, repair from pruning rules; after repair failure, use the nearest validated template.`;
+
 const CUSTOM_FEATURE_SYSTEM = `You are an expert Onshape FeatureScript author. You write production-quality custom features.
 Return ONLY a JSON object — no markdown, no explanation outside the JSON:
 {
@@ -1512,7 +1554,7 @@ Every file must follow this exact structure:
         "operationType" : NewBodyOperationType.NEW
     });
 - opRevolve: { "entities": Query, "axis": Line, "angleForward": 2 * PI * radian }
-- The revolve axis must be a Line value, such as line(skPlane.origin, skPlane.normal), not a query.
+- The revolve axis must be a Line value, not a query. For a profile drawn with radius on sketch X and height on sketch Y, use line(skPlane.origin, cross(skPlane.normal, skPlane.x)).
 - Organic tapered shapes like carrots should use a revolved spline profile with at least 4 profile points.
   A 2-point skFitSpline is not enough for a realistic tapered organic shape.
 - opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperationType.UNION }
@@ -1558,11 +1600,10 @@ opLoft — creates a solid by transitioning between two or more profile sketches
   skCircle(sk2, "c", { "center" : vector(0,0)*inch, "radius" : definition.topRadius });
   skSolve(sk2);
   opLoft(context, id + "loft1", {
-      "vertices"  : [],
-      "edges"     : [qSketchRegion(id + "prof1"), qSketchRegion(id + "prof2")]
+      "profileSubqueries" : [qSketchRegion(id + "prof1"), qSketchRegion(id + "prof2")]
   });
-  // For 3+ profiles, add more entries to "edges". Profiles must be in order along the path.
-  // NEVER add "sections" key — FS opLoft only uses "edges" and "vertices".
+  // For 3+ profiles, add more entries to "profileSubqueries". Profiles must be in order along the path.
+  // NEVER add "sections" or "edges" keys — FS 2931 opLoft uses "profileSubqueries".
 
 opSweep — extrudes a profile sketch along a path sketch:
   // Path sketch: a single open wire (skLineSegment, skArc, or skFitSpline curve)
@@ -1582,10 +1623,10 @@ opSweep — extrudes a profile sketch along a path sketch:
 opShell — hollows a solid body, leaving a specified wall thickness:
   // Must be called AFTER the solid body exists (after opExtrude or opRevolve).
   opShell(context, id + "shell1", {
-      "entities"   : qCreatedBy(id + "extrude1", EntityType.BODY),
-      "thickness"  : definition.wallThickness,
-      "excludeFaces" : qCapEntity(id + "extrude1", CapType.START)  // open face (leave it open)
+      "entities"  : qCapEntity(id + "extrude1", CapType.END, EntityType.FACE),
+      "thickness" : -definition.wallThickness
   });
+  // In FS 2931, pass the face(s) to remove/open as entities; do not use an excludeFaces key.
 
 opFillet — rounds selected edges:
   opFillet(context, id + "fillet1", {
@@ -1639,9 +1680,10 @@ Use a revolved spline profile for any organic tapered shape:
   skLineSegment(sk, "top",  { "start" : vector(0.02, htv)*inch, "end" : vector(0, htv)*inch });
   skLineSegment(sk, "base", { "start" : vector(0, 0)*inch, "end" : vector(bRv, 0)*inch });
   skSolve(sk);
+  var revolveAxis = line(skPlane.origin, cross(skPlane.normal, skPlane.x));
   opRevolve(context, id + "body", {
       "entities"     : qSketchRegion(id + "profile"),
-      "axis"         : line(skPlane.origin, skPlane.normal),
+      "axis"         : revolveAxis,
       "angleForward" : 2 * PI * radian
   });
   // The axis line must connect to the profile edges to close the region.
@@ -1897,6 +1939,9 @@ export function validateFeatureScript(code) {
     if (/"startAngle"\s*:|"endAngle"\s*:/.test(line)) {
       addIssue(lineNo, "opCylinder startAngle/endAngle keys do not exist — remove them.", line);
     }
+    if (/\bopLoft\s*\(/.test(text) && /"(edges|sections|vertices)"\s*:/.test(line)) {
+      addIssue(lineNo, "Use opLoft profileSubqueries; old edges/sections/vertices keys are invalid here.", line);
+    }
     if (/^\s*definition\.\w+\s+is\s+number\s*;/.test(line)) {
       addIssue(lineNo, "Use isInteger(..., {(unitless) : [...]}) instead of definition.x is number.", line);
     }
@@ -1979,6 +2024,7 @@ function hasFatalFeatureScriptPatterns(code) {
     [/"endAngle"\s*:/, "endAngle on opCylinder (invalid key)"],
     [/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/, "qSketchRegion called with a sketch variable instead of sketch id expression"],
     [/\bqSketchEntity\s*\(/, "qSketchEntity query used where a Line or sketch id is expected"],
+    [/\bopLoft[\s\S]*?"(edges|sections|vertices)"\s*:/, "opLoft with obsolete keys instead of profileSubqueries"],
 
     // Named top-level function declared INSIDE the feature body.
     // FS spec (toplevel.md): only lambdas (const x = function(...){}) are valid inside bodies.

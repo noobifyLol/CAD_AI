@@ -11,7 +11,7 @@ This app does not change Groq/Llama model weights in real time. Hosted LLM weigh
 - `public/index.html` is the browser UI structure and styles.
 - `public/script.js` is the browser logic. It calls the server, shows the small non-blocking timestamped result popup, sends Good/Needs Work feedback, and displays database diagnostics.
 - `data/cadKnowledge.json` is the local seed knowledge used even when Supabase memory is missing.
-- `scripts/seedCadKnowledge.js` copies `data/cadKnowledge.json` into Supabase `cad_knowledge` and `cad_memory`.
+- `scripts/seedCadKnowledge.js` is the full seed pass. It merges `data/cadKnowledge.json`, `data/cadKnowledge.csv`, `data/cadPruningTable.csv`, `data/cadKnowledge.new.csv`, `data/cadPruningTable.new.csv`, and `data/cadMemoryExamples.new.csv`, then writes the combined result into Supabase.
 - `scripts/dbLearningReport.js` prints the database health report from the terminal.
 - `supabase/migrations/20260505213000_adaptive_cad_memory.sql` creates the full database schema for generations, CAD knowledge, memory rows, feedback events, and scoring RPCs.
 
@@ -120,6 +120,8 @@ Then seed the starting CAD memory:
 npm run seed:knowledge
 ```
 
+If you already generated fresh `.new.csv` artifacts, `npm run seed:knowledge` will pick those up too. You do not have to import those CSVs separately unless you want to load only one file by itself.
+
 Check that every table exists:
 
 ```bash
@@ -147,14 +149,20 @@ You can also open the app, go to `Guide`, and click `Check Database`.
 2. Generate one simple known part, such as `box 2 x 2 x 1 inch`, then verify a row appears in `generations` and the popup reports local docs used.
 3. Click `Good Result`; verify `cad_feedback_events` gets a row and `cad_memory` has quality scores.
 4. Paste an Onshape compile error into Debug; verify `debug_sessions` gets a row and the original generation receives negative feedback.
-5. Seed the new advanced knowledge pack: `data/cadKnowledge.csv` now adds gear standards, pulley sizing, bearing envelopes, structural tube guidance, frame profiles, scissor simplification, enclosure shells, and freeform-relief guidance. `data/cadPruningTable.csv` adds routing rules that keep prompts on safer editable paths.
-6. Import only the new pruning rules when needed with `npm run import:cad-pruning`, or import the knowledge CSV alone with `npm run import:cad-knowledge`.
+5. Seed the new advanced knowledge pack: `data/cadKnowledge.csv` adds gear standards, pulley sizing, bearing envelopes, structural tube guidance, frame profiles, scissor simplification, enclosure shells, and freeform-relief guidance. `data/cadPruningTable.csv` adds routing rules that keep prompts on safer editable paths. The CAD-MLLM importer also writes `.new.csv` artifacts, and the seed script now ingests those too.
+6. Use `npm run seed:knowledge` for the normal path. Use `npm run import:cad-knowledge -- ./data/<file>.csv` or `node scripts/importCadKnowledgeCsv.js ./data/<file>.csv` only when you want to import one CSV without doing the whole combined seed pass.
 7. Expand the validated template set. `ROBOT_MECH` now exists for blocky cuboid mechs; simple cylinders with bores now use a vector-sketch template path, and the next best templates are picture frame, hinged scissors, lined-paper relief, tabletop vacuum shell, computer tower, speaker enclosure, and a dedicated timing pulley.
 8. Keep refining the FeatureScript validation step before returning code. It already rejects many known invalid APIs and query mistakes; the next best additions are more organic-profile checks and deeper revolve-axis validation.
 
 ## Seed Pack Update
 
-- `seed:knowledge` now merges `data/cadKnowledge.json`, `data/cadKnowledge.csv`, and `data/cadPruningTable.csv`.
+- `seed:knowledge` now merges:
+  - `data/cadKnowledge.json`
+  - `data/cadKnowledge.csv`
+  - `data/cadPruningTable.csv`
+  - `data/cadKnowledge.new.csv`
+  - `data/cadPruningTable.new.csv`
+  - `data/cadMemoryExamples.new.csv`
 - Local retrieval also reads the new CSV files even before Supabase is fully seeded, so the app can use those rules as prompt context right away.
 - The validated spur gear template was repaired to create its sketch correctly and keep tooth count, pitch radius, bore radius, face width, and pressure angle user-editable.
 - Seed knowledge and pruning rules were also cleaned up so the local memory no longer teaches contradictory cylinder guidance such as `prefer fCylinder` in one place and `use opCylinder` in another.

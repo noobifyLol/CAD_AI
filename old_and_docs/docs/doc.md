@@ -1125,3 +1125,6 @@ AreaStatusKey IssueGear template (tGear)BrokenHelper functions inside feature bo
 
 **5/12/26**
 Making notes on the many of the files, removing and redesigning things since the AI was use template instead of thinking how to code the Feature itself.
+
+**5/15/26 Breakthrought**
+There is other modeling LLM that I can reference my data base off of. Now all the thinking code is done, now it's all importing data.

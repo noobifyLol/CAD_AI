@@ -1,0 +1,336 @@
+{
+  "prompt": "Create a carrot-like body with a mounting flange: revolve organic profile for body, add flange ring with 4 bolt holes in circular pattern.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "organic_or_axisymmetric",
+    "operations": [
+      "revolve",
+      "loft",
+      "pattern"
+    ],
+    "parameters": [
+      {
+        "name": "baseRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "height",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "tipRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "curvatureFactor",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "squareSize",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "circleRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "profileOffset",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "flangeRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "boltRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "boltCircleRadius",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=revolve_organic",
+    "subtasks": [
+      {
+        "id": "step_1_revolve",
+        "operation": "revolve",
+        "goal": "build an axisymmetric body from a closed silhouette profile",
+        "retrievalKeywords": [
+          "revolve",
+          "carrot",
+          "like",
+          "body",
+          "mounting",
+          "flange",
+          "organic",
+          "profile",
+          "add",
+          "ring"
+        ],
+        "validationFocus": [
+          "closed profile",
+          "axis is Line",
+          "profile x >= 0",
+          "skSolve before opRevolve"
+        ]
+      },
+      {
+        "id": "step_2_loft",
+        "operation": "loft",
+        "goal": "transition between solved profile sketches on ordered offset planes",
+        "retrievalKeywords": [
+          "loft",
+          "carrot",
+          "like",
+          "body",
+          "mounting",
+          "flange",
+          "revolve",
+          "organic",
+          "profile",
+          "add"
+        ],
+        "validationFocus": [
+          "profile topology similarity",
+          "profileSubqueries",
+          "ordered planes",
+          "skSolve for every profile"
+        ]
+      },
+      {
+        "id": "step_3_pattern",
+        "operation": "pattern",
+        "goal": "add repeated mechanical features such as bolt holes or flange cuts",
+        "retrievalKeywords": [
+          "pattern",
+          "carrot",
+          "like",
+          "body",
+          "mounting",
+          "flange",
+          "revolve",
+          "organic",
+          "profile",
+          "add"
+        ],
+        "validationFocus": [
+          "bolt holes stay inside flange",
+          "boolean tools and targets are separate"
+        ]
+      }
+    ],
+    "fallbackTemplate": "hybrid_organic_flange.fs"
+  },
+  "multimodal": {
+    "shapeClass": "revolve_organic",
+    "controlPoints": [],
+    "descriptors": [],
+    "plannerHints": [],
+    "hasMultimodalInput": false,
+    "summary": "shapeClass=revolve_organic"
+  },
+  "generationStrategy": {
+    "requested": "ai_then_fallback",
+    "aiAvailable": true,
+    "used": "agent_template",
+    "preferTemplate": false,
+    "forceAi": false,
+    "initialTemplateFile": "hybrid_organic_flange.fs",
+    "generationError": "Connection error."
+  },
+  "retrieval": {
+    "keywords": [
+      "carrot",
+      "like",
+      "body",
+      "mounting",
+      "flange",
+      "revolve",
+      "organic",
+      "profile"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: hybrid_organic_flange.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.1,
+        "keywords": [
+          "hybrid_organic_flange",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: revolve_carrot.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.5,
+        "keywords": [
+          "revolve_carrot",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: bottle_revolve_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.4,
+        "keywords": [
+          "bottle_revolve_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: flange_pattern.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.4,
+        "keywords": [
+          "flange_pattern",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "Hybrid Organic Mechanical Flange",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 1.1409339040805033,
+        "keywords": [
+          "carrot",
+          "flange",
+          "bolt holes",
+          "opBoolean",
+          "revolve",
+          "pattern"
+        ]
+      },
+      {
+        "title": "Compound Cylinder With Mounting Flange",
+        "memory_type": "local_seed",
+        "source_table": null,
+        "quality_score": 0.65,
+        "score": 1.1172485438964117,
+        "keywords": [
+          "cylinder with flange",
+          "flanged cylinder",
+          "standoff",
+          "boss",
+          "integrated flange",
+          "adapter"
+        ]
+      },
+      {
+        "title": "FeatureScript Example revolve carrot",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 1.1064580154737687,
+        "keywords": [
+          "revolve",
+          "carrot",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      },
+      {
+        "title": "FeatureScript Example hybrid organic flange",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 1.1064580154737687,
+        "keywords": [
+          "hybrid",
+          "organic",
+          "flange",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      }
+    ],
+    "pruningRows": [],
+    "featureScriptSnippets": [
+      {
+        "file": "hybrid_organic_flange.fs",
+        "score": 11
+      },
+      {
+        "file": "revolve_carrot.fs",
+        "score": 5
+      },
+      {
+        "file": "bottle_revolve_loft.fs",
+        "score": 4
+      },
+      {
+        "file": "flange_pattern.fs",
+        "score": 4
+      }
+    ],
+    "memoryMatches": []
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "repairs": [],
+    "fallbackTemplate": false,
+    "fallbackFile": null
+  },
+  "generationId": null
+}

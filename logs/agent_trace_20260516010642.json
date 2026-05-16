@@ -1,0 +1,520 @@
+{
+  "prompt": "Create an organic carrot using a 5-point spline at 0%,20%,45%,70%,100% heights. Expose baseRadius, height, curvatureFactor, tipRadius. Use axis line at x=0, skSolve, opRevolve 360°. Return only compile-safe FeatureScript.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "organic_or_axisymmetric",
+    "operations": [
+      "revolve"
+    ],
+    "parameters": [
+      {
+        "name": "baseRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "height",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "tipRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "curvatureFactor",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=revolve_organic | controlPoints=5 | Use 5 prompt-derived control point stations.",
+    "subtasks": [
+      {
+        "id": "step_1_revolve",
+        "operation": "revolve",
+        "goal": "build an axisymmetric body from a closed silhouette profile",
+        "retrievalKeywords": [
+          "revolve",
+          "organic",
+          "carrot",
+          "point",
+          "spline",
+          "100",
+          "heights",
+          "expose",
+          "baseradius",
+          "height"
+        ],
+        "validationFocus": [
+          "closed profile",
+          "axis is Line",
+          "profile x >= 0",
+          "skSolve before opRevolve"
+        ]
+      }
+    ],
+    "fallbackTemplate": "revolve_carrot.fs"
+  },
+  "multimodal": {
+    "shapeClass": "revolve_organic",
+    "controlPoints": [
+      {
+        "station": 0,
+        "index": 0
+      },
+      {
+        "station": 0.2,
+        "index": 1
+      },
+      {
+        "station": 0.45,
+        "index": 2
+      },
+      {
+        "station": 0.7,
+        "index": 3
+      },
+      {
+        "station": 1,
+        "index": 4
+      }
+    ],
+    "descriptors": [],
+    "plannerHints": [
+      "Use 5 prompt-derived control point stations."
+    ],
+    "hasMultimodalInput": true,
+    "summary": "shapeClass=revolve_organic | controlPoints=5 | Use 5 prompt-derived control point stations."
+  },
+  "retrieval": {
+    "keywords": [
+      "organic",
+      "carrot",
+      "point",
+      "spline",
+      "100",
+      "heights",
+      "expose",
+      "baseradius"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: revolve_carrot.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.8,
+        "keywords": [
+          "revolve_carrot",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: hybrid_organic_flange.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1,
+        "keywords": [
+          "hybrid_organic_flange",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: bottle_revolve_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.7,
+        "keywords": [
+          "bottle_revolve_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: lofted_airfoil.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.5,
+        "keywords": [
+          "lofted_airfoil",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "Organic Carrot Or Root Shape",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.7,
+        "score": 0.8277430470989776,
+        "keywords": [
+          "carrot",
+          "root",
+          "organic",
+          "taper",
+          "spline",
+          "revolve",
+          "natural shape",
+          "vegetable",
+          "prop"
+        ]
+      },
+      {
+        "title": "Create an organic carrot‑like tapered body using a 5‑point spline profile and a revolve. Expose para",
+        "memory_type": "confirmed_generation",
+        "source_table": null,
+        "quality_score": 0.88,
+        "score": 0.8216120938158277,
+        "keywords": [
+          "organic",
+          "carrot",
+          "like",
+          "tapered",
+          "body",
+          "point",
+          "spline",
+          "profile",
+          "revolve",
+          "expose"
+        ]
+      },
+      {
+        "title": "Silhouette Driven Organic Revolve",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 0.8199257128651024,
+        "keywords": [
+          "revolve",
+          "silhouette",
+          "skFitSpline",
+          "axis",
+          "Line",
+          "carrot",
+          "vase",
+          "pod"
+        ]
+      },
+      {
+        "title": "Organic Revolved Taper Profile",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 0.8030722524088618,
+        "keywords": [
+          "carrot",
+          "organic",
+          "taper",
+          "revolve",
+          "skFitSpline",
+          "line axis",
+          "profile"
+        ]
+      },
+      {
+        "title": "Organic Spline Control Points Must Stay Stable",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.93,
+        "score": 0.7874355599563074,
+        "keywords": [
+          "skFitSpline",
+          "control points",
+          "self intersection",
+          "axis crossing",
+          "organic"
+        ]
+      },
+      {
+        "title": "Closed Spline Carrot Revolve with Full Constraints",
+        "memory_type": "feedback_lesson",
+        "source_table": null,
+        "quality_score": 0.6,
+        "score": 0.787036641178317,
+        "keywords": [
+          "cad"
+        ]
+      },
+      {
+        "title": "Closed‑Spline Carrot Revolve with Full Parameter Exposure",
+        "memory_type": "feedback_lesson",
+        "source_table": null,
+        "quality_score": 0.42,
+        "score": 0.7863122620444221,
+        "keywords": [
+          "cad"
+        ]
+      },
+      {
+        "title": "Create an organic tapered carrot‑like shape using a single clean side profile and a revolve. Expose ",
+        "memory_type": "confirmed_generation",
+        "source_table": null,
+        "quality_score": 0.68,
+        "score": 0.7834333195522758,
+        "keywords": [
+          "organic",
+          "tapered",
+          "carrot",
+          "like",
+          "shape",
+          "single",
+          "clean",
+          "side",
+          "profile",
+          "revolve"
+        ]
+      }
+    ],
+    "pruningRows": [
+      {
+        "title": "Organic Spline Control Points Must Stay Stable",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.93,
+        "score": 0.7874355599563074,
+        "keywords": [
+          "skFitSpline",
+          "control points",
+          "self intersection",
+          "axis crossing",
+          "organic"
+        ]
+      }
+    ],
+    "featureScriptSnippets": [
+      {
+        "file": "revolve_carrot.fs",
+        "score": 18
+      },
+      {
+        "file": "hybrid_organic_flange.fs",
+        "score": 10
+      },
+      {
+        "file": "bottle_revolve_loft.fs",
+        "score": 7
+      },
+      {
+        "file": "lofted_airfoil.fs",
+        "score": 5
+      }
+    ],
+    "memoryMatches": [
+      {
+        "memory_id": "ad1515d0-0b37-44c7-88a9-847d6814b37a",
+        "score_rank": 1,
+        "score_snapshot": 0.8277430470989776,
+        "neural_score": 0.834412455693154,
+        "feature_vector": [
+          0.875,
+          0,
+          0.7,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "6e5cac26-9927-4c7b-953a-98b9014a3752",
+        "score_rank": 2,
+        "score_snapshot": 0.8216120938158277,
+        "neural_score": 0.8349829158075107,
+        "feature_vector": [
+          0.75,
+          0,
+          0.88,
+          1,
+          0.5,
+          0,
+          1,
+          0.45,
+          0,
+          0,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "0cd78579-933e-4a99-a018-313b00fee25a",
+        "score_rank": 3,
+        "score_snapshot": 0.8199257128651024,
+        "neural_score": 0.8338195818960441,
+        "feature_vector": [
+          0.75,
+          0,
+          0.86,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "747a13df-3b44-4b7d-8c3e-b4e7bbd6eee6",
+        "score_rank": 4,
+        "score_snapshot": 0.8030722524088618,
+        "neural_score": 0.8333890046254498,
+        "feature_vector": [
+          0.625,
+          0,
+          0.86,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "ed3fe572-49d1-4877-8dad-f73f2235eb57",
+        "score_rank": 5,
+        "score_snapshot": 0.7874355599563074,
+        "neural_score": 0.8330918814224241,
+        "feature_vector": [
+          0.625,
+          0,
+          0.93,
+          1,
+          0.5,
+          0,
+          0.55,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "1305b6bc-76cd-49b0-a286-bfca7128944b",
+        "score_rank": 6,
+        "score_snapshot": 0.787036641178317,
+        "neural_score": 0.8321976629879104,
+        "feature_vector": [
+          0.625,
+          0,
+          0.6,
+          0,
+          0.5,
+          0,
+          0.82,
+          0.45,
+          0,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "3819184b-a62b-497b-bea3-9775ad4bd190",
+        "score_rank": 7,
+        "score_snapshot": 0.7863122620444221,
+        "neural_score": 0.8292980953465442,
+        "feature_vector": [
+          0.75,
+          0,
+          0.42,
+          0,
+          0,
+          1,
+          0.82,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "8cec26c6-c9c8-45de-b6dc-297a93560dea",
+        "score_rank": 8,
+        "score_snapshot": 0.7834333195522758,
+        "neural_score": 0.8318838199944469,
+        "feature_vector": [
+          0.75,
+          0,
+          0.68,
+          1,
+          0,
+          1,
+          1,
+          0.45,
+          0.15019048322368794,
+          0,
+          0.75
+        ],
+        "source_kind": "memory"
+      }
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "repairs": [],
+    "fallbackTemplate": false,
+    "fallbackFile": null
+  },
+  "generationId": "07beb498-df04-4411-84b7-e79ed490b802"
+}

@@ -44,6 +44,15 @@ function clampScore(value, fallback = 0.65) {
   return Math.max(0, Math.min(1, parsed));
 }
 
+function parseBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (value === undefined || value === null || value === "") return fallback;
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(text)) return true;
+  if (["false", "0", "no", "n"].includes(text)) return false;
+  return fallback;
+}
+
 // Shape type registry — keeps CSV/JSON values consistent with AI.js constants
 const KNOWN_SHAPES = new Set([
   "BOX", "ROBOT_MECH", "CYLINDER", "PLATE", "POLYGON", "LINKAGE",
@@ -88,7 +97,7 @@ function normalizeSeedEntry(raw, options = {}) {
     memoryType: normalizeText(raw.memory_type || raw.memoryType || memoryType),
     qualityScore: clampScore(raw.quality_score ?? raw.qualityScore ?? qualityScore),
     sourceTable: normalizeText(raw.source_table || raw.sourceTable || sourceTable),
-    memoryOnly: Boolean(raw.memory_only ?? raw.memoryOnly ?? memoryOnly),
+    memoryOnly: parseBoolean(raw.memory_only ?? raw.memoryOnly, memoryOnly),
   };
 }
 

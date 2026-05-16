@@ -1,0 +1,272 @@
+{
+  "prompt": "Create a transition from 2 inch square to 1 inch circle over 3 inches using opLoft. Expose height and profile offsets.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "loft",
+    "operations": [
+      "loft"
+    ],
+    "parameters": [
+      {
+        "name": "height",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "squareSize",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "circleRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "profileOffset",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=loft_transition",
+    "subtasks": [
+      {
+        "id": "step_1_loft",
+        "operation": "loft",
+        "goal": "transition between solved profile sketches on ordered offset planes",
+        "retrievalKeywords": [
+          "loft",
+          "transition",
+          "square",
+          "circle",
+          "over",
+          "oploft",
+          "expose",
+          "height",
+          "profile",
+          "offsets"
+        ],
+        "validationFocus": [
+          "profile topology similarity",
+          "profileSubqueries",
+          "ordered planes",
+          "skSolve for every profile"
+        ]
+      }
+    ],
+    "fallbackTemplate": "loft_transition_square_to_circle.fs"
+  },
+  "multimodal": {
+    "shapeClass": "loft_transition",
+    "controlPoints": [],
+    "descriptors": [],
+    "plannerHints": [],
+    "hasMultimodalInput": false,
+    "summary": "shapeClass=loft_transition"
+  },
+  "generationStrategy": {
+    "requested": "ai_then_fallback",
+    "aiAvailable": true,
+    "used": "agent_template",
+    "preferTemplate": false,
+    "forceAi": false,
+    "initialTemplateFile": "loft_transition_square_to_circle.fs",
+    "generationError": "Connection error."
+  },
+  "retrieval": {
+    "keywords": [
+      "transition",
+      "square",
+      "circle",
+      "over",
+      "oploft",
+      "expose",
+      "height",
+      "profile"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: loft_transition_square_to_circle.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.2,
+        "keywords": [
+          "loft_transition_square_to_circle",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: vase_multi_profile_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.5,
+        "keywords": [
+          "vase_multi_profile_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: bottle_revolve_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.3,
+        "keywords": [
+          "bottle_revolve_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: fillet_and_chamfer_example.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.3,
+        "keywords": [
+          "fillet_and_chamfer_example",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "opLoft Between Two Profiles",
+        "memory_type": "local_seed",
+        "source_table": null,
+        "quality_score": 0.65,
+        "score": 1.1499081791034667,
+        "keywords": [
+          "loft",
+          "opLoft",
+          "transition",
+          "profile",
+          "cross-section",
+          "airfoil",
+          "taper",
+          "blend"
+        ]
+      },
+      {
+        "title": "FeatureScript Example loft transition square to circle",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 1.1419662065651537,
+        "keywords": [
+          "loft",
+          "transition",
+          "square",
+          "to",
+          "circle",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      },
+      {
+        "title": "Multi Profile Loft Transition",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 1.1409339040805033,
+        "keywords": [
+          "opLoft",
+          "profileSubqueries",
+          "square",
+          "circle",
+          "intermediate",
+          "topology"
+        ]
+      },
+      {
+        "title": "Nozzle Or Spout Shape",
+        "memory_type": "local_seed",
+        "source_table": null,
+        "quality_score": 0.65,
+        "score": 1.1172485438964117,
+        "keywords": [
+          "nozzle",
+          "spout",
+          "injector",
+          "tip",
+          "spray nozzle",
+          "cone tip",
+          "transition fitting"
+        ]
+      }
+    ],
+    "pruningRows": [],
+    "featureScriptSnippets": [
+      {
+        "file": "loft_transition_square_to_circle.fs",
+        "score": 12
+      },
+      {
+        "file": "vase_multi_profile_loft.fs",
+        "score": 5
+      },
+      {
+        "file": "bottle_revolve_loft.fs",
+        "score": 3
+      },
+      {
+        "file": "fillet_and_chamfer_example.fs",
+        "score": 3
+      }
+    ],
+    "memoryMatches": []
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "repairs": [],
+    "fallbackTemplate": false,
+    "fallbackFile": null
+  },
+  "generationId": null
+}

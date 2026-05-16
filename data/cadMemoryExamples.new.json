@@ -1,0 +1,3121 @@
+[
+  {
+    "title": "FS Example: Bottle Revolve Loft",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/bottle_revolve_loft.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "revolve",
+      "organic",
+      "loft"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "revolve",
+      "organic",
+      "loft",
+      "bottle_revolve_loft"
+    ],
+    "parameter_hints": [
+      "location",
+      "bodyRadius",
+      "neckRadius",
+      "height"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/bottle_revolve_loft.fs as the validated template for featurescript example revolve organic loft prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Bottle Revolve Loft template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Fillet And Chamfer Example",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/fillet_and_chamfer_example.fs.",
+    "tags": [
+      "featurescript",
+      "example"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "fillet_and_chamfer_example"
+    ],
+    "parameter_hints": [
+      "location",
+      "width",
+      "depth",
+      "height",
+      "filletRadius",
+      "chamferWidth"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/fillet_and_chamfer_example.fs as the validated template for featurescript example prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Fillet And Chamfer Example template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Flange Pattern",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/flange_pattern.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "flange",
+      "hybrid"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "flange",
+      "hybrid",
+      "flange_pattern"
+    ],
+    "parameter_hints": [
+      "location",
+      "outerRadius",
+      "boreRadius",
+      "thickness",
+      "boltCircleRadius",
+      "boltHoleRadius",
+      "boltCount"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/flange_pattern.fs as the validated template for featurescript example flange hybrid prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Flange Pattern template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Hybrid Organic Flange",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/hybrid_organic_flange.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "flange",
+      "hybrid"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "flange",
+      "hybrid",
+      "hybrid_organic_flange"
+    ],
+    "parameter_hints": [
+      "location",
+      "baseRadius",
+      "height",
+      "tipRadius",
+      "flangeRadius",
+      "boltCircleRadius",
+      "boltRadius",
+      "flangeThickness"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/hybrid_organic_flange.fs as the validated template for featurescript example flange hybrid prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Hybrid Organic Flange template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Loft Transition Square To Circle",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/loft_transition_square_to_circle.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "loft"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "loft",
+      "loft_transition_square_to_circle"
+    ],
+    "parameter_hints": [
+      "location",
+      "squareSize",
+      "circleRadius",
+      "height",
+      "profileOffset"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/loft_transition_square_to_circle.fs as the validated template for featurescript example loft prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Loft Transition Square To Circle template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Lofted Airfoil",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/lofted_airfoil.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "loft"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "loft",
+      "lofted_airfoil"
+    ],
+    "parameter_hints": [
+      "location",
+      "rootChord",
+      "tipChord",
+      "span",
+      "thicknessPercent"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/lofted_airfoil.fs as the validated template for featurescript example loft prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Lofted Airfoil template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Revolve Carrot",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/revolve_carrot.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "revolve",
+      "organic"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "revolve",
+      "organic",
+      "revolve_carrot"
+    ],
+    "parameter_hints": [
+      "location",
+      "baseRadius",
+      "height",
+      "tipRadius",
+      "curvatureFactor"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/revolve_carrot.fs as the validated template for featurescript example revolve organic prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Revolve Carrot template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Shell Enclosure Open Top",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/shell_enclosure_open_top.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "shell"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "shell",
+      "shell_enclosure_open_top"
+    ],
+    "parameter_hints": [
+      "location",
+      "width",
+      "depth",
+      "height",
+      "wallThickness",
+      "openTop"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/shell_enclosure_open_top.fs as the validated template for featurescript example shell prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Shell Enclosure Open Top template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Sweep Pipe Elbow",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/sweep_pipe_elbow.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "sweep"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "sweep",
+      "sweep_pipe_elbow"
+    ],
+    "parameter_hints": [
+      "location",
+      "outerRadius",
+      "bendRadius"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/sweep_pipe_elbow.fs as the validated template for featurescript example sweep prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Sweep Pipe Elbow template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "FS Example: Vase Multi Profile Loft",
+    "summary": "Validated FeatureScript example stored at data/fs_examples/vase_multi_profile_loft.fs.",
+    "tags": [
+      "featurescript",
+      "example",
+      "loft"
+    ],
+    "keywords": [
+      "featurescript",
+      "example",
+      "loft",
+      "vase_multi_profile_loft"
+    ],
+    "parameter_hints": [
+      "location",
+      "height",
+      "baseRadius",
+      "bellyRadius",
+      "neckRadius"
+    ],
+    "modeling_notes": [
+      "Starts with FeatureScript 2931 and geometry.fs 2931.0.",
+      "Exposes editable parameters in precondition.",
+      "Calls skSolve before downstream modeling operations."
+    ],
+    "feature_pattern": "Use data/fs_examples/vase_multi_profile_loft.fs as the validated template for featurescript example loft prompts.",
+    "failure_modes": [
+      "template drift",
+      "parameter not exposed",
+      "missing skSolve"
+    ],
+    "validation_rules": [
+      "FeatureScript 2931 header",
+      "skSolve before operation",
+      "no unused helper variables"
+    ],
+    "example_prompt": "Use the Vase Multi Profile Loft template.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.93,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0021/00218415",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (ExtrudeFeature:3 Sketch:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.04"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:3 Sketch:1.",
+      "Profile curve types: Circle3D:5.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0021/00218415: ExtrudeFeature:3 Sketch:1; curves Circle3D:5.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0037/00377358",
+    "summary": "Dataset-derived CAD command descriptor with 3 entities (ExtrudeFeature:1 Sketch:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.002"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:1 Sketch:2.",
+      "Profile curve types: Line3D:18 Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0037/00377358: ExtrudeFeature:1 Sketch:2; curves Line3D:18 Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0077/00776311",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.15"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0077/00776311: Sketch:1 ExtrudeFeature:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0077/00774067",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.006350000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:4 Line3D:14 Arc3D:1.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0077/00774067: Sketch:2 ExtrudeFeature:2; curves Circle3D:4 Line3D:14 Arc3D:1.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0058/00580713",
+    "summary": "Dataset-derived CAD command descriptor with 6 entities (Sketch:3 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.050800000000000005"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:3.",
+      "Profile curve types: Line3D:12.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0058/00580713: Sketch:3 ExtrudeFeature:3; curves Line3D:12.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0005/00058615",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=2"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0005/00058615: Sketch:1 ExtrudeFeature:1; curves Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0005/00059807",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0635"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:2.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0005/00059807: Sketch:2 ExtrudeFeature:2; curves Circle3D:2.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0005/00050876",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0031750000000000003"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:12 Arc3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0005/00050876: Sketch:1 ExtrudeFeature:1; curves Line3D:12 Arc3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0046/00469414",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.05"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4 Arc3D:6.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0046/00469414: Sketch:1 ExtrudeFeature:1; curves Line3D:4 Arc3D:6.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0086/00868338",
+    "summary": "Dataset-derived CAD command descriptor with 6 entities (Sketch:3 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.006"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:3.",
+      "Profile curve types: Circle3D:12 Line3D:24.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0086/00868338: Sketch:3 ExtrudeFeature:3; curves Circle3D:12 Line3D:24.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0022/00221084",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.025"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:1 Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0022/00221084: Sketch:2 ExtrudeFeature:2; curves Circle3D:1 Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0022/00229218",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.45720000000000005"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Line3D:22.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0022/00229218: Sketch:2 ExtrudeFeature:2; curves Line3D:22.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0022/00221760",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.635"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:1.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0022/00221760: Sketch:1 ExtrudeFeature:1; curves Circle3D:1.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0022/00227336",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.025"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:16 Arc3D:2.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0022/00227336: Sketch:1 ExtrudeFeature:1; curves Line3D:16 Arc3D:2.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0015/00151562",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0032512000000000005"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0015/00151562: Sketch:1 ExtrudeFeature:1; curves Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0015/00158416",
+    "summary": "Dataset-derived CAD command descriptor with 6 entities (Sketch:3 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.127"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:3.",
+      "Profile curve types: Circle3D:2 Line3D:1 Arc3D:1.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0015/00158416: Sketch:3 ExtrudeFeature:3; curves Circle3D:2 Line3D:1 Arc3D:1.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0015/00156664",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0025400000000000006"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:11.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0015/00156664: Sketch:1 ExtrudeFeature:1; curves Circle3D:11.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0018/00184348",
+    "summary": "Dataset-derived CAD command descriptor with 3 entities (Sketch:2 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0005080000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0018/00184348: Sketch:2 ExtrudeFeature:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0018/00180088",
+    "summary": "Dataset-derived CAD command descriptor with 6 entities (Sketch:3 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.3"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:3.",
+      "Profile curve types: Circle3D:8.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0018/00180088: Sketch:3 ExtrudeFeature:3; curves Circle3D:8.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0028/00285881",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (ExtrudeFeature:1 Sketch:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.005"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:1 Sketch:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0028/00285881: ExtrudeFeature:1 Sketch:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0028/00284817",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (ExtrudeFeature:2 Sketch:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.03"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:2 Sketch:2.",
+      "Profile curve types: Line3D:13.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0028/00284817: ExtrudeFeature:2 Sketch:2; curves Line3D:13.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0078/00782325",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.003"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:12.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0078/00782325: Sketch:1 ExtrudeFeature:1; curves Line3D:12.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0087/00874977",
+    "summary": "Dataset-derived CAD command descriptor with 6 entities (Sketch:3 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.635"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:3.",
+      "Profile curve types: Line3D:12.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0087/00874977: Sketch:3 ExtrudeFeature:3; curves Line3D:12.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0050/00503736",
+    "summary": "Dataset-derived CAD command descriptor with 5 entities (Sketch:2 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "arc3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.01905"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:3.",
+      "Profile curve types: Circle3D:1 Arc3D:3 Line3D:7.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0050/00503736: Sketch:2 ExtrudeFeature:3; curves Circle3D:1 Arc3D:3 Line3D:7.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0050/00500655",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.1524"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:8.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0050/00500655: Sketch:1 ExtrudeFeature:1; curves Line3D:8.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0050/00508427",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.555"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:6.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0050/00508427: Sketch:2 ExtrudeFeature:2; curves Circle3D:6.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0025/00250773",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.10160000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0025/00250773: Sketch:2 ExtrudeFeature:2; curves Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0067/00675619",
+    "summary": "Dataset-derived CAD command descriptor with 7 entities (Sketch:5 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.050800000000000005"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:5 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:20 Line3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0067/00675619: Sketch:5 ExtrudeFeature:2; curves Circle3D:20 Line3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0062/00624995",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.050800000000000005"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Line3D:12.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0062/00624995: Sketch:2 ExtrudeFeature:2; curves Line3D:12.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0062/00624279",
+    "summary": "Dataset-derived CAD command descriptor with 3 entities (Sketch:2 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.005080000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:3 Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0062/00624279: Sketch:2 ExtrudeFeature:1; curves Circle3D:3 Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0008/00081718",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.006350000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:6 Line3D:2 Arc3D:2.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0008/00081718: Sketch:1 ExtrudeFeature:1; curves Circle3D:6 Line3D:2 Arc3D:2.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0008/00080715",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (ExtrudeFeature:1 Sketch:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.00381"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:1 Sketch:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0008/00080715: ExtrudeFeature:1 Sketch:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0008/00087197",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.003"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:4 Line3D:4 Arc3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0008/00087197: Sketch:1 ExtrudeFeature:1; curves Circle3D:4 Line3D:4 Arc3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0060/00600838",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.025"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0060/00600838: Sketch:1 ExtrudeFeature:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0060/00604550",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.5588000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0060/00604550: Sketch:1 ExtrudeFeature:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0060/00602952",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.025400000000000002"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Line3D:4 Circle3D:1.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0060/00602952: Sketch:2 ExtrudeFeature:2; curves Line3D:4 Circle3D:1.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0060/00601219",
+    "summary": "Dataset-derived CAD command descriptor with 5 entities (Sketch:3 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.9144000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:2 Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0060/00601219: Sketch:3 ExtrudeFeature:2; curves Circle3D:2 Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0003/00034076",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (ExtrudeFeature:2 Sketch:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0032500000000000003"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:2 Sketch:2.",
+      "Profile curve types: Circle3D:6.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0003/00034076: ExtrudeFeature:2 Sketch:2; curves Circle3D:6.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0061/00613454",
+    "summary": "Dataset-derived CAD command descriptor with 3 entities (Sketch:2 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.052000000000000005"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:6.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0061/00613454: Sketch:2 ExtrudeFeature:1; curves Line3D:6.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0061/00611893",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.036068"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0061/00611893: Sketch:1 ExtrudeFeature:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0052/00521742",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=-0.025400000000000002"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0052/00521742: Sketch:1 ExtrudeFeature:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0002/00020470",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (ExtrudeFeature:1 Sketch:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=-0.002"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:1 Sketch:1.",
+      "Profile curve types: Line3D:4 Circle3D:2.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0002/00020470: ExtrudeFeature:1 Sketch:1; curves Line3D:4 Circle3D:2.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0031/00318479",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (ExtrudeFeature:2 Sketch:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.01"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:2 Sketch:2.",
+      "Profile curve types: Line3D:8.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0031/00318479: ExtrudeFeature:2 Sketch:2; curves Line3D:8.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0065/00655843",
+    "summary": "Dataset-derived CAD command descriptor with 6 entities (Sketch:3 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.006500000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:3.",
+      "Profile curve types: Line3D:12.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0065/00655843: Sketch:3 ExtrudeFeature:3; curves Line3D:12.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0065/00655097",
+    "summary": "Dataset-derived CAD command descriptor with 3 entities (Sketch:2 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.006350000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4 Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0065/00655097: Sketch:2 ExtrudeFeature:1; curves Line3D:4 Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0065/00656942",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.025400000000000002"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:11.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0065/00656942: Sketch:1 ExtrudeFeature:1; curves Line3D:11.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0076/00762177",
+    "summary": "Dataset-derived CAD command descriptor with 5 entities (Sketch:3 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.01"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:2.",
+      "Profile curve types: Line3D:4 Circle3D:1.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0076/00762177: Sketch:3 ExtrudeFeature:2; curves Line3D:4 Circle3D:1.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0076/00760308",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=1.5"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:20.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0076/00760308: Sketch:1 ExtrudeFeature:1; curves Line3D:20.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0033/00335212",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.254"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0033/00335212: Sketch:1 ExtrudeFeature:1; curves Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0033/00330574",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.127"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:2 Line3D:16.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0033/00330574: Sketch:2 ExtrudeFeature:2; curves Circle3D:2 Line3D:16.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0033/00336334",
+    "summary": "Dataset-derived CAD command descriptor with 3 entities (Sketch:2 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d",
+      "arc3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.003"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4 Arc3D:2.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0033/00336334: Sketch:2 ExtrudeFeature:1; curves Line3D:4 Arc3D:2.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0033/00331213",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (ExtrudeFeature:1 Sketch:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.01"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:1 Sketch:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0033/00331213: ExtrudeFeature:1 Sketch:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0017/00171972",
+    "summary": "Dataset-derived CAD command descriptor with 3 entities (Sketch:2 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d",
+      "arc3d",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0025"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:6 Arc3D:14 Line3D:43.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0017/00171972: Sketch:2 ExtrudeFeature:1; curves Circle3D:6 Arc3D:14 Line3D:43.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0017/00179978",
+    "summary": "Dataset-derived CAD command descriptor with 5 entities (ExtrudeFeature:2 Sketch:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.6"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:2 Sketch:3.",
+      "Profile curve types: Line3D:24.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0017/00179978: ExtrudeFeature:2 Sketch:3; curves Line3D:24.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0044/00448072",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (ExtrudeFeature:1 Sketch:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.006350000000000001"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:1 Sketch:1.",
+      "Profile curve types: Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0044/00448072: ExtrudeFeature:1 Sketch:1; curves Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0044/00443043",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.2499995"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Line3D:4.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0044/00443043: Sketch:1 ExtrudeFeature:1; curves Line3D:4.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0090/00901593",
+    "summary": "Dataset-derived CAD command descriptor with 4 entities (Sketch:2 ExtrudeFeature:2).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0032500000000000003"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:2 ExtrudeFeature:2.",
+      "Profile curve types: Circle3D:6.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0090/00901593: Sketch:2 ExtrudeFeature:2; curves Circle3D:6.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0035/00356511",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (ExtrudeFeature:1 Sketch:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "extrudefeature",
+      "sketch",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.025400000000000002"
+    ],
+    "modeling_notes": [
+      "Entity types: ExtrudeFeature:1 Sketch:1.",
+      "Profile curve types: Line3D:8.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0035/00356511: ExtrudeFeature:1 Sketch:1; curves Line3D:8.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0035/00357169",
+    "summary": "Dataset-derived CAD command descriptor with 2 entities (Sketch:1 ExtrudeFeature:1).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "circle3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.0051"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:1 ExtrudeFeature:1.",
+      "Profile curve types: Circle3D:3.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0035/00357169: Sketch:1 ExtrudeFeature:1; curves Circle3D:3.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  },
+  {
+    "title": "Omni-CAD Command Sequence 0030/00307295",
+    "summary": "Dataset-derived CAD command descriptor with 6 entities (Sketch:3 ExtrudeFeature:3).",
+    "tags": [
+      "omni-cad",
+      "deepcad",
+      "dataset",
+      "cad-json",
+      "command-sequence"
+    ],
+    "keywords": [
+      "dataset",
+      "cad_json",
+      "sketch",
+      "extrudefeature",
+      "line3d"
+    ],
+    "parameter_hints": [
+      "operationCount",
+      "curveTypes",
+      "maxExtent=0.025400000000000002"
+    ],
+    "modeling_notes": [
+      "Entity types: Sketch:3 ExtrudeFeature:3.",
+      "Profile curve types: Line3D:13.",
+      "Use this row as retrieval context for command ordering and sketch topology, not as raw FeatureScript."
+    ],
+    "feature_pattern": "CAD JSON sequence 0030/00307295: Sketch:3 ExtrudeFeature:3; curves Line3D:13.",
+    "failure_modes": [
+      "lost command order",
+      "unclosed dataset profile",
+      "non-parametric replay"
+    ],
+    "validation_rules": [
+      "preserve sketch before feature order",
+      "convert profile loops to closed FeatureScript sketches"
+    ],
+    "example_prompt": "Create a simple parametric part following this dataset command sequence.",
+    "shape_type": "CUSTOM",
+    "memory_type": "seed",
+    "quality_score": 0.74,
+    "source_table": "cad_memory",
+    "memory_only": true
+  }
+]

@@ -11,7 +11,10 @@
     "import:cad-knowledge": "node scripts/importCadKnowledgeCsv.js",
     "import:cad-pruning": "node scripts/importCadKnowledgeCsv.js ./data/cadPruningTable.csv",
     "prune:cad-memory": "node scripts/pruneCadMemory.js",
-    "db:learning-report": "node scripts/dbLearningReport.js"
+    "db:learning-report": "node scripts/dbLearningReport.js",
+    "build:research-import": "node scripts/build_research_import_artifacts.js",
+    "smoke:agent": "node scripts/run_smoke_tests.js /agent/run",
+    "train:adaptive": "node scripts/train_adaptive_network.js data/adaptive_training.jsonl"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",

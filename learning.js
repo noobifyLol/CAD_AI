@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ADAPTIVE_NETWORK_KEY,
@@ -272,6 +272,29 @@ function toFsPath(value) {
   return value instanceof URL ? fileURLToPath(value) : String(value);
 }
 
+function loadOptionalCsv(pathOrUrl, options = {}) {
+  const filePath = toFsPath(pathOrUrl);
+  if (!filePath || !existsSync(filePath)) return [];
+  return loadSeedEntriesFromCsv(filePath, options);
+}
+
+function siblingPath(pathOrUrl, fileName) {
+  const filePath = toFsPath(pathOrUrl);
+  return filePath ? join(dirname(filePath), fileName) : null;
+}
+
+function loadLocalAdaptiveStateFile() {
+  const statePath = fileURLToPath(new URL("./data/adaptive_state.json", import.meta.url));
+  if (!existsSync(statePath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, "utf8"));
+    return parsed?.state || parsed;
+  } catch (err) {
+    console.warn(`[Learning] Could not read local adaptive state: ${err.message}`);
+    return null;
+  }
+}
+
 function listMarkdownFiles(rootPath) {
   if (!rootPath || !existsSync(rootPath)) return [];
 
@@ -522,10 +545,27 @@ export function createLearningService({
       qualityScore: 0.72,
       sourceTable: "cad_knowledge",
     }),
+    ...loadOptionalCsv(siblingPath(cadKnowledgeCsvPath, "cadKnowledge.new.csv"), {
+      memoryType: "local_seed",
+      qualityScore: 0.86,
+      sourceTable: "cad_knowledge",
+    }),
     ...loadSeedEntriesFromCsv(cadPruningPath, {
       memoryType: "local_pruning_rule",
       qualityScore: 0.82,
       sourceTable: "pruning_table",
+      memoryOnly: true,
+    }),
+    ...loadOptionalCsv(siblingPath(cadPruningPath, "cadPruningTable.new.csv"), {
+      memoryType: "local_pruning_rule",
+      qualityScore: 0.9,
+      sourceTable: "pruning_table",
+      memoryOnly: true,
+    }),
+    ...loadOptionalCsv(siblingPath(cadKnowledgeCsvPath, "cadMemoryExamples.new.csv"), {
+      memoryType: "fs_example",
+      qualityScore: 0.88,
+      sourceTable: "cad_memory",
       memoryOnly: true,
     }),
   ]);
@@ -545,8 +585,9 @@ export function createLearningService({
     }
 
     if (!supabase) {
-      adaptiveStateSource = "default";
-      adaptiveStateCache = createInitialAdaptiveState();
+      const localState = loadLocalAdaptiveStateFile();
+      adaptiveStateSource = localState ? "local_file" : "default";
+      adaptiveStateCache = localState || createInitialAdaptiveState();
       adaptiveStateLoadedAt = now;
       return adaptiveStateCache;
     }
@@ -559,14 +600,16 @@ export function createLearningService({
 
     if (error) {
       if (!isMissingDbObject(error)) warnOnce(warned, "cad_learning_state", `[DB] Could not load adaptive neural state: ${error.message}`);
-      adaptiveStateSource = "default";
-      adaptiveStateCache = createInitialAdaptiveState();
+      const localState = loadLocalAdaptiveStateFile();
+      adaptiveStateSource = localState ? "local_file" : "default";
+      adaptiveStateCache = localState || createInitialAdaptiveState();
       adaptiveStateLoadedAt = now;
       return adaptiveStateCache;
     }
 
-    adaptiveStateSource = data?.state ? "supabase" : "default";
-    adaptiveStateCache = data?.state || createInitialAdaptiveState();
+    const localState = data?.state ? null : loadLocalAdaptiveStateFile();
+    adaptiveStateSource = data?.state ? "supabase" : localState ? "local_file" : "default";
+    adaptiveStateCache = data?.state || localState || createInitialAdaptiveState();
     adaptiveStateLoadedAt = now;
     return adaptiveStateCache;
   }

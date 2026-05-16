@@ -1,0 +1,500 @@
+{
+  "prompt": "Create a 90-degree elbow pipe with 0.5 inch outer radius and 2 inch bend radius using opSweep.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "sweep",
+    "operations": [
+      "sweep"
+    ],
+    "parameters": [
+      {
+        "name": "outerRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "bendRadius",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=sweep_path",
+    "subtasks": [
+      {
+        "id": "step_1_sweep",
+        "operation": "sweep",
+        "goal": "sweep a circular or custom profile along a connected wire path",
+        "retrievalKeywords": [
+          "sweep",
+          "degree",
+          "elbow",
+          "pipe",
+          "outer",
+          "radius",
+          "bend",
+          "opsweep",
+          "shapeclass",
+          "sweep_path"
+        ],
+        "validationFocus": [
+          "connected path",
+          "profile plane perpendicular to tangent",
+          "skSolve before opSweep"
+        ]
+      }
+    ],
+    "fallbackTemplate": "sweep_pipe_elbow.fs"
+  },
+  "multimodal": {
+    "shapeClass": "sweep_path",
+    "controlPoints": [],
+    "descriptors": [],
+    "plannerHints": [],
+    "hasMultimodalInput": false,
+    "summary": "shapeClass=sweep_path"
+  },
+  "retrieval": {
+    "keywords": [
+      "degree",
+      "elbow",
+      "pipe",
+      "outer",
+      "radius",
+      "bend",
+      "opsweep",
+      "sweep"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: sweep_pipe_elbow.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.2,
+        "keywords": [
+          "sweep_pipe_elbow",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: flange_pattern.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.2,
+        "keywords": [
+          "flange_pattern",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: hybrid_organic_flange.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.2,
+        "keywords": [
+          "hybrid_organic_flange",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: bottle_revolve_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.1,
+        "keywords": [
+          "bottle_revolve_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "Sweep Along Connected Tube Path",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 0.8336432785497502,
+        "keywords": [
+          "opSweep",
+          "profile",
+          "path",
+          "arc",
+          "wire",
+          "perpendicular",
+          "pipe elbow"
+        ]
+      },
+      {
+        "title": "FeatureScript Cylinder And Bore Profile",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.91,
+        "score": 0.8044950805393254,
+        "keywords": [
+          "opCylinder",
+          "cylinder",
+          "shaft",
+          "rod",
+          "pin",
+          "primitive",
+          "bottomCenter",
+          "topCenter",
+          "radius",
+          "vector",
+          "skCircle",
+          "bore"
+        ]
+      },
+      {
+        "title": "Unsupported Timing Pulley Teeth Simplify To A Pitch Cylinder",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.82,
+        "score": 0.7726791294763071,
+        "keywords": [
+          "timing pulley",
+          "gt2",
+          "htd",
+          "pitch diameter",
+          "idler",
+          "bore"
+        ]
+      },
+      {
+        "title": "SDP-SI Timing Pulley Pitch Cylinder",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.8,
+        "score": 0.7712601964799215,
+        "keywords": [
+          "timing pulley",
+          "gt2",
+          "htd",
+          "belt pitch",
+          "pitch diameter",
+          "outside diameter",
+          "flange",
+          "idler"
+        ]
+      },
+      {
+        "title": "Create me a cylinder wit ha hole on the top of it",
+        "memory_type": "confirmed_generation",
+        "source_table": null,
+        "quality_score": 0.64,
+        "score": 0.7686415498024605,
+        "keywords": [
+          "cylinder",
+          "wit",
+          "hole",
+          "top"
+        ]
+      },
+      {
+        "title": "FeatureScript Example sweep pipe elbow",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 0.7628629190377034,
+        "keywords": [
+          "sweep",
+          "pipe",
+          "elbow",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      },
+      {
+        "title": "Create me a cylinder please",
+        "memory_type": "confirmed_generation",
+        "source_table": null,
+        "quality_score": 0.68,
+        "score": 0.7585915321265485,
+        "keywords": [
+          "cylinder",
+          "please"
+        ]
+      },
+      {
+        "title": "The result was good and generated what I asked for",
+        "memory_type": "confirmed_generation",
+        "source_table": null,
+        "quality_score": 0.68,
+        "score": 0.7585915321265485,
+        "keywords": [
+          "cylinder",
+          "please"
+        ]
+      }
+    ],
+    "pruningRows": [
+      {
+        "title": "Unsupported Timing Pulley Teeth Simplify To A Pitch Cylinder",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.82,
+        "score": 0.7726791294763071,
+        "keywords": [
+          "timing pulley",
+          "gt2",
+          "htd",
+          "pitch diameter",
+          "idler",
+          "bore"
+        ]
+      },
+      {
+        "title": "Sweep Path Must Be A Connected Wire",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.7885014319390847,
+        "keywords": [
+          "opSweep",
+          "path",
+          "wire",
+          "connected",
+          "arc",
+          "edge"
+        ]
+      }
+    ],
+    "featureScriptSnippets": [
+      {
+        "file": "sweep_pipe_elbow.fs",
+        "score": 12
+      },
+      {
+        "file": "flange_pattern.fs",
+        "score": 2
+      },
+      {
+        "file": "hybrid_organic_flange.fs",
+        "score": 2
+      },
+      {
+        "file": "bottle_revolve_loft.fs",
+        "score": 1
+      }
+    ],
+    "memoryMatches": [
+      {
+        "memory_id": "fef5632b-09af-4057-ba86-8de44b926712",
+        "score_rank": 1,
+        "score_snapshot": 0.8336432785497502,
+        "neural_score": 0.8339975432604604,
+        "feature_vector": [
+          0.875,
+          0,
+          0.86,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "b0f3a6c4-91ad-4330-8718-e83de800916b",
+        "score_rank": 2,
+        "score_snapshot": 0.8044950805393254,
+        "neural_score": 0.8315272370806785,
+        "feature_vector": [
+          0.25,
+          1,
+          0.91,
+          1,
+          0.5,
+          0,
+          0.48,
+          0.45,
+          0.38823676709842325,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "d19b5c07-6943-438e-8a3a-b460d8ef0ec0",
+        "score_rank": 3,
+        "score_snapshot": 0.7726791294763071,
+        "neural_score": 0.8284625785438762,
+        "feature_vector": [
+          0.25,
+          1,
+          0.82,
+          1,
+          0,
+          1,
+          0.55,
+          0.45,
+          0.34873150258179014,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "c76fae65-384c-4b5d-b525-a32e475dc5ae",
+        "score_rank": 4,
+        "score_snapshot": 0.7712601964799215,
+        "neural_score": 0.8284050119189807,
+        "feature_vector": [
+          0.25,
+          1,
+          0.8,
+          1,
+          0,
+          1,
+          0.48,
+          0.45,
+          0.34873150258179014,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "f5439bcc-1850-4776-bf04-55052f31928a",
+        "score_rank": 5,
+        "score_snapshot": 0.7686415498024605,
+        "neural_score": 0.8307608441519332,
+        "feature_vector": [
+          0.125,
+          1,
+          0.64,
+          1,
+          0.25,
+          0.75,
+          1,
+          0.45,
+          0.34873150258179014,
+          0,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "bbb795b6-b84f-4107-b75b-69d981f515a3",
+        "score_rank": 6,
+        "score_snapshot": 0.7628629190377034,
+        "neural_score": 0.8337432930073143,
+        "feature_vector": [
+          0.875,
+          0,
+          0.9,
+          1,
+          0.5,
+          0,
+          0.75,
+          0.45,
+          0.15019048322368794,
+          0.85,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "b3866196-2ef9-432c-8232-e1373ee65e2e",
+        "score_rank": 7,
+        "score_snapshot": 0.7585915321265485,
+        "neural_score": 0.8296784238244811,
+        "feature_vector": [
+          0.125,
+          1,
+          0.68,
+          1,
+          0,
+          1,
+          1,
+          0.45,
+          0.23804628387473528,
+          0,
+          0.75
+        ],
+        "source_kind": "memory"
+      },
+      {
+        "memory_id": "10eb46f9-eb7d-4d5f-b312-3594b71adc72",
+        "score_rank": 8,
+        "score_snapshot": 0.7585915321265485,
+        "neural_score": 0.8296784238244811,
+        "feature_vector": [
+          0.125,
+          1,
+          0.68,
+          1,
+          0,
+          1,
+          1,
+          0.45,
+          0.23804628387473528,
+          0,
+          0.75
+        ],
+        "source_kind": "memory"
+      }
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "repairs": [],
+    "fallbackTemplate": false,
+    "fallbackFile": null
+  },
+  "generationId": "b0f6c97f-3cb2-4cca-9203-bff9db0ab899"
+}

@@ -1,0 +1,312 @@
+[
+  {
+    "title": "Loft Profiles Must Be Topologically Similar",
+    "summary": "If loft profiles differ strongly, insert intermediate profiles or use a different primitive.",
+    "tags": [
+      "pruning",
+      "loft",
+      "topology"
+    ],
+    "keywords": [
+      "loft",
+      "profile mismatch",
+      "circle",
+      "rectangle",
+      "intermediate"
+    ],
+    "parameter_hints": [
+      "profileSimilarityScore",
+      "intermediateProfileCount"
+    ],
+    "modeling_notes": [
+      "Trigger when profile_similarity_score < 0.7 or circle-to-rectangle is requested.",
+      "Remediate with an octagon or rounded rectangle intermediate profile.",
+      "Fallback to revolve sections when the intended shape is axisymmetric."
+    ],
+    "feature_pattern": "if profile_similarity_score < 0.7 then add >= 1 intermediate profile before opLoft.",
+    "failure_modes": [
+      "twisted loft",
+      "failed loft",
+      "self-intersecting loft"
+    ],
+    "validation_rules": [
+      "profile_similarity_score >= 0.7 else fallback_to_multi_profile"
+    ],
+    "example_prompt": "Loft a circle to a rectangle without twisting.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  },
+  {
+    "title": "Sweep Path Must Be Connected",
+    "summary": "Sweep path queries must resolve to one connected edge chain and the profile must be perpendicular to the path start.",
+    "tags": [
+      "pruning",
+      "sweep",
+      "path"
+    ],
+    "keywords": [
+      "sweep",
+      "path",
+      "connected",
+      "perpendicular",
+      "opSweep"
+    ],
+    "parameter_hints": [
+      "pathContinuity",
+      "profilePlaneNormal",
+      "bendRadius"
+    ],
+    "modeling_notes": [
+      "Trigger when opSweep path uses disjoint sketch entities.",
+      "Use one skArc or skFitSpline for elbows instead of separate loose lines.",
+      "Fallback to simple cylinder segments plus boolean union if the sweep fails."
+    ],
+    "feature_pattern": "skArc/skFitSpline path + qCreatedBy(pathSketch, EntityType.EDGE) + perpendicular profile plane.",
+    "failure_modes": [
+      "invalid sweep path",
+      "profile twist",
+      "open profile"
+    ],
+    "validation_rules": [
+      "pathContinuity == connected",
+      "opSweep has profiles and path"
+    ],
+    "example_prompt": "Create a 90-degree elbow pipe.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  },
+  {
+    "title": "Revolve Profile Cannot Cross Axis",
+    "summary": "Organic revolve profiles must remain on one side of the axis and close cleanly to the axis.",
+    "tags": [
+      "pruning",
+      "revolve",
+      "organic"
+    ],
+    "keywords": [
+      "revolve",
+      "axis",
+      "self intersection",
+      "spline"
+    ],
+    "parameter_hints": [
+      "minProfileX",
+      "tipRadius",
+      "baseRadius"
+    ],
+    "modeling_notes": [
+      "Trigger when any spline x coordinate is negative or the spline crosses x=0.",
+      "Clamp x coordinates to >= 0.01 inch except explicit axis closure points.",
+      "Fallback to a cone/frustum template if spline repair fails."
+    ],
+    "feature_pattern": "validate all profile x >= 0; close with top/base line segments and axis edge.",
+    "failure_modes": [
+      "self-intersecting revolve",
+      "zero-area profile",
+      "axis query instead of Line"
+    ],
+    "validation_rules": [
+      "minProfileX >= 0",
+      "opRevolve axis is Line",
+      "skSolve before opRevolve"
+    ],
+    "example_prompt": "Organic carrot with five spline control points.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  },
+  {
+    "title": "Organic Splines Need Enough Control Points",
+    "summary": "A two-point spline collapses to a straight taper and should be replaced by a 5-7 point profile.",
+    "tags": [
+      "pruning",
+      "spline",
+      "organic"
+    ],
+    "keywords": [
+      "skFitSpline",
+      "organic",
+      "control points",
+      "curvature"
+    ],
+    "parameter_hints": [
+      "controlPointCount",
+      "curvatureFactor"
+    ],
+    "modeling_notes": [
+      "Trigger when skFitSpline has fewer than 4 points for organic prompts.",
+      "Use percentage heights such as 0, 20, 45, 70, and 100 percent.",
+      "Expose curvatureFactor to let users tune the silhouette."
+    ],
+    "feature_pattern": "5 point skFitSpline with parameterized radii at percentage heights.",
+    "failure_modes": [
+      "trivial geometry",
+      "faceted silhouette",
+      "missing curvature"
+    ],
+    "validation_rules": [
+      "controlPointCount >= 5 for organic prompts"
+    ],
+    "example_prompt": "Create an organic carrot using a 5-point spline.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  },
+  {
+    "title": "Sketch Region Queries Use Sketch Ids",
+    "summary": "qSketchRegion must receive the sketch feature id expression, not the sketch variable.",
+    "tags": [
+      "pruning",
+      "FeatureScript",
+      "query"
+    ],
+    "keywords": [
+      "qSketchRegion",
+      "sketch id",
+      "sketch variable",
+      "region"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Trigger on qSketchRegion(sk) or qSketchRegion(sketch1).",
+      "Replace with qSketchRegion(id + \"sketchName\").",
+      "Use filterInnerLoops true for regions with holes."
+    ],
+    "feature_pattern": "qSketchRegion(id + \"profile\") or qSketchRegion(id + \"profile\", true).",
+    "failure_modes": [
+      "invalid query",
+      "compile error",
+      "missing geometry"
+    ],
+    "validation_rules": [
+      "no qSketchRegion(sketchVariable)"
+    ],
+    "example_prompt": "Extrude a flange ring with bolt holes.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  },
+  {
+    "title": "All Editable Parameters Must Be Exposed",
+    "summary": "Any definition parameter used in the body must be declared in precondition with a supported FeatureScript form.",
+    "tags": [
+      "pruning",
+      "parameters",
+      "precondition"
+    ],
+    "keywords": [
+      "isLength",
+      "isInteger",
+      "boolean",
+      "precondition",
+      "definition"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Trigger when definition.foo is used without isLength/isInteger/boolean/Query declaration.",
+      "Length parameters use isLength(definition.foo, LENGTH_BOUNDS).",
+      "Integer parameters use isInteger(definition.foo, {(unitless): [min, default, max]})."
+    ],
+    "feature_pattern": "precondition exposes every definition.* used in the body.",
+    "failure_modes": [
+      "hardcoded dimensions",
+      "compile error",
+      "non-editable feature"
+    ],
+    "validation_rules": [
+      "for each definition param in body exists precondition declaration"
+    ],
+    "example_prompt": "Expose baseRadius, height, curvatureFactor, and tipRadius.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  },
+  {
+    "title": "Boolean Operations Need Valid Body Targets",
+    "summary": "Boolean union/subtract operations must use body queries created by prior operations and must not target sketches.",
+    "tags": [
+      "pruning",
+      "boolean",
+      "targets"
+    ],
+    "keywords": [
+      "opBoolean",
+      "targets",
+      "tools",
+      "qCreatedBy",
+      "body"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Trigger when opBoolean tools or targets query sketch entities.",
+      "Use qCreatedBy(operationId, EntityType.BODY) for both tools and targets.",
+      "Fallback to sketch inner loops for holes if subtractive tools are unstable."
+    ],
+    "feature_pattern": "opBoolean({tools:qCreatedBy(toolOp,BODY), targets:qCreatedBy(targetOp,BODY), operationType:...}).",
+    "failure_modes": [
+      "invalid boolean operation",
+      "no target body",
+      "holes not cut"
+    ],
+    "validation_rules": [
+      "tools and targets resolve to EntityType.BODY"
+    ],
+    "example_prompt": "Hybrid carrot body with mounting flange and bolt holes.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  },
+  {
+    "title": "Shell Uses Face Entities Not ExcludeFaces",
+    "summary": "FeatureScript opShell opens selected faces by passing them as entities; excludeFaces is not a valid key.",
+    "tags": [
+      "pruning",
+      "shell",
+      "FeatureScript"
+    ],
+    "keywords": [
+      "opShell",
+      "qCapEntity",
+      "excludeFaces",
+      "open top"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Trigger when opShell contains excludeFaces.",
+      "Use qCapEntity(extrudeId, CapType.END, EntityType.FACE) as entities for open-top shells.",
+      "Fallback to explicit wall sketches if shell fails."
+    ],
+    "feature_pattern": "opShell(context,id+\"shell\", {entities:qCapEntity(id+\"extrude\",CapType.END,EntityType.FACE), thickness:-definition.wallThickness}).",
+    "failure_modes": [
+      "invalid opShell key",
+      "closed enclosure",
+      "shell failure"
+    ],
+    "validation_rules": [
+      "no excludeFaces key",
+      "opShell after solid creation"
+    ],
+    "example_prompt": "Open-top electronics enclosure with 0.1 inch walls.",
+    "shape_type": "CUSTOM",
+    "memory_type": "pruning_rule",
+    "quality_score": 0.85,
+    "source_table": "pruning_table",
+    "memory_only": true
+  }
+]

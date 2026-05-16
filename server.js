@@ -1,8 +1,9 @@
 import "dotenv/config";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
-import { analyzeImage, analyzeImages, analyzeLearningOutcome, debugFeatureScript, generateFeatureScript } from "./ai.js";
+import { analyzeImage, analyzeImages, analyzeLearningOutcome, debugFeatureScript, generateFeatureScript } from "./AI.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
+import { createAgentRouter } from "./agent.js";
 import { createLearningService } from "./learning.js";
 
 const app = express();
@@ -82,6 +83,7 @@ app.get("/health", (_req, res) => {
 app.post("/auth/signup", authRoutes.signup);
 app.post("/auth/login", authRoutes.login);
 app.get("/auth/me", authRoutes.me);
+app.use("/agent", createAgentRouter({ learning }));
 
 app.get("/history", requireAuth, async (req, res) => {
   if (!supabase) {

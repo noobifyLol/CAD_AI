@@ -1,0 +1,285 @@
+{
+  "prompt": "Attempt to loft a circle to a rectangle; if profiles are too dissimilar, apply pruning rule to insert intermediate profile or fallback to multi-profile loft.",
+  "plan": {
+    "loop": [
+      "Plan",
+      "Decompose",
+      "Retrieve",
+      "Generate",
+      "Validate",
+      "Repair",
+      "Finalize",
+      "Learn"
+    ],
+    "shapeClass": "loft",
+    "operations": [
+      "loft"
+    ],
+    "parameters": [
+      {
+        "name": "height",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "squareSize",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "circleRadius",
+        "source": "prompt_or_pattern_hint"
+      },
+      {
+        "name": "profileOffset",
+        "source": "prompt_or_pattern_hint"
+      }
+    ],
+    "multimodalSummary": "shapeClass=loft_transition",
+    "subtasks": [
+      {
+        "id": "step_1_loft",
+        "operation": "loft",
+        "goal": "transition between solved profile sketches on ordered offset planes",
+        "retrievalKeywords": [
+          "loft",
+          "attempt",
+          "circle",
+          "rectangle",
+          "profiles",
+          "are",
+          "too",
+          "dissimilar",
+          "apply",
+          "pruning"
+        ],
+        "validationFocus": [
+          "profile topology similarity",
+          "profileSubqueries",
+          "ordered planes",
+          "skSolve for every profile"
+        ]
+      }
+    ],
+    "fallbackTemplate": "loft_transition_square_to_circle.fs"
+  },
+  "multimodal": {
+    "shapeClass": "loft_transition",
+    "controlPoints": [],
+    "descriptors": [],
+    "plannerHints": [],
+    "hasMultimodalInput": false,
+    "summary": "shapeClass=loft_transition"
+  },
+  "generationStrategy": {
+    "requested": "ai_then_fallback",
+    "aiAvailable": true,
+    "used": "agent_template",
+    "preferTemplate": false,
+    "forceAi": false,
+    "initialTemplateFile": "loft_transition_square_to_circle.fs",
+    "generationError": "Connection error."
+  },
+  "retrieval": {
+    "keywords": [
+      "attempt",
+      "loft",
+      "circle",
+      "rectangle",
+      "profiles",
+      "are",
+      "too",
+      "dissimilar"
+    ],
+    "knowledgeRows": [
+      {
+        "title": "FeatureScript example: loft_transition_square_to_circle.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 1.1,
+        "keywords": [
+          "loft_transition_square_to_circle",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: vase_multi_profile_loft.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.5,
+        "keywords": [
+          "vase_multi_profile_loft",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: hybrid_organic_flange.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.3,
+        "keywords": [
+          "hybrid_organic_flange",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "FeatureScript example: lofted_airfoil.fs",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.92,
+        "score": 0.3,
+        "keywords": [
+          "lofted_airfoil",
+          "2931",
+          "import",
+          "path",
+          "onshape",
+          "std",
+          "geometry",
+          "version",
+          "annotation",
+          "feature",
+          "type",
+          "name"
+        ]
+      },
+      {
+        "title": "Loft Profiles Must Be Topologically Similar",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.94,
+        "score": 1.1268337316839367,
+        "keywords": [
+          "loft",
+          "profile similarity",
+          "circle rectangle",
+          "intermediate profile",
+          "fallback"
+        ]
+      },
+      {
+        "title": "opLoft Between Two Profiles",
+        "memory_type": "local_seed",
+        "source_table": null,
+        "quality_score": 0.65,
+        "score": 1.1176546924401816,
+        "keywords": [
+          "loft",
+          "opLoft",
+          "transition",
+          "profile",
+          "cross-section",
+          "airfoil",
+          "taper",
+          "blend"
+        ]
+      },
+      {
+        "title": "FeatureScript Example loft transition square to circle",
+        "memory_type": "fs_example",
+        "source_table": null,
+        "quality_score": 0.9,
+        "score": 1.1064580154737687,
+        "keywords": [
+          "loft",
+          "transition",
+          "square",
+          "to",
+          "circle",
+          "FeatureScript",
+          "skSolve",
+          "geometry.fs"
+        ]
+      },
+      {
+        "title": "Multi Profile Loft Transition",
+        "memory_type": "seed",
+        "source_table": null,
+        "quality_score": 0.86,
+        "score": 1.10490106337378,
+        "keywords": [
+          "opLoft",
+          "profileSubqueries",
+          "square",
+          "circle",
+          "intermediate",
+          "topology"
+        ]
+      }
+    ],
+    "pruningRows": [
+      {
+        "title": "Loft Profiles Must Be Topologically Similar",
+        "memory_type": "pruning_rule",
+        "source_table": null,
+        "quality_score": 0.94,
+        "score": 1.1268337316839367,
+        "keywords": [
+          "loft",
+          "profile similarity",
+          "circle rectangle",
+          "intermediate profile",
+          "fallback"
+        ]
+      }
+    ],
+    "featureScriptSnippets": [
+      {
+        "file": "loft_transition_square_to_circle.fs",
+        "score": 11
+      },
+      {
+        "file": "vase_multi_profile_loft.fs",
+        "score": 5
+      },
+      {
+        "file": "hybrid_organic_flange.fs",
+        "score": 3
+      },
+      {
+        "file": "lofted_airfoil.fs",
+        "score": 3
+      }
+    ],
+    "memoryMatches": []
+  },
+  "validation": {
+    "passed": true,
+    "issues": [],
+    "repairs": [],
+    "fallbackTemplate": false,
+    "fallbackFile": null
+  },
+  "generationId": null
+}

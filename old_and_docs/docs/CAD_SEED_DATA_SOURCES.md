@@ -68,5 +68,24 @@ These are intentionally written as editable CAD guidance, not as manufacturing s
 - `data/cadKnowledge.json`
 - `data/cadKnowledge.csv`
 - `data/cadPruningTable.csv`
+- `data/cadKnowledge.new.csv`
+- `data/cadPruningTable.new.csv`
+- `data/cadMemoryExamples.new.csv`
 
 The pruning table is loaded into `cad_memory` only, while normal knowledge rows are loaded into both `cad_knowledge` and `cad_memory`.
+
+### Do I Need To Import The CSVs Manually?
+
+Usually no. If your generated `.new.csv` files are already sitting in `data/`, `npm run seed:knowledge` is enough and will load them during the normal combined seed pass.
+
+Use the direct importer only when you want a narrower operation, for example:
+
+- re-import just one CSV
+- test one file without touching the rest of the seed set
+- load a file before running the full seed pass
+
+Example:
+
+```bash
+node scripts/importCadKnowledgeCsv.js ./data/cadKnowledge.new.csv
+```
