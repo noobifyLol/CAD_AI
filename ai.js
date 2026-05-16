@@ -9,12 +9,14 @@ const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first"
 const USE_VALIDATED_TEMPLATES = process.env.USE_VALIDATED_TEMPLATES !== "false";
 
 import fetch from "node-fetch";
+import Groq from "groq-sdk";
 
 // ------------------------------
 // Model configuration
 // ------------------------------
 const LOCAL_MODEL = process.env.OLLAMA_MODEL || "deepseek-r1";
 const CLOUD_MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1";
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 9000);
 
 // ------------------------------
@@ -68,6 +70,73 @@ function logFetchError(label, err, extra = {}) {
     details: err?.details || null,
     ...extra,
   });
+}
+
+function normalizeMessageContent(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map(part => {
+        if (typeof part === "string") return part;
+        if (part?.type === "text") return part.text || "";
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+  return "";
+}
+
+function isOpenRouterBillingError(err) {
+  return Number(err?.details?.status) === 402 || /\b402\b/.test(String(err?.message || ""));
+}
+
+function shouldFallbackToGroq(err) {
+  return Boolean(process.env.GROQ_API_KEY) && (
+    isOpenRouterBillingError(err) ||
+    err?.name === "FetchError" ||
+    err?.name === "AbortError" ||
+    /Invalid OpenRouter response/i.test(String(err?.message || ""))
+  );
+}
+
+async function callGroqLLM(prompt, model = GROQ_MODEL) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("Missing GROQ_API_KEY");
+
+  const client = new Groq({
+    apiKey,
+    timeout: LLM_TIMEOUT_MS,
+    maxRetries: 0,
+  });
+
+  try {
+    const completion = await client.chat.completions.create({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      max_completion_tokens: 4096,
+    });
+
+    const content = normalizeMessageContent(completion?.choices?.[0]?.message?.content);
+    if (!content) {
+      const error = new Error("Invalid Groq response");
+      error.details = { body: truncateForLog(completion) };
+      throw error;
+    }
+
+    return content;
+  } catch (err) {
+    console.error("[Groq] request failed", {
+      message: err?.message || String(err),
+      name: err?.name,
+      status: err?.status,
+      cause: err?.cause?.message,
+      stack: err?.stack,
+      model,
+    });
+    throw err;
+  }
 }
 
 // ------------------------------
@@ -126,13 +195,14 @@ async function callCloudLLM(prompt, model = CLOUD_MODEL) {
     });
 
     const data = await parseJsonResponse(response, "OpenRouter");
-    if (!data.choices?.[0]?.message?.content) {
+    const content = normalizeMessageContent(data?.choices?.[0]?.message?.content);
+    if (!content) {
       const error = new Error("Invalid OpenRouter response");
       error.details = { body: truncateForLog(data) };
       throw error;
     }
 
-    return data.choices[0].message.content;
+    return content;
   } catch (err) {
     logFetchError("OpenRouter", err, { model });
     throw err;
@@ -151,10 +221,26 @@ export async function callLLM(prompt, model = LOCAL_MODEL) {
     try {
       return await callLocalLLM(prompt, model);
     } catch {
-      return await callCloudLLM(prompt, cloudModel);
+      try {
+        return await callCloudLLM(prompt, cloudModel);
+      } catch (cloudErr) {
+        if (shouldFallbackToGroq(cloudErr)) {
+          console.warn(`[AI] OpenRouter failed (${cloudErr.message}); falling back to Groq ${GROQ_MODEL}`);
+          return await callGroqLLM(prompt, GROQ_MODEL);
+        }
+        throw cloudErr;
+      }
     }
   } else {
-    return await callCloudLLM(prompt, cloudModel);
+    try {
+      return await callCloudLLM(prompt, cloudModel);
+    } catch (cloudErr) {
+      if (shouldFallbackToGroq(cloudErr)) {
+        console.warn(`[AI] OpenRouter failed (${cloudErr.message}); falling back to Groq ${GROQ_MODEL}`);
+        return await callGroqLLM(prompt, GROQ_MODEL);
+      }
+      throw cloudErr;
+    }
   }
 }
 
@@ -2310,21 +2396,21 @@ export async function analyzeLearningOutcome({ prompt, signal, rating, feedback,
     databaseSnapshot: compactLearningSnapshot(snapshot),
   };
 
-  const raw = await chat([
-    { role: "system", content: LEARNING_OUTCOME_SYSTEM },
-    { role: "user", content: JSON.stringify(userPayload).slice(0, 12000) },
-  ]);
-
   try {
+    const raw = await chat([
+      { role: "system", content: LEARNING_OUTCOME_SYSTEM },
+      { role: "user", content: JSON.stringify(userPayload).slice(0, 12000) },
+    ]);
     return JSON.parse(stripJson(raw));
-  } catch {
+  } catch (err) {
+    console.warn(`[AI] Learning analysis fallback used: ${err.message}`);
     return {
-      summary: "The learning auditor returned non-JSON output, so a fallback lesson was created.",
+      summary: "The learning auditor was unavailable, so a fallback lesson was created locally.",
       whatWentWrong: errorMessages || feedback || "No issue reported",
       weightAdvice: Number(rating) >= 4 || signal === "good"
         ? "Positive feedback should slightly increase matching memory quality scores."
         : "Negative feedback should decrease matching memory quality scores and save the failure as a lesson.",
-      nextPromptGuidance: "Prefer compile-safe parametric FeatureScript with editable dimensions and conservative operations.",
+      nextPromptGuidance: "Prefer compile-safe parametric FeatureScript with editable dimensions, conservative operations, and a provider fallback when the primary LLM is unavailable.",
       memoryCandidate: {
         title: `Feedback lesson ${Date.now()}`,
         summary: normalizeText(feedback || errorMessages || prompt || "CAD generation feedback"),
@@ -2333,7 +2419,7 @@ export async function analyzeLearningOutcome({ prompt, signal, rating, feedback,
         keywords: extractPromptKeywords(prompt || "", 6),
         parameterHints: [],
         modelingNotes: ["Keep generated dimensions editable and validate FeatureScript syntax before returning code."],
-        failureModes: errorMessages ? [normalizeText(errorMessages).slice(0, 240)] : [],
+        failureModes: [normalizeText(errorMessages || err.message || "Learning analysis provider unavailable").slice(0, 240)],
         validationRules: ["Use exactly one exported feature and compile-safe FeatureScript API calls."],
         qualityScore: Number(rating) >= 4 || signal === "good" ? 0.68 : 0.45,
       },
