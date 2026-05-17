@@ -5,9 +5,11 @@ const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
 const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || TEXT_MODEL;
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
-// Templates stay available as a safety net, but AI-first generation is now the default path.
-const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "false").toLowerCase() === "true";
-const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
+// Templates are injected as reference examples for the AI — not used as primary output.
+// Set USE_VALIDATED_TEMPLATES=false only to disable reference injection (not recommended).
+const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "true").toLowerCase() === "true";
+// Emergency fallback: if AI produces unfixable code after repair passes, fall back to template output.
+const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "true").toLowerCase() === "true";
 
 import Groq from "groq-sdk";
 
@@ -1063,14 +1065,33 @@ function buildLearningContextText(learningContext = {}) {
   }
 
   if (featureScriptDocs.length) {
-    lines.push("FeatureScript documentation snippets to obey:");
-    featureScriptDocs.slice(0, 4).forEach((entry, index) => {
-      const title = normalizeText(entry.title || `Doc ${index + 1}`);
-      const source = normalizeText(entry.source || "local FS docs");
-      const text = normalizeText(entry.text || "").slice(0, 520);
-      lines.push(`${index + 1}. ${title} (${source})`);
-      if (text) lines.push(`   ${text}`);
-    });
+    // Separate validated template references from regular docs — templates come first
+    // with full code so the AI can use them as concrete structural examples.
+    const templateDocs = featureScriptDocs.filter(doc => doc.source === "validated_template");
+    const regularDocs = featureScriptDocs.filter(doc => doc.source !== "validated_template");
+
+    if (templateDocs.length) {
+      lines.push("SHAPE REFERENCE TEMPLATE (study this structure, then write your own):");
+      lines.push("This is a compile-safe FeatureScript example for this shape type.");
+      lines.push("Use it as a structural guide — precondition patterns, sketch strategy, operation order.");
+      lines.push("Do NOT copy it verbatim. Write fresh code adapting it to the user's specific request.");
+      templateDocs.slice(0, 1).forEach(doc => {
+        lines.push(`Reference shape: ${normalizeText(doc.title || "")}`);
+        lines.push(String(doc.text || "").slice(0, 3200));
+      });
+      lines.push("END REFERENCE TEMPLATE");
+    }
+
+    if (regularDocs.length) {
+      lines.push("FeatureScript documentation to apply:");
+      regularDocs.slice(0, 3).forEach((entry, index) => {
+        const title = normalizeText(entry.title || `Doc ${index + 1}`);
+        const source = normalizeText(entry.source || "local FS docs");
+        const text = normalizeText(entry.text || "").slice(0, 520);
+        lines.push(`${index + 1}. ${title} (${source})`);
+        if (text) lines.push(`   ${text}`);
+      });
+    }
   } else {
     // No indexed FS docs on disk — inject core FeatureScript syntax reference inline.
     lines.push("FeatureScript core syntax reference (use these rules as ground truth):");
@@ -1274,37 +1295,42 @@ function promptLooksComplex(prompt) {
   return /assembly|hinge|joint|cam|freeform|organic|thread|helical|spring|loft|spline|enclosure|mount|slot|rib|web|pocket|boss|complex|custom|motor|gearbox|bearing block|filleted/i.test(prompt || "");
 }
 
+// All known shapes that have a validated template — used for emergency fallback only.
+// Templates are NEVER the primary output; they are injected as reference examples for the AI.
+const TEMPLATE_SHAPES = new Set([
+  "BOX", "ROBOT_MECH", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
+  "L_BRACKET", "T_BRACKET", "FLANGE", "HEX_NUT", "WASHER", "BUSHING",
+  "HITCH_PEG", "GEAR_SPUR", "CONE", "STEPPED_SHAFT", "PIPE",
+]);
+
 function canUseTemplateFallback(dims) {
-  if (!USE_VALIDATED_TEMPLATES) return false;
-  return new Set([
-    "BOX", "ROBOT_MECH", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
-    "L_BRACKET", "T_BRACKET", "FLANGE", "HEX_NUT", "WASHER", "BUSHING",
-    "HITCH_PEG", "GEAR_SPUR"
-  ]).has(dims.shape);
+  // Template fallback is a last resort only — never the primary generation path.
+  return TEMPLATE_SHAPES.has(dims.shape);
 }
 
-function shouldPreferValidatedTemplate(prompt, dims) {
-  if (!USE_VALIDATED_TEMPLATES || dims.parseFailed || dims.confidence === "LOW" || promptLooksComplex(prompt)) {
-    return false;
+/**
+ * Build a reference example from the validated template for a given shape.
+ * This is injected into the AI's context as a structural example, NOT returned as output.
+ * The AI reads it to understand the expected FeatureScript structure and parameter conventions,
+ * then generates its own fresh code that implements the user's specific request.
+ */
+function buildTemplateExampleForDims(dims) {
+  if (!TEMPLATE_SHAPES.has(dims.shape)) return null;
+  try {
+    return buildFeatureScript(dims);
+  } catch {
+    return null;
   }
-  if (dims.shape === "CYLINDER") return true;
-  return ["BUSHING", "WASHER"].includes(dims.shape);
 }
 
+// AI always generates code — no shape is ever routed to template output.
+// "template_only" env override still works for CI/test environments.
 function decideGenerationMode(prompt, dims) {
-  if (shouldPreferValidatedTemplate(prompt, dims)) {
-    return "template";
-  }
-
   if (GENERATION_STRATEGY === "template_only") {
+    // Only bypass for explicit CI/testing override — not a normal user path.
     return canUseTemplateFallback(dims) ? "template" : "custom";
   }
-
-  if (GENERATION_STRATEGY === "template_first") {
-    const simpleHighConfidence = canUseTemplateFallback(dims) && !dims.parseFailed && dims.confidence !== "LOW";
-    return simpleHighConfidence && !promptLooksComplex(prompt) ? "template" : "custom";
-  }
-
+  // All other strategies: AI generates, templates are examples.
   return "custom";
 }
 // Clean and trim the featureScript to prevent errors
@@ -1621,22 +1647,28 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   lines.push(`Shape: ${d.shape}  |  Confidence: ${d.confidence}`);
   const generationLabel =
     meta.generationMode === "template_fallback"
-      ? "AI-authored feature attempted, validated template fallback used"
-      : meta.generationMode === "custom"
-        ? "AI-authored parametric feature"
-        : "Validated template";
+      ? "AI-authored feature — emergency template fallback triggered after repair failure"
+      : meta.generationMode === "template"
+        ? "Template output (CI/test override — template_only env)"
+        : "AI-authored parametric feature";
   lines.push(`Generation mode: ${generationLabel}`);
+
+  if (meta.templateInjected) {
+    lines.push(`Template reference: A validated ${d.shape} template was injected into context as a structural guide.`);
+  }
 
   if (meta.learningExamples) {
     lines.push(`Database context: used ${meta.learningExamples} similar prior generation(s) as guidance.`);
   }
 
   if (d.shape === "GEAR_SPUR") {
-    const m = (2 * d.radiusInches) / d.numTeeth;
-    lines.push(`Gear math:`);
-    lines.push(`  Teeth: ${d.numTeeth}  Pitch radius: ${d.radiusInches.toFixed(4)} in  Module: ${m.toFixed(4)} in`);
-    lines.push(`  Tip radius: ${(d.radiusInches + m).toFixed(4)} in  Root radius: ${Math.max(d.radiusInches - 1.35*m, d.radiusInches*0.5).toFixed(4)} in`);
-    lines.push(`  Pressure angle: 20deg standard  |  ${d.numTeeth * 4} sketch entities`);
+  const m = (2 * d.radiusInches) / d.numTeeth;
+  lines.push(`Gear math:`);
+  lines.push(`  Teeth: ${d.numTeeth}  Pitch radius: ${d.radiusInches.toFixed(4)} in  Module: ${m.toFixed(4)} in`);
+  lines.push(`  Tip radius: ${(d.radiusInches + m).toFixed(4)} in  Root radius: ${Math.max(d.radiusInches - 1.35*m, d.radiusInches*0.5).toFixed(4)} in`);
+  lines.push(`  Pressure angle: 20deg standard  |  ${d.numTeeth * 4} sketch entities`);
+  lines.push(`  MANDATORY GEAR BUILD: Use involute flank sampling (skFitSpline with involute points computed from base circle), root arc (skArc), tip arc (skArc), circular pattern for all teeth (opPatternCircular), boolean union of tooth + hub bodies, and bore cut.`);
+  lines.push(`  NEVER use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.`);
   } else if (d.shape === "HITCH_PEG") {
     lines.push(`Compound shape: cylindrical shaft + hemispherical dome`);
     lines.push(`  Shaft: radius ${d.widthInches/2} in, height ${d.depthInches} in`);
@@ -1712,29 +1744,27 @@ Return ONLY a JSON object — no markdown, no explanation outside the JSON:
   "code": "complete raw FeatureScript file — no backticks"
 }
 
-═══ MANDATORY FILE STRUCTURE ═══
-Every file must follow this exact structure:
+═══ HOW TO USE THE REFERENCE TEMPLATE IN DATABASE CONTEXT ═══
+When DATABASE CONTEXT contains a "SHAPE REFERENCE TEMPLATE", do the following:
+1. Read it carefully to understand the expected structure for this shape type.
+2. Note the precondition patterns (isLength, isInteger, Query, boolean).
+3. Note the sketch strategy (which sketch API calls, how profiles are built).
+4. Note the operation order (sketch → skSolve → opExtrude/opRevolve/etc).
+5. Then write COMPLETELY FRESH CODE that implements the user's specific request.
+   - Use the same structural patterns, but with the user's exact dimensions.
+   - Add, remove, or modify features as the prompt requires.
+   - The template is a structural guide, NOT code to copy verbatim.
+   - Your output MUST be meaningfully different from the template.
 
-  FeatureScript 2931;
-  import(path : "onshape/std/geometry.fs", version : "2931.0");
+═══ MANDATORY FILE STRUCTURE (HARD CONSTRAINT — DO NOT VIOLATE) ═══\r\nEvery file MUST follow this EXACT structure — the layout and punctuation matter:\r\n\r\n  FeatureScript 2931;\r\n  import(path : "onshape/std/geometry.fs", version : "2931.0");\r\n\r\n  annotation { "Feature Type Name" : "My Feature" }\r\n  export const myFeature = defineFeature(function(context is Context, id is Id, definition is map)\r\n      precondition {\r\n          // parameter declarations here\r\n      }\r\n      {\r\n          // feature body here\r\n      });
 
-  annotation { "Feature Type Name" : "My Feature" }
-  export const myFeature = defineFeature(function(context is Context, id is Id, definition is map)
-      precondition
-      {
-          // parameter declarations here
-      }
-      {
-          // feature body here
-      });
+═══ STRUCTURE PUNCTUATION RULES (CRITICAL — THESE SYNTAX ERRORS BREAK COMPILATION) ═══
+-- defineFeature takes EXACTLY: defineFeature(function(context is Context, id is Id, definition is map)
+-- The body BLOCK opens IMMEDIATELY after the closing paren on the SAME LINE with no newline between ) and {
+-- The closing MUST be }); with semicolon (NOT just } or ));
+-- NEVER split precondition or body opening across lines.
 
 ═══ PRECONDITION RULES (from official FS docs) ═══
-- User-selectable plane:
-    annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
-    definition.location is Query;
-- Length parameter (ALWAYS use this form — never "definition.x is Length"):
-    annotation { "Name" : "Width", "Default" : "2 * inch" }
-    isLength(definition.width, LENGTH_BOUNDS);
 - Integer parameter (FS 2931 requires the bounds map form):
     annotation { "Name" : "Count", "Default" : "4" }
     isInteger(definition.count, {(unitless) : [1, 4, 100]});
@@ -1894,7 +1924,7 @@ Intermediate plane construction — how to make a plane at an offset or angle:
   var offsetPlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal);
   var sidePlane   = plane(skPlane.origin, skPlane.x);  // perpendicular to sketch plane
 
-═══ MECH / MULTI-BODY STRATEGY ═══
+═══ GEAR GENERATION RULES (MUST USE INVOLUTE PROFILE) ═══\r\n-- For GEAR_SPUR shapes, you MUST use the full involute flank sampling approach:\r\n-- 1. Compute base circle, pitch circle, root circle, and tip circle radii from:\r\n--    - pitchRadius, pressureAngle, module (module = 2*pitchRadius / numTeeth)\r\n--    - tipRadius = pitchRadius + module\r\n--    - rootRadius = max(pitchRadius - 1.35*module, pitchRadius*0.5)\r\n--    - baseRadius = pitchRadius * cos(pressureAngle)\r\n-- 2. Draw the tooth profile using skArc for root arc, skArc for tip arc, and skFitSpline for involute flank\r\n-- 3. Create ONE tooth profile sketch, then use opPatternCircular with the body as target and axis for pattern\r\n-- 4. Create the hub/body as a cylinder (skCircle + opExtrude) with bore hole\r\n-- 5. UNION the tooth body with the hub body using opBoolean\r\n-- DO NOT use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.\r\n-- DO NOT use skCircle alone for root/tip without involute spline in between.\r\n-- Every gear must have: involute flank spline, root arc, tip arc, circular pattern, boolean union, bore cut.\r\n\r\n═══ MECH / MULTI-BODY STRATEGY ═══
 Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
 Build each section as its own opExtrude or opCylinder call, then union adjacent bodies:
 
@@ -1938,6 +1968,15 @@ Use a revolved spline profile for any organic tapered shape:
   // The axis line must connect to the profile edges to close the region.
   // A 2-point spline or a simple line is NOT sufficient for realistic organic shapes.
 
+
+═══ GEAR RULE (HARD CONSTRAINT FOR GEAR_SPUR) ═══
+-- When shape is GEAR_SPUR, you MUST produce a complete involute spur gear with:
+   1. Base circle, pitch circle, root circle, tip circle radii from pressure angle + module
+   2. One tooth profile: skArc (root) + skFitSpline involute flank + skArc (tip)
+   3. Circular pattern of the tooth body (opPatternCircular)
+   4. Hub/cylinder body with bore — UNIONed with tooth body
+   5. Every dimension exposed in precondition for user editing
+-- DO NOT use concentric circles alone — they produce a non-compiled placeholder.
 ═══ GOAL ═══
 - Build exactly what the user asked for, with sensible parametric defaults.
 - Every parameter must be editable in the Onshape feature dialog.
@@ -1946,6 +1985,8 @@ Use a revolved spline profile for any organic tapered shape:
 
 async function generateCustomFeatureScript(prompt, dims, learningContext = {}, history = []) {
   const context = normalizeLearningContext(learningContext);
+  const hasTemplateRef = Array.isArray(context.featureScriptDocs) &&
+    context.featureScriptDocs.some(doc => doc.source === "validated_template");
   const systemPrompt = withLearningContext(CUSTOM_FEATURE_SYSTEM, context);
   const messages = [{ role: "system", content: systemPrompt }];
 
@@ -1956,24 +1997,31 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
   }
 
   const isEdit = history.length > 0;
-  const userPrompt = isEdit 
+  const templateNote = hasTemplateRef
+    ? `\nA SHAPE REFERENCE TEMPLATE appears in DATABASE CONTEXT above. Study its structure (preconditions, sketch strategy, operation order), then write completely fresh code that implements this request. Do not copy the template — adapt its patterns to the specific dimensions and requirements below.`
+    : "";
+
+  const userPrompt = isEdit
     ? [
         `ITERATION REQUEST: ${prompt.trim()}`,
         `PREVIOUS DIMS: ${summarizeDimsForPrompt(history[history.length-1].dims || {})}`,
         `NEW DIMS: ${summarizeDimsForPrompt(dims)}`,
-        `TASK: Modify the previous FeatureScript code provided in the assistant history to apply these changes. Ensure the code remains a single complete file.`,
-        `Return valid JSON only.`
-      ].join("\n")
+        templateNote,
+        `TASK: Modify the previous FeatureScript code in the conversation history to apply these changes. Keep the file complete and self-contained.`,
+        `Return valid JSON only: { "featureName": "...", "featureLabel": "...", "reasoning": "...", "code": "..." }`,
+      ].filter(Boolean).join("\n")
     : [
         `NEW GENERATION REQUEST: ${prompt.trim()}`,
         `Extracted dimensions: ${summarizeDimsForPrompt(dims)}`,
-        `Build the geometry strategy yourself. Return valid JSON only.`
-      ].join("\n");
+        templateNote,
+        `Generate FeatureScript that implements exactly what the user asked for, with all dimensions editable in the Onshape feature dialog.`,
+        `Return valid JSON only: { "featureName": "...", "featureLabel": "...", "reasoning": "...", "code": "..." }`,
+      ].filter(Boolean).join("\n");
 
   messages.push({ role: "user", content: userPrompt });
 
   const authoringModel = promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL;
-  const raw = await chat(messages, authoringModel, [TEXT_MODEL, FALLBACK_MODEL]);
+  const raw = await chat(messages, authoringModel, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL]);
 
   try {
     const parsed = JSON.parse(stripJson(raw));
@@ -1987,7 +2035,7 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
     return {
       featureName: dims.featureName || "customFeature",
       featureLabel: dims.featureLabel || "Custom Feature",
-      reasoning: "The generator returned a non-JSON response, so the raw code was sanitized and repaired.",
+      reasoning: "The generator returned a non-JSON response; raw output was sanitized.",
       code: sanitizeFeatureScript(raw),
     };
   }
@@ -2003,36 +2051,57 @@ export async function generateFeatureScript(prompt, options = {}) {
   const dims = await extractDims(prompt, learningContext, history);
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
-  // Add geometric reasoning to the learning context before generation
+  // ── Geometric reasoning ──────────────────────────────────────────────────
   const mathAnalysis = performGeometricReasoning(dims);
   learningContext.notes.push(`Geometric Reasoning: ${mathAnalysis}`);
 
-  let generationMode = decideGenerationMode(prompt, dims);
+  // ── Inject validated template as a structural reference example ──────────
+  // The AI reads this to understand expected FeatureScript structure, correct
+  // precondition forms, sketch strategy, and operation order for the shape.
+  // It then writes its OWN code — adapted fully to the user's specific prompt.
+  const templateExample = buildTemplateExampleForDims(dims);
+  if (templateExample) {
+    const shapeLabel = dims.shape.replace(/_/g, " ").toLowerCase();
+    learningContext.featureScriptDocs = [
+      {
+        title: `${dims.shape} reference template`,
+        source: "validated_template",
+        text: templateExample,
+      },
+      ...(Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : []),
+    ];
+    learningContext.notes.push(
+      `Shape reference: A validated ${shapeLabel} template has been provided in DATABASE CONTEXT as a structural example. ` +
+      `Study its preconditions, sketch patterns, and operations, then generate fresh code for this specific request.`
+    );
+    console.log(`[AI] Injected ${dims.shape} template example (${templateExample.length} chars) as reference`);
+  }
+
+  const generationMode = decideGenerationMode(prompt, dims);
   let code;
   let customReasoning = "";
   let featureName = dims.featureName;
   let featureLabel = dims.featureLabel;
 
   if (generationMode === "template") {
+    // Only reached when GENERATION_STRATEGY=template_only (CI/testing override)
     code = buildFeatureScript(dims);
   } else {
     try {
-      console.log("[AI] Authoring custom FeatureScript...");
+      console.log("[AI] Authoring FeatureScript (template injected as reference)...");
       const custom = await generateCustomFeatureScript(prompt, dims, learningContext, history);
       featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
       featureLabel = custom.featureLabel || featureLabel;
       customReasoning = custom.reasoning;
       code = sanitizeFeatureScript(custom.code);
 
+      // ── Validation + repair loop ─────────────────────────────────────────
       let validationIssues = validateFeatureScript(code);
       if (validationIssues.length || hasFatalFeatureScriptPatterns(code)) {
         if (validationIssues.length) {
-          console.log(`[AI] Initial validator issues: ${validationIssues.map(issue => issue.message).slice(0, 3).join(" | ")}`);
+          console.log(`[AI] Repair pass 1 — ${validationIssues.length} issues: ${validationIssues.map(i => i.message).slice(0, 3).join(" | ")}`);
         }
-        console.log(`[AI] Running repair pass for ${validationIssues.length} validator issue(s)...`);
-        const repaired = await debugFeatureScript(code, "", {
-          learningContext,
-        });
+        const repaired = await debugFeatureScript(code, "", { learningContext });
         code = sanitizeFeatureScript(repaired.fixed);
         validationIssues = validateFeatureScript(code);
       }
@@ -2040,48 +2109,55 @@ export async function generateFeatureScript(prompt, options = {}) {
       if (validationIssues.length) {
         const issueText = validationIssues
           .slice(0, 12)
-          .map(issue => `Line ${issue.line || "?"}: ${issue.message}${issue.text ? ` [${issue.text}]` : ""}`)
+          .map(i => `Line ${i.line || "?"}: ${i.message}${i.text ? ` [${i.text}]` : ""}`)
           .join("\n");
-        console.log(`[AI] Remaining validator issues: ${validationIssues.map(issue => issue.message).slice(0, 3).join(" | ")}`);
-        console.log(`[AI] Running second repair pass for ${validationIssues.length} remaining validator issue(s)...`);
-        const repairedAgain = await debugFeatureScript(code, issueText, {
-          learningContext,
-        });
+        console.log(`[AI] Repair pass 2 — ${validationIssues.length} remaining issues`);
+        const repairedAgain = await debugFeatureScript(code, issueText, { learningContext });
         code = sanitizeFeatureScript(repairedAgain.fixed);
-        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validator triggered a second repair pass for ${validationIssues.length} issue(s).`;
+        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Second repair pass for ${validationIssues.length} validator issue(s).`;
+        validationIssues = validateFeatureScript(code);
       }
 
+      // ── Emergency template fallback (last resort only) ───────────────────
       if (hasFatalFeatureScriptPatterns(code)) {
         if (ALLOW_TEMPLATE_FALLBACK && canUseTemplateFallback(dims)) {
-          console.warn("[AI] Fatal FeatureScript patterns remained after repair; falling back to validated template.");
+          console.warn("[AI] Fatal patterns after repair — emergency template fallback.");
           code = buildFeatureScript({
             ...dims,
             shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
           });
-          generationMode = "template_fallback";
-          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Fallback used because the AI-authored code still contained invalid FeatureScript type or bounds syntax.`;
+          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Emergency template fallback: AI code still had fatal syntax after two repair passes.`;
+          return {
+            code, featureName, featureLabel,
+            thinking: buildThinkingTrace(prompt, dims, { generationMode: "template_fallback", learningExamples: learningContext.examples.length, customReasoning }),
+            dims,
+            generationMode: "template_fallback",
+          };
         } else {
-          console.warn("[AI] Fatal FeatureScript patterns remained after repair; preserving Groq-authored output because template fallback is disabled.");
-          generationMode = "custom_unverified";
-          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Groq-authored output was preserved even though validator warnings remain, because template fallback is disabled.`;
+          console.warn("[AI] Fatal patterns after repair — preserving output (template fallback disabled).");
+          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validator warnings remain; template fallback disabled.`;
         }
       }
     } catch (err) {
-      if (ALLOW_TEMPLATE_FALLBACK) {
-        console.warn(`[AI] Text generation fallback used: ${err.message}`);
-        const fallbackShape = canUseTemplateFallback(dims) ? dims.shape : "BOX";
+      if (ALLOW_TEMPLATE_FALLBACK && canUseTemplateFallback(dims)) {
+        console.warn(`[AI] Generation failed — emergency template fallback: ${err.message}`);
         code = buildFeatureScript({
           ...dims,
-          shape: fallbackShape,
+          shape: canUseTemplateFallback(dims) ? dims.shape : "BOX",
           featureName: featureName || "customFeature",
           featureLabel: featureLabel || "Custom Feature",
         });
-        generationMode = "template_fallback";
-        featureName = featureName || "customFeature";
-        featureLabel = featureLabel || "Custom Feature";
-        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validated template fallback used because text generation was unavailable: ${err.message}`;
+        customReasoning = `Emergency template fallback after generation failure: ${err.message}`;
+        return {
+          code,
+          featureName: featureName || "customFeature",
+          featureLabel: featureLabel || "Custom Feature",
+          thinking: buildThinkingTrace(prompt, dims, { generationMode: "template_fallback", learningExamples: learningContext.examples.length, customReasoning }),
+          dims,
+          generationMode: "template_fallback",
+        };
       } else {
-        console.error("[AI] Groq generation failed and template fallback is disabled.", err?.message || String(err));
+        console.error("[AI] Generation failed and template fallback disabled.", err?.message || String(err));
         throw err;
       }
     }
@@ -2091,6 +2167,7 @@ export async function generateFeatureScript(prompt, options = {}) {
     generationMode,
     learningExamples: learningContext.examples.length,
     customReasoning,
+    templateInjected: Boolean(templateExample),
   });
 
   console.log(`[AI] done — ${code.length} chars`);
@@ -2330,7 +2407,7 @@ function hasFatalFeatureScriptPatterns(code) {
     [/\bqSketchEntity\s*\(/, "qSketchEntity query used where a Line or sketch id is expected"],
     [/\bopLoft[\s\S]*?"(edges|sections|vertices)"\s*:/, "opLoft with obsolete keys instead of profileSubqueries"],
 
-    // Named top-level function declared INSIDE the feature body.
+    // STRUCTURE CHECKS: FS requires ) { (no newline) and }; at end\r\n  // The defineFeature body must open with ) { on the same line, no newline between ) and {\r\n  if (/defineFeature\\s*\\(\\s*function\\s*\\([^)]*\\)\\s*\\n\\s*precondition/.test(text)) { return true; /* newline before precondition — FS requires defineFeature(...) precondition { */ } if (/defineFeature\\s*\\(\\s*function\\s*\\([^)]*\\)\\s*\\n\\s*\{/.test(text)) { return true; /* newline between ) and { */ } // FeatureScript requires closing }); (paren-brace-semicolon) at the end of the defineFeature declaration. if (/\\}\\);\\s*$/m.test(text)) { /* good */ } else if (/export const \\w+ = defineFeature/.test(text) && /\\}\\);/.test(text) === false) { return true; /* missing }; */ } // Named top-level function declared INSIDE the feature body.
     // FS spec (toplevel.md): only lambdas (const x = function(...){}) are valid inside bodies.
     // A named typed function like: function foo(x is number) returns vector { ... }
     // is only legal at module top level. Detecting this inside a feature body block.
@@ -2346,7 +2423,7 @@ function hasFatalFeatureScriptPatterns(code) {
 
   if (fatalPatterns.some(([pattern]) => pattern.test(text))) return true;
 
-  // Compound check: sketch created but skSolve never called
+  // GEAR-SPECIFIC: if the code looks like a gear (mentions gear/numTeeth/pressureAngle) but uses ONLY circles/lines without any spline for involute, flag it\r\n  const looksLikeGear = /\\bgear\\b/i.test(text) || /\\bnumTeeth\\w*\\b/.test(text) || /\\bpressureAngle\\w*\\b/.test(text);\r\n  const hasInvoluteSpline = /\\bskFitSpline\\s*\\([^)]*involute/i.test(text) || /\\binvoluteFlank\\s*:/i.test(text);\r\n  const hasToothArcs = /skArc.*(?:root|tip|flank)/i.test(text);\r\n  if (looksLikeGear && /numTeeth/i.test(text) && /skCircle/i.test(text) && !hasInvoluteSpline && !hasToothArcs) {\r\n    addIssue(0, "Gear geometry is over-simplified: concentric circles alone are not a valid finished spur gear tooth profile. Use involute-style flank splines with tip/root arcs or a robust gear example.", "(global)");\r\n  }\r\n  if (looksLikeGear && /opBoolean\\s*\\([\\s\\S]*?BooleanOperationType\\.UNION/.test(text) && /id\\s*\\+\\s*"ext1"/.test(text) && /id\\s*\\+\\s*"ext2"/.test(text)) {\r\n    addIssue(0, "Two generated gears were unioned into one body. Gear pairs should stay as separate bodies unless the prompt explicitly asks for a merged solid.", "(global)");\r\n  }\r\n\r\n  // Compound check: sketch created but skSolve never called
   const hasSketch = /\bnewSketchOnPlane\s*\(|\bnewSketch\s*\(/.test(text);
   const hasSolve  = /\bskSolve\s*\(/.test(text);
   if (hasSketch && !hasSolve) return true;
