@@ -829,14 +829,15 @@ function tGear(d) {
     body: `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
 
-        // Helper lambdas — const assignments are legal inside a feature body (FS spec: lambdas are values)
-        const invPoint = function(t is number, rb is number)
+        // Helper lambdas — FS lambdas inside a feature body MUST NOT have typed parameters.
+        // "t is number" is illegal here; parameters are always untyped in const lambdas.
+        const invPoint = function(t, rb)
         {
             return vector((rb * (cos(t) + t * sin(t))) * inch,
                           (rb * (sin(t) - t * cos(t))) * inch);
         };
 
-        const rotPoint = function(p, a is number)
+        const rotPoint = function(p, a)
         {
             return vector(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));
         };
@@ -877,8 +878,8 @@ function tGear(d) {
 
         for (var k = 0; k < N; k += 1)
         {
-            const a = (2 * PI * k) / N;
-            const rfK = [
+            var a = (2 * PI * k) / N;
+            var rfK = [
                 rotPoint(rf[0], a),
                 rotPoint(rf[1], a),
                 rotPoint(rf[2], a),
@@ -886,7 +887,7 @@ function tGear(d) {
                 rotPoint(rf[4], a),
                 rotPoint(rf[5], a)
             ];
-            const lfK = [
+            var lfK = [
                 rotPoint(lf[0], a),
                 rotPoint(lf[1], a),
                 rotPoint(lf[2], a),
@@ -894,16 +895,16 @@ function tGear(d) {
                 rotPoint(lf[4], a),
                 rotPoint(lf[5], a)
             ];
-            const tipMid = vector(ra * cos(a) * inch, ra * sin(a) * inch);
-            const lfRoot = lfK[lfK.length - 1];
-            const nextA = (2 * PI * (k + 1)) / N;
-            const nextRF0 = rotPoint(rf[0], nextA);
-            const a1 = atan2(lfRoot.y, lfRoot.x);
+            var tipMid = vector(ra * cos(a) * inch, ra * sin(a) * inch);
+            var lfRoot = lfK[5];  // always 6 elements; FS has no .length
+            var nextA = (2 * PI * (k + 1)) / N;
+            var nextRF0 = rotPoint(rf[0], nextA);
+            var a1 = atan2(lfRoot.y, lfRoot.x);
             var a2 = atan2(nextRF0.y, nextRF0.x);
             if (a2 < a1) a2 += 2 * PI;
-            const rootMid = vector(rd * cos((a1 + a2) / 2) * inch, rd * sin((a1 + a2) / 2) * inch);
+            var rootMid = vector(rd * cos((a1 + a2) / 2) * inch, rd * sin((a1 + a2) / 2) * inch);
             skFitSpline(sketch1, "rf" ~ k, { "points" : rfK });
-            skArc(sketch1, "tip" ~ k, { "start" : rfK[rfK.length - 1], "mid" : tipMid, "end" : lfK[0] });
+            skArc(sketch1, "tip" ~ k, { "start" : rfK[5], "mid" : tipMid, "end" : lfK[0] });
             skFitSpline(sketch1, "lf" ~ k, { "points" : lfK });
             skArc(sketch1, "root" ~ k, { "start" : lfRoot, "mid" : rootMid, "end" : nextRF0 });
         }
@@ -1368,6 +1369,20 @@ function sanitizeFeatureScript(code) {
     // Remove "* inch" multiplied onto a parameter already declared with isLength —
     // those params already carry Length type; multiplying by inch doubles the units.
     .replace(/\b(definition\.\w+)\s*\*\s*inch\b/g, '$1')
+    // FeatureScript has no ++ or -- operators. Fix increment/decrement.
+    .replace(/\b(\w+)\s*\+\+\s*([;)\]])/g, '$1 += 1$2')
+    .replace(/\b(\w+)\s*--\s*([;)\]])/g, '$1 -= 1$2')
+    // Strip type annotations from lambda parameters inside feature bodies.
+    // "const f = function(x is number, y is map)" → "const f = function(x, y)"
+    // This covers `is number`, `is vector`, `is map`, `is array`, `is boolean`, `is string`
+    // but must NOT touch `definition.x is Query` or precondition lines.
+    .replace(/(\bfunction\s*\([^)]*?)\s+is\s+(number|vector|map|array|boolean|string)\b([^)]*?\))/g,
+      (match, before, _type, after) => `${before}${after}`)
+    // Repeat up to 3 times for multiple typed params in one lambda
+    .replace(/(\bfunction\s*\([^)]*?)\s+is\s+(number|vector|map|array|boolean|string)\b([^)]*?\))/g,
+      (match, before, _type, after) => `${before}${after}`)
+    .replace(/(\bfunction\s*\([^)]*?)\s+is\s+(number|vector|map|array|boolean|string)\b([^)]*?\))/g,
+      (match, before, _type, after) => `${before}${after}`)
     // Repair legacy integer/number preconditions into FS 2931-safe isInteger bounds.
     .replace(
       /isInteger\((definition\.\w+)\)\s*;\s*\n(\s*)\1\s*>=\s*(\d+)\s*;\s*\n\s*\1\s*<=\s*(\d+)\s*;/g,
@@ -1854,16 +1869,34 @@ When DATABASE CONTEXT contains a "SHAPE REFERENCE TEMPLATE", do the following:
 6. Using "skPolygon" — it does not exist. Use skRegularPolygon.
 7. Keeping helper variables that are computed but never used — remove them before returning code.
 8. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
-9. Organic profiles with only two spline points — these collapse into straight or trivial geometry and do not look realistic.
+9. Organic profiles with only two spline points — these collapse into straight or trivial geometry.
+10. TYPED LAMBDA PARAMETERS — FeatureScript lambdas inside a feature body CANNOT have type annotations.
+    WRONG: const f = function(t is number, rb is number) { ... }
+    WRONG: const f = function(p, a is number) { ... }   ← even ONE typed param breaks compilation
+    RIGHT: const f = function(t, rb) { ... }
+    RIGHT: const f = function(p, a) { ... }
+    The error message is: "Error in initializer function arguments" or "missing TOP_SEMI at 'function'"
+11. INCREMENT/DECREMENT — FeatureScript has NO ++ or -- operators.
+    WRONG: k++   WRONG: i--   → these cause "no viable alternative" parse errors.
+    RIGHT: k += 1   RIGHT: i -= 1
+12. const INSIDE LOOP BODIES — const is only valid at the top level of the feature body.
+    Inside a for/while/if block you MUST use var.
+    WRONG: for (var k = 0; ...) { const x = expr; }
+    RIGHT: for (var k = 0; ...) { var x = expr; }
+13. ARRAY .length — FeatureScript arrays have NO .length property.
+    WRONG: arr[arr.length - 1]   → runtime error
+    RIGHT: use a known index like arr[5], or track the count with a separate var.
 
 ═══ GEARS / TOOTHED PARTS ═══
-- For gear helper lambdas, write: const toothProfile = function(sketch, pitchRadius, addendum, dedendum) { ... };
-- Never use var toothProfile = function(...).
+- Gear helper lambdas MUST use untyped parameters (rule 10 above):
+  RIGHT: const invPoint = function(t, rb) { ... };
+  WRONG: const invPoint = function(t is number, rb is number) { ... };
+- Never use var for const helper lambdas at the feature body top level; use const.
+- Inside for loops over teeth, use var for loop-body temporaries (rule 12 above).
 - Tooth sketches must create CLOSED regions before extrusion.
 - Keep all user-facing values editable: tooth count, module or pitch radius, face width, pressure angle, and bore.
 - Never represent a finished spur gear as only concentric circles for root, pitch, and tip diameters.
-- Use sampled involute-style left and right tooth flanks plus tip/root arcs, or closely follow a robust spur gear example structure.
-- Use vector(0, 0) * inch for sketch centers when sketch entities need an explicit origin point.
+- Use sampled involute-style left and right tooth flanks plus tip/root arcs.
 - For a gear pair, keep the gears as separate bodies and offset their centers by pitchRadius1 + pitchRadius2.
 - Do not boolean-union two different gears together unless the prompt explicitly asks for one merged body.
 
@@ -2252,20 +2285,39 @@ skFitSpline: valid sketch spline API
 UNUSED VARIABLES:
   If the compiler says "Variable X set but not used", delete that variable and any dead calculations feeding it.
 
-LAMBDA TYPES:
-  "vector" (lowercase) is a constructor function, not a type declaration.
-  WRONG: function(p is vector, a is number)
-  RIGHT: function(p, a is number)
+LAMBDA PARAMETER RULES (causes "Error in initializer function arguments"):
+  Lambda parameters inside a feature body MUST be untyped — no "is type" annotations.
+  WRONG: const f = function(t is number, rb is number) { ... }
+  WRONG: const f = function(p, a is number) { ... }   ← even one typed param breaks it
+  RIGHT: const f = function(t, rb) { ... }
+  RIGHT: const f = function(p, a) { ... }
+  The "is type" syntax is only valid in top-level named functions, not lambdas.
+
+FOR LOOP VARIABLES:
+  Inside a for/while/if block body, use var, not const.
+  WRONG: for (var k = 0; ...) { const x = ...; }
+  RIGHT: for (var k = 0; ...) { var x = ...; }
+  FeatureScript const is only valid at the top level of the feature body.
+
+INCREMENT/DECREMENT:
+  FeatureScript has NO ++ or -- operators. They cause "no viable alternative" parse errors.
+  WRONG: k++   WRONG: i--
+  RIGHT: k += 1   RIGHT: i -= 1
+
+ARRAY LENGTH:
+  FeatureScript arrays have NO .length property.
+  WRONG: arr[arr.length - 1]
+  RIGHT: use a hardcoded index like arr[5] when the size is known, or track it with a counter.
 
 FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse errors):
   Named typed top-level functions are ONLY legal at MODULE TOP LEVEL.
   Inside a feature body (the lambda passed to defineFeature) they are ILLEGAL.
   WRONG — causes parse errors:
     function invPoint(t is number, rb is number) returns vector { ... }
-  RIGHT — const lambda is legal inside a feature body:
-    const invPoint = function(t is number, rb is number) { ... };
+  RIGHT — const lambda is legal inside a feature body (with UNTYPED params):
+    const invPoint = function(t, rb) { ... };
   If the broken code has named functions inside the feature body, move them to module
-  top level (before the annotation block) OR convert them to const lambda form.
+  top level (before the annotation block) OR convert them to const lambda form with untyped params.
 
 FIX RULES:
 1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
@@ -2285,7 +2337,11 @@ FIX RULES:
 13. qSketchEntity(...) or qCreatedBy(...) used as an opRevolve axis → replace with a Line value
 14. variable set but not used → remove the variable and any dead helper math
 15. gear generated with only concentric circles and no tooth flanks/arcs → replace with a closed tooth-profile strategy using splines/arcs or a robust spur gear example
-16. two gears boolean-unioned into one body by default → keep them as separate bodies unless the prompt explicitly asks for a merged solid`;
+16. two gears boolean-unioned into one body by default → keep them as separate bodies unless the prompt explicitly asks for a merged solid
+17. k++ or i++ or k-- inside FeatureScript → replace with k += 1 or k -= 1; FS has no ++ or -- operators
+18. typed lambda parameters like function(t is number, rb is number) → remove type annotations: function(t, rb); FS lambdas inside feature bodies require untyped params
+19. const inside a for/while loop body → change to var; const is only valid at the direct top-level of the feature body, not inside nested blocks
+20. arr[arr.length - 1] → FS arrays have no .length; use a hardcoded index (e.g. arr[5]) or track the count with a separate variable`;
 
 export function validateFeatureScript(code) {
   const text = String(code || "");
@@ -2317,6 +2373,20 @@ export function validateFeatureScript(code) {
     }
     if (/\bfunction\s*\([^)]*\)\s+returns\s+(vector|array|map)\b/i.test(line)) {
       addIssue(lineNo, "Avoid lambda return-type annotations here; use an untyped const lambda.", line);
+    }
+    // FS has no ++ or -- operators — causes "no viable alternative" parse error
+    if (/\b\w+\s*\+\+|\b\w+\s*--/.test(line) && !/\/\//.test(line.split('//')[0] || line)) {
+      addIssue(lineNo, "FeatureScript has no ++ or -- operators. Use += 1 or -= 1.", line);
+    }
+    // Lambda parameters inside feature body CANNOT be typed — strips silently in sanitize
+    // but flag here so the debug pass can also catch them before sanitize runs.
+    if (/\bfunction\s*\([^)]*\s+is\s+(number|map|array|boolean|string)\b/.test(line) &&
+        !/^\s*\/\//.test(line)) {
+      addIssue(lineNo, "Lambda parameters cannot have type annotations (e.g. 'x is number'). Use untyped params: function(x, y).", line);
+    }
+    // .length on FeatureScript arrays is invalid — FS has no .length property
+    if (/\w+\s*\[\s*\w+\.length\b/.test(line) || /\.\blength\b/.test(line) && /\[/.test(line)) {
+      addIssue(lineNo, "FeatureScript arrays have no .length property. Use a hardcoded index or size() if available.", line);
     }
     if (/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/.test(line)) {
       addIssue(lineNo, "qSketchRegion expects the sketch id expression like id + \"sketch1\", not the sketch variable.", line);
@@ -2406,6 +2476,17 @@ function hasFatalFeatureScriptPatterns(code) {
     [/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/, "qSketchRegion called with a sketch variable instead of sketch id expression"],
     [/\bqSketchEntity\s*\(/, "qSketchEntity query used where a Line or sketch id is expected"],
     [/\bopLoft[\s\S]*?"(edges|sections|vertices)"\s*:/, "opLoft with obsolete keys instead of profileSubqueries"],
+
+    // FS has no ++ or -- operators — causes "no viable alternative" parse error
+    [/\b\w+\s*\+\+\s*[;)\]]/, "increment operator ++ not valid in FeatureScript; use += 1"],
+    [/\b\w+\s*--\s*[;)\]]/, "decrement operator -- not valid in FeatureScript; use -= 1"],
+
+    // Typed lambda params inside feature body — causes "Error in initializer function arguments"
+    // Lambda parameters must be untyped: function(x, y) not function(x is number, y is map)
+    [/\bfunction\s*\([^)]*\s+is\s+(number|vector|map|array|boolean|string)\b[^)]*\)/, "typed parameter in lambda inside feature body; use untyped params: function(x, y)"],
+
+    // .length on FS arrays is invalid — FS has no .length property
+    [/\[\s*\w+\.length\b/, "array index using .length — FeatureScript arrays have no .length; use a hardcoded index"],
 
     // STRUCTURE CHECKS: FS requires ) { (no newline) and }; at end\r\n  // The defineFeature body must open with ) { on the same line, no newline between ) and {\r\n  if (/defineFeature\\s*\\(\\s*function\\s*\\([^)]*\\)\\s*\\n\\s*precondition/.test(text)) { return true; /* newline before precondition — FS requires defineFeature(...) precondition { */ } if (/defineFeature\\s*\\(\\s*function\\s*\\([^)]*\\)\\s*\\n\\s*\{/.test(text)) { return true; /* newline between ) and { */ } // FeatureScript requires closing }); (paren-brace-semicolon) at the end of the defineFeature declaration. if (/\\}\\);\\s*$/m.test(text)) { /* good */ } else if (/export const \\w+ = defineFeature/.test(text) && /\\}\\);/.test(text) === false) { return true; /* missing }; */ } // Named top-level function declared INSIDE the feature body.
     // FS spec (toplevel.md): only lambdas (const x = function(...){}) are valid inside bodies.
