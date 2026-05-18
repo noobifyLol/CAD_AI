@@ -18,6 +18,7 @@ import Groq from "groq-sdk";
 // ------------------------------
 const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS || 120000);
 const GROQ_MAX_COMPLETION_TOKENS = Number(process.env.GROQ_MAX_COMPLETION_TOKENS || 8192);
+const GROQ_MAX_PROMPT_CHARS = Number(process.env.GROQ_MAX_PROMPT_CHARS || 160000);
 const GROQ_TEMPERATURE = Number(process.env.GROQ_TEMPERATURE || 0.2);
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
@@ -1066,32 +1067,29 @@ function buildLearningContextText(learningContext = {}) {
   }
 
   if (featureScriptDocs.length) {
-    // Separate validated template references from regular docs — templates come first
-    // with full code so the AI can use them as concrete structural examples.
+    // Prefer FeatureScript documentation over templates: docs are the primary reference.
     const templateDocs = featureScriptDocs.filter(doc => doc.source === "validated_template");
     const regularDocs = featureScriptDocs.filter(doc => doc.source !== "validated_template");
 
-    if (templateDocs.length) {
-      lines.push("SHAPE REFERENCE TEMPLATE (study this structure, then write your own):");
-      lines.push("This is a compile-safe FeatureScript example for this shape type.");
-      lines.push("Use it as a structural guide — precondition patterns, sketch strategy, operation order.");
-      lines.push("Do NOT copy it verbatim. Write fresh code adapting it to the user's specific request.");
-      templateDocs.slice(0, 1).forEach(doc => {
-        lines.push(`Reference shape: ${normalizeText(doc.title || "")}`);
-        lines.push(String(doc.text || "").slice(0, 3200));
-      });
-      lines.push("END REFERENCE TEMPLATE");
-    }
-
     if (regularDocs.length) {
-      lines.push("FeatureScript documentation to apply:");
-      regularDocs.slice(0, 3).forEach((entry, index) => {
+      lines.push("FeatureScript documentation to apply first:");
+      regularDocs.slice(0, 4).forEach((entry, index) => {
         const title = normalizeText(entry.title || `Doc ${index + 1}`);
         const source = normalizeText(entry.source || "local FS docs");
         const text = normalizeText(entry.text || "").slice(0, 520);
         lines.push(`${index + 1}. ${title} (${source})`);
         if (text) lines.push(`   ${text}`);
       });
+      lines.push("USE THESE DOCS AS PRIMARY GUIDANCE BEFORE APPLYING TEMPLATE EXAMPLES.");
+    }
+
+    if (templateDocs.length) {
+      lines.push("FeatureScript template examples (secondary structural guides):");
+      templateDocs.slice(0, 1).forEach(doc => {
+        lines.push(`Reference shape: ${normalizeText(doc.title || "")}`);
+        lines.push(String(doc.text || "").slice(0, 3200));
+      });
+      lines.push("END TEMPLATE EXAMPLE");
     }
   } else {
     // No indexed FS docs on disk — inject core FeatureScript syntax reference inline.
@@ -1161,16 +1159,92 @@ function buildLearningContextText(learningContext = {}) {
   return lines.join("\n").trim();
 }
 
-function withLearningContext(basePrompt, learningContext) {
-  const learningText = buildLearningContextText(learningContext);
-  if (!learningText) return basePrompt;
-  return `${basePrompt}\n\nDATABASE CONTEXT\n${learningText}`;
-}
-
 function clampNumber(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(parsed, min), max);
+}
+
+function truncateText(text, maxChars) {
+  const normalized = String(text || "");
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 3)}...`;
+}
+
+function estimateContextSize(text) {
+  return String(text || "").length;
+}
+
+function prioritizeLearningContext(context = {}) {
+  if (!context || typeof context !== "object") return {};
+
+  const trimmed = {
+    ...context,
+    featureScriptDocs: Array.isArray(context.featureScriptDocs) ? [...context.featureScriptDocs] : [],
+    notes: Array.isArray(context.notes) ? [...context.notes] : [],
+    examples: Array.isArray(context.examples) ? [...context.examples] : [],
+    knowledge: Array.isArray(context.knowledge) ? [...context.knowledge] : [],
+  };
+
+  while (true) {
+    const text = buildLearningContextText(trimmed);
+    if (estimateContextSize(text) <= GROQ_MAX_PROMPT_CHARS) return trimmed;
+
+    if (trimmed.knowledge.length > 2) {
+      trimmed.knowledge = trimmed.knowledge.slice(0, Math.max(1, trimmed.knowledge.length - 1));
+      continue;
+    }
+
+    if (trimmed.examples.length > 1) {
+      trimmed.examples = trimmed.examples.slice(0, 1);
+      continue;
+    }
+
+    if (trimmed.notes.length > 2) {
+      trimmed.notes = trimmed.notes.slice(0, 2);
+      continue;
+    }
+
+    if (trimmed.featureScriptDocs.length > 1) {
+      trimmed.featureScriptDocs = trimmed.featureScriptDocs.slice(0, 1).map(doc => ({
+        ...doc,
+        text: truncateText(doc.text, 800),
+      }));
+      continue;
+    }
+
+    if (trimmed.featureScriptDocs.length > 0) {
+      trimmed.featureScriptDocs = trimmed.featureScriptDocs.slice(0, 1).map(doc => ({
+        ...doc,
+        text: truncateText(doc.text, 400),
+      }));
+      continue;
+    }
+
+    if (trimmed.notes.length > 0) {
+      trimmed.notes = [];
+      continue;
+    }
+
+    if (trimmed.examples.length > 0) {
+      trimmed.examples = [];
+      continue;
+    }
+
+    if (trimmed.knowledge.length > 0) {
+      trimmed.knowledge = [];
+      continue;
+    }
+
+    return trimmed;
+  }
+}
+
+function withLearningContext(basePrompt, learningContext) {
+  const safeContext = prioritizeLearningContext(learningContext);
+  const learningText = buildLearningContextText(safeContext);
+  if (!learningText) return basePrompt;
+  return `${basePrompt}\n\nDATABASE CONTEXT\n${learningText}`;
 }
 
 function normalizeDims(dims) {

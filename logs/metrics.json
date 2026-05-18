@@ -1,7 +1,7 @@
 {
   "compile_success_rate": null,
-  "average_quality_score": 0.802,
+  "average_quality_score": 0.789,
   "pruning_rule_trigger_rate": null,
   "adaptive_network_trained_steps": 0,
-  "generated_at": "2026-05-16T02:03:05.261Z"
+  "generated_at": "2026-05-18T01:26:14.675Z"
 }

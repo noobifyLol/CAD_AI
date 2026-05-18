@@ -631,6 +631,12 @@ export function createLearningService({
       qualityScore: 0.86,
       sourceTable: "cad_knowledge",
     }),
+    ...loadOptionalCsv(siblingPath(cadKnowledgeCsvPath, "cadMemoryExamples.dataset.csv"), {
+      memoryType: "dataset_example",
+      qualityScore: 0.8,
+      sourceTable: "cad_memory",
+      memoryOnly: true,
+    }),
     ...loadSeedEntriesFromCsv(cadPruningPath, {
       memoryType: "local_pruning_rule",
       qualityScore: 0.82,

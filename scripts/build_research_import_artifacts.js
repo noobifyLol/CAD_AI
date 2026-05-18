@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const DATA = join(ROOT, "data");
-const DOCS = join(ROOT, "docs", "research_summaries");
 const LOGS = join(ROOT, "logs");
 const FS_DIR = join(DATA, "fs_examples");
 
@@ -858,6 +857,42 @@ function summarizeDeepCadJson(parsed, sampleId) {
 }
 
 function sampleDeepCadRows(limit = 36) {
+  // Prefer the extracted Omni-CAD/json/ directory over the compressed archive.
+  const omniDir = join(DATA, "Omni-CAD", "json");
+  if (existsSync(omniDir)) {
+    try {
+      // Walk subdirectories and collect JSON file paths
+      const allFiles = [];
+      for (const subDir of readdirSync(omniDir)) {
+        const sub = join(omniDir, subDir);
+        try {
+          if (statSync(sub).isDirectory()) {
+            for (const f of readdirSync(sub)) {
+              if (f.endsWith(".json")) allFiles.push(join(sub, f));
+            }
+          } else if (subDir.endsWith(".json")) {
+            allFiles.push(sub);
+          }
+        } catch { /* skip */ }
+      }
+      // Sample evenly across the file list
+      const step = Math.max(1, Math.floor(allFiles.length / limit));
+      const sample = allFiles.filter((_, i) => i % step === 0).slice(0, limit);
+      const rows = [];
+      for (const filePath of sample) {
+        try {
+          const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+          rows.push(summarizeDeepCadJson(parsed, basename(filePath, ".json")));
+        } catch { /* skip unparseable */ }
+      }
+      if (rows.length > 0) {
+        console.log(`[build] Sampled ${rows.length} rows from extracted Omni-CAD directory.`);
+        return rows;
+      }
+    } catch { /* fall through to tar archive */ }
+  }
+
+  // Fallback: read from compressed archive
   const archive = join(DATA, "data", "cad_json.tar.gz");
   if (!existsSync(archive)) return [];
   try {
@@ -940,22 +975,19 @@ async function appendTrainingExamples(memoryRows) {
 
 async function main() {
   await mkdir(DATA, { recursive: true });
-  await mkdir(DOCS, { recursive: true });
   await mkdir(LOGS, { recursive: true });
   await mkdir(FS_DIR, { recursive: true });
 
   for (const [file, code] of Object.entries(fsExamples)) {
     await writeFile(join(FS_DIR, file), `${code.trim()}\n`);
   }
-  for (const [file, text] of Object.entries(summaries)) {
-    await writeFile(join(DOCS, file), text);
-  }
 
-  const datasetRows = sampleDeepCadRows(36);
+  const datasetRows = sampleDeepCadRows(96);
   const memoryRows = [...fsMemoryRows(), ...datasetRows];
   await writeFile(join(DATA, "cadKnowledge.new.csv"), csv(knowledgeRows));
   await writeFile(join(DATA, "cadPruningTable.new.csv"), csv(pruningRows));
   await writeFile(join(DATA, "cadMemoryExamples.new.csv"), csv(memoryRows));
+  await writeFile(join(DATA, "cadMemoryExamples.dataset.csv"), csv(datasetRows));
   await writeFile(join(DATA, "cadKnowledge.new.json"), JSON.stringify(knowledgeRows, null, 2));
   const trainingCount = await appendTrainingExamples(memoryRows);
 
