@@ -7,16 +7,16 @@ export const robustSpurGear = defineFeature(function(context is Context, id is I
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Number of Teeth", "Default" : "20" }
-        isInteger(definition.numTeeth, {(unitless) : [6, 20, 200]});
+        annotation { "Name" : "Number of Teeth" }
+        isInteger(definition.numTeeth, { (unitless) : [6, 20, 200] } as IntegerBoundSpec);
         annotation { "Name" : "Pitch Radius", "Default" : "1 * inch" }
         isLength(definition.radius, LENGTH_BOUNDS);
         annotation { "Name" : "Bore Radius", "Default" : "0.2 * inch" }
         isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);
         annotation { "Name" : "Face Width", "Default" : "0.5 * inch" }
         isLength(definition.faceWidth, LENGTH_BOUNDS);
-        annotation { "Name" : "Pressure Angle (degrees)", "Default" : "20" }
-        isInteger(definition.pressureAngleDegrees, {(unitless) : [10, 20, 30]});
+        annotation { "Name" : "Pressure Angle (degrees)" }
+        isInteger(definition.pressureAngleDegrees, { (unitless) : [10, 20, 30] } as IntegerBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)

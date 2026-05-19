@@ -13,8 +13,8 @@ export const loftedAirfoil = defineFeature(function(context is Context, id is Id
         isLength(definition.tipChord, LENGTH_BOUNDS);
         annotation { "Name" : "Span", "Default" : "8 * inch" }
         isLength(definition.span, LENGTH_BOUNDS);
-        annotation { "Name" : "Thickness Percent", "Default" : "12" }
-        isInteger(definition.thicknessPercent, {(unitless) : [6, 12, 18]});
+        annotation { "Name" : "Thickness Percent" }
+        isInteger(definition.thicknessPercent, { (unitless) : [6, 12, 18] } as IntegerBoundSpec);
     }
     {
         var rootPlane = isQueryEmpty(context, definition.location)

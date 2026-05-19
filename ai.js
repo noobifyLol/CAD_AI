@@ -367,6 +367,28 @@ function promptRequestsAxialHole(prompt = "") {
   return /\b(bore|through hole|center hole|centre hole|axial hole|hole down the center|hole down the centre|hollow|inner diameter|\bid\b|hole on (the )?top|hole in the top|top hole)\b/i.test(prompt);
 }
 
+function promptRequestsBlindTopHole(prompt = "") {
+  const mentionsTopHole = /\b(hole on (the )?top|hole in the top|top hole|blind hole|blind bore|counterbore)\b/i.test(prompt);
+  const mentionsThroughHole = /\b(through hole|bore through|pass through|through bore|hollow|inner diameter)\b/i.test(prompt);
+  return mentionsTopHole && !mentionsThroughHole;
+}
+
+function inferShapeFromPrompt(prompt = "") {
+  const text = normalizeText(prompt).toLowerCase();
+  const shapeHints = [
+    ["ROBOT_MECH", /\b(robot|robotic|mech|mecha|android|humanoid)\b/],
+    ["GEAR_SPUR", /\b(gear|spur|pinion|teeth|tooth|diametral|module|pressure angle|involute)\b/],
+    ["FLANGE", /\b(flange|bolt circle|bolt hole|hub|mount|coupling flange)\b/],
+    ["LINKAGE", /\b(linkage|linkage arm|connecting rod|coupler|arm|lever|clevis|tie rod|rod end)\b/],
+    ["WASHER", /\b(washer|ring magnet|ring|shim|spacer disk)\b/],
+    ["CYLINDER", /\b(wheel|roller|cylinder|rod|shaft|pipe|tube|dowel|pin|post|standoff|magnet)\b/],
+    ["BOX", /\b(box|block|cube|rectangular|bar magnet)\b/],
+    ["CONE", /\b(carrot|cone|frustum|tapered|nozzle|funnel)\b/],
+    ["POLYGON", /\b(hex|hexagon|triangle|polygon|octagon|pentagon|n-sided)\b/],
+  ];
+  return shapeHints.find(([, pattern]) => pattern.test(text))?.[0] || null;
+}
+
 function promptNeedsHighFidelityModel(prompt = "") {
   return /\b(organic|realistic|carrot|freeform|smooth|curved|spline|loft|sweep|sculpt|detailed|gear|involute|helical|complex)\b/i.test(prompt);
 }
@@ -414,7 +436,7 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
 //   - isLength(definition.foo, BOUNDS) in precondition → gives user an editable slider
 //   - definition.foo in body already has Length type — do NOT multiply by * inch
 //   - sketch circles + extrude are the most reliable path for cylinders with bores
-//   - opCylinder takes: context, id, { bottomCenter, topCenter, radius, operationType }
+//   - fCylinder takes: context, id, { bottomCenter, topCenter, radius }
 //   - newSketchOnPlane for user-selected planes, not newSketch
 //   - skSolve() after all sketch entities, before any opExtrude
 
@@ -433,8 +455,8 @@ function preconditionLength(paramName, label, min, def, max) {
 
 function preconditionInteger(paramName, label, min, def, max) {
   const defaultValue = Math.min(Math.max(Math.round(def || min), min), max);
-  return `        annotation { "Name" : "${label}", "Default" : "${defaultValue}" }
-        isInteger(definition.${paramName}, {(unitless) : [${min}, ${defaultValue}, ${max}]});`;
+  return `        annotation { "Name" : "${label}" }
+        isInteger(definition.${paramName}, { (unitless) : [${min}, ${defaultValue}, ${max}] } as IntegerBoundSpec);`;
 }
 
 function preconditionDegrees(paramName, label, min, def, max) {
@@ -567,6 +589,8 @@ function tCylinder(d) {
   const boreDefault = d.holeRadiusInches > 0
     ? Math.min(d.holeRadiusInches, Math.max(0.01, d.radiusInches * 0.45))
     : 0;
+  const blindTopHole = d.topHoleMode === "blind_top";
+  const holeDepthDefault = Math.max(0.05, Math.min(d.holeDepthInches || d.depthInches * 0.6 || 0.5, d.depthInches || 1));
   return {
     precondition: [
       preconditionPlane(),
@@ -574,23 +598,40 @@ function tCylinder(d) {
       preconditionLength("height", "Height",  0.01, d.depthInches,  48),
       `        annotation { "Name" : "Hole Radius", "Default" : "${n(Math.max(0, boreDefault))} * inch" }
         isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);`,
+      blindTopHole
+        ? preconditionLength("holeDepth", "Top Hole Depth", 0.01, holeDepthDefault, Math.max(1, d.depthInches || 1))
+        : "",
     ].join("\n"),
     body: `${planeVar()}
         var hasBore = definition.holeRadius > 0 * inch && definition.holeRadius < definition.radius;
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
         skCircle(sketch1, "outer", { "center" : vector(0, 0) * inch, "radius" : definition.radius });
-        if (hasBore)
+        if (hasBore && ${blindTopHole ? "false" : "true"})
         {
             skCircle(sketch1, "inner", { "center" : vector(0, 0) * inch, "radius" : definition.holeRadius });
         }
         skSolve(sketch1);
-        var cylEntities = hasBore ? qSketchRegion(id + "sketch1", true) : qSketchRegion(id + "sketch1");
+        var cylEntities = hasBore && ${blindTopHole ? "false" : "true"} ? qSketchRegion(id + "sketch1", true) : qSketchRegion(id + "sketch1");
         opExtrude(context, id + "extrude1", {
             "entities"  : cylEntities,
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
             "endDepth"  : definition.height
-        });`,
+        });${blindTopHole ? `
+        if (hasBore)
+        {
+            var topHolePlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal, skPlane.x);
+            var holeSketch = newSketchOnPlane(context, id + "holeSketch", { "sketchPlane" : topHolePlane });
+            skCircle(holeSketch, "topHole", { "center" : vector(0, 0) * inch, "radius" : definition.holeRadius });
+            skSolve(holeSketch);
+            opExtrude(context, id + "topHoleCut", {
+                "entities"      : qSketchRegion(id + "holeSketch"),
+                "direction"     : -skPlane.normal,
+                "endBound"      : BoundingType.BLIND,
+                "endDepth"      : definition.holeDepth,
+                "operationType" : NewBodyOperationType.REMOVE
+            });
+        }` : ""}`,
   };
 }
 
@@ -830,11 +871,10 @@ function tHitchPeg(d) {
     ].join("\n"),
     body: `${planeVar()}
         // Shaft
-        opCylinder(context, id + "shaft", {
+        fCylinder(context, id + "shaft", {
             "bottomCenter"  : skPlane.origin,
             "topCenter"     : skPlane.origin + skPlane.normal * definition.shaftHeight,
-            "radius"        : definition.shaftRadius,
-            "operationType" : NewBodyOperationType.NEW
+            "radius"        : definition.shaftRadius
         });
         // Dome head — revolved semicircle centred at top of shaft
         var domePlane = plane(skPlane.origin + skPlane.normal * definition.shaftHeight, skPlane.normal, skPlane.x);
@@ -907,17 +947,15 @@ function tSteppedShaft(d) {
       preconditionLength("length2", "Small Section",      0.01, h2, 48),
     ].join("\n"),
     body: `${planeVar()}
-        opCylinder(context, id + "seg1", {
+        fCylinder(context, id + "seg1", {
             "bottomCenter"  : skPlane.origin,
             "topCenter"     : skPlane.origin + skPlane.normal * definition.length1,
-            "radius"        : definition.radius1,
-            "operationType" : NewBodyOperationType.NEW
+            "radius"        : definition.radius1
         });
-        opCylinder(context, id + "seg2", {
+        fCylinder(context, id + "seg2", {
             "bottomCenter"  : skPlane.origin + skPlane.normal * definition.length1,
             "topCenter"     : skPlane.origin + skPlane.normal * (definition.length1 + definition.length2),
-            "radius"        : definition.radius2,
-            "operationType" : NewBodyOperationType.NEW
+            "radius"        : definition.radius2
         });
         opBoolean(context, id + "join", {
             "tools"         : qCreatedBy(id + "seg2", EntityType.BODY),
@@ -1166,6 +1204,8 @@ function summarizeDimsForPrompt(dims) {
     holeSpacingInches: dims.holeSpacingInches,
     numHoles: dims.numHoles,
     numTeeth: dims.numTeeth,
+    topHoleMode: dims.topHoleMode,
+    holeDepthInches: dims.holeDepthInches,
   });
 }
 
@@ -1249,7 +1289,7 @@ function buildLearningContextText(learningContext = {}) {
     lines.push(`6. Sketches: var sk = newSketchOnPlane(context, id + "sk1", { "sketchPlane": skPlane }); — then add entities — then ALWAYS call skSolve(sk); before any opExtrude/opRevolve.`);
     lines.push(`7. Vector coords: vector(x, y) * inch where x and y are unitless numbers (divide a Length by inch to get a number: definition.width / inch).`);
     lines.push(`8. opExtrude: opExtrude(context, id + "ext1", { "entities": qSketchRegion(id + "sk1"), "direction": skPlane.normal, "endBound": BoundingType.BLIND, "endDepth": definition.depth });`);
-    lines.push(`9. opCylinder(context, id + "cyl1", { "bottomCenter": skPlane.origin, "topCenter": skPlane.origin + skPlane.normal * definition.height, "radius": r, "operationType": NewBodyOperationType.NEW });`);
+    lines.push(`9. fCylinder(context, id + "cyl1", { "bottomCenter": skPlane.origin, "topCenter": skPlane.origin + skPlane.normal * definition.height, "radius": r });`);
     lines.push(`10. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
     lines.push(`11. Remove helper variables that are computed but never used if they do not affect the final geometry.`);
     lines.push(`12. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
@@ -1565,7 +1605,7 @@ function humanizeSanitizationRule(rule = "") {
   const labels = {
     remove_typed_lambda_annotations: "removed typed lambda annotations for FeatureScript compatibility",
     replace_length_index: "replaced forbidden array length indexing with a deterministic fixed index",
-    force_opCylinder_map_form: "normalized opCylinder usage into map form",
+    normalize_opCylinder_to_fCylinder: "renamed unsupported opCylinder calls to fCylinder",
     insert_skSolve_after_sketch: "inserted skSolve before downstream modeling operations",
     sanitize_qSketchRegion_variable: "normalized qSketchRegion usage to an explicit sketch id",
     repair_pass: "applied an automated repair pass to satisfy validator checks",
@@ -1619,6 +1659,8 @@ function normalizeDims(dims) {
     holeSpacingInches: clampNumber(dims.holeSpacingInches, 1.5, 0.01, 120),
     numHoles: Math.max(1, Math.min(24, Math.round(Number(dims.numHoles) || 4))),
     numTeeth: Math.max(6, Math.min(200, Math.round(Number(dims.numTeeth) || 20))),
+    holeDepthInches: clampNumber(dims.holeDepthInches, 0.5, 0.01, 120),
+    topHoleMode: String(dims.topHoleMode || "through"),
     parseFailed: Boolean(dims.parseFailed),
   };
 
@@ -1630,6 +1672,83 @@ function normalizeDims(dims) {
     }
   }
   return normalized;
+}
+
+function applyPromptHeuristics(prompt, dims) {
+  const normalized = { ...dims };
+  const inferredShape = inferShapeFromPrompt(prompt);
+  const shouldOverrideShape = !normalized.shape || normalized.shape === "CUSTOM" || normalized.confidence === "LOW" || normalized.parseFailed;
+  if (shouldOverrideShape && inferredShape) {
+    normalized.shape = inferredShape;
+  }
+
+  if (/\bcarrot\b/i.test(prompt)) {
+    normalized.shape = "CONE";
+    normalized.radiusInches = Math.max(normalized.radiusInches, 0.75);
+    normalized.heightInches = Math.max(normalized.heightInches, 4);
+    normalized.depthInches = Math.max(normalized.depthInches, normalized.heightInches);
+    normalized.holeRadiusInches = Math.min(normalized.holeRadiusInches, 0.08);
+  }
+
+  if (/\bgear\b/i.test(prompt)) {
+    normalized.shape = "GEAR_SPUR";
+    normalized.radiusInches = Math.max(normalized.radiusInches, 1);
+    normalized.depthInches = Math.max(normalized.depthInches, 0.4);
+    normalized.holeRadiusInches = normalized.holeRadiusInches > 0 ? normalized.holeRadiusInches : Math.max(0.08, normalized.radiusInches * 0.12);
+  }
+
+  if (/\b(linkage|linkage arm|connecting rod|coupler|tie rod|rod end)\b/i.test(prompt)) {
+    normalized.shape = "LINKAGE";
+    normalized.widthInches = Math.max(normalized.widthInches, 0.75);
+    normalized.depthInches = Math.max(normalized.depthInches, 0.25);
+    normalized.shaftLengthInches = Math.max(normalized.shaftLengthInches, normalized.widthInches * 4, 4);
+    normalized.holeRadiusInches = normalized.holeRadiusInches > 0 ? normalized.holeRadiusInches : Math.max(0.12, normalized.widthInches * 0.18);
+  }
+
+  if (/\b(robot|robotic|mech|mecha|android|humanoid)\b/i.test(prompt)) {
+    normalized.shape = "ROBOT_MECH";
+    normalized.widthInches = Math.max(normalized.widthInches, 8);
+    normalized.heightInches = Math.max(normalized.heightInches, 8);
+    normalized.depthInches = Math.max(normalized.depthInches, 3);
+  }
+
+  if (/\bwheel\b/i.test(prompt)) {
+    normalized.shape = "CYLINDER";
+    normalized.radiusInches = Math.max(normalized.radiusInches, 1.25);
+    normalized.depthInches = Math.max(normalized.depthInches, 0.6);
+    normalized.holeRadiusInches = normalized.holeRadiusInches > 0 ? normalized.holeRadiusInches : Math.max(0.12, normalized.radiusInches * 0.18);
+  }
+
+  if (/\bmagnet\b/i.test(prompt)) {
+    if (/\b(bar magnet)\b/i.test(prompt)) {
+      normalized.shape = "BOX";
+      normalized.widthInches = Math.max(normalized.widthInches, 2);
+      normalized.heightInches = Math.max(normalized.heightInches, 0.75);
+      normalized.depthInches = Math.max(normalized.depthInches, 0.5);
+    } else if (/\b(ring magnet|ring)\b/i.test(prompt)) {
+      normalized.shape = "WASHER";
+      normalized.radiusInches = Math.max(normalized.radiusInches, 1);
+      normalized.holeRadiusInches = normalized.holeRadiusInches > 0 ? normalized.holeRadiusInches : Math.max(0.2, normalized.radiusInches * 0.45);
+      normalized.depthInches = Math.max(normalized.depthInches, 0.25);
+    } else {
+      normalized.shape = "CYLINDER";
+      normalized.radiusInches = Math.max(normalized.radiusInches, 0.5);
+      normalized.depthInches = Math.max(normalized.depthInches, 0.25);
+    }
+  }
+
+  if (promptRequestsBlindTopHole(prompt)) {
+    normalized.shape = "CYLINDER";
+    normalized.topHoleMode = "blind_top";
+    normalized.radiusInches = Math.max(normalized.radiusInches, 0.75);
+    normalized.depthInches = Math.max(normalized.depthInches, 0.5);
+    normalized.holeRadiusInches = normalized.holeRadiusInches > 0 ? normalized.holeRadiusInches : Math.max(0.1, normalized.radiusInches * 0.3);
+    normalized.holeDepthInches = Math.min(normalized.depthInches * 0.7, Math.max(0.15, normalized.holeDepthInches || normalized.depthInches * 0.6));
+  } else if (promptRequestsAxialHole(prompt)) {
+    normalized.holeRadiusInches = normalized.holeRadiusInches > 0 ? normalized.holeRadiusInches : Math.max(0.1, normalized.radiusInches * 0.3);
+  }
+
+  return normalizeDims(normalized);
 }
 
 /**
@@ -1710,7 +1829,7 @@ function performGeometricReasoning(dims) {
   // ── 7. Structural guidance tag ────────────────────────────────────────────
   const structural =
     profile === "thin_plate"     ? "use_plate_or_sheet_profile" :
-    profile.includes("slender")  ? "axial_load_dominant_consider_opCylinder_or_opExtrude" :
+    profile.includes("slender")  ? "axial_load_dominant_consider_fCylinder_or_opExtrude" :
     genus > 0                    ? "sketch_holes_before_extrude_not_opBoolean_subtract" :
     wt > 0 && wt < 0.1           ? "keep_wall_thickness_editable_parameter" :
                                    "standard_solid_body";
@@ -1734,6 +1853,33 @@ const TEMPLATE_SHAPES = new Set([
 function canUseTemplateFallback(dims) {
   // Template fallback is a last resort only — never the primary generation path.
   return TEMPLATE_SHAPES.has(dims.shape);
+}
+
+function pickTemplateFallbackDims(prompt, dims) {
+  const heuristicDims = applyPromptHeuristics(prompt, dims);
+  if (canUseTemplateFallback(heuristicDims)) return heuristicDims;
+
+  const inferredShape = inferShapeFromPrompt(prompt);
+  const fallbackShape = TEMPLATE_SHAPES.has(inferredShape)
+    ? inferredShape
+    : /\b(wheel|roller|tube|pipe|magnet|cylinder|rod|shaft)\b/i.test(prompt)
+      ? "CYLINDER"
+      : /\b(linkage|arm|rod end|coupler)\b/i.test(prompt)
+        ? "LINKAGE"
+        : /\b(robot|mech|android|humanoid)\b/i.test(prompt)
+          ? "ROBOT_MECH"
+          : /\b(gear|pinion|spur)\b/i.test(prompt)
+            ? "GEAR_SPUR"
+            : /\b(carrot|cone|frustum|tapered)\b/i.test(prompt)
+              ? "CONE"
+              : "BOX";
+
+  return applyPromptHeuristics(prompt, {
+    ...heuristicDims,
+    shape: fallbackShape,
+    confidence: "LOW",
+    parseFailed: false,
+  });
 }
 
 /**
@@ -1784,15 +1930,18 @@ function _coreFeatureScriptSanitize(code) {
 
   // ── Basic token repairs ───────────────────────────────────────────────────
   cleaned = cleaned
-    // Remove invalid angle keys that models incorrectly add (opCylinder does not exist — use sketch circle + opExtrude)
+  // Remove invalid angle keys that models incorrectly add to cylinder/revolve calls.
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
-    // operationType is a valid opCylinder key — do NOT strip it
+    // operationType may be valid on extrude/revolve-style body creators — do NOT strip it
     .replace(/^\s*return\s+[^;{][^;]*;\s*$/gm, "")          // remove value-returning returns in bodies
     .replace(/\bskSpline\s*\(/g, "skFitSpline(")
     .replace(/\bskPolygon\s*\(/g, "skRegularPolygon(")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
     .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);')
+    // Quantity defaults belong in the bound spec for numeric quantity parameters.
+    .replace(/(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*),\s*"Default"\s*:\s*"[-0-9.]+"\s*\}(\s*\n\s*isInteger\()/g, '$1 }$2')
+    .replace(/isInteger\((definition\.\w+),\s*\{\s*\(unitless\)\s*:\s*\[([^\]]+)\]\s*\}\s*\);/g, 'isInteger($1, { (unitless) : [$2] } as IntegerBoundSpec);')
     // Remove "* inch" multiplied onto a parameter already declared with isLength —
     // those params already carry Length type; multiplying by inch doubles the units.
     .replace(/\b(definition\.\w+)\s*\*\s*inch\b/g, '$1')
@@ -1989,24 +2138,15 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     return after;
   });
 
-  // 3) Force opCylinder to use map form
-  // Convert opCylinder(context, id, radius, height) -> opCylinder(context, id, { radius:..., height:... })
-  // Conservative: only convert when 3rd and 4th args look like numeric expressions or simple vars
-  const opCylinderRegex = /opCylinder\s*\(\s*([^,()]+)\s*,\s*([^,()]+)\s*,\s*([^,()]+)\s*(?:,\s*([^,()]+)\s*)?\)/g;
-  code = code.replace(opCylinderRegex, (match, ctx, id, a3, a4) => {
-    // If already map-like, skip
-    if (/\{[\s\S]*:/.test(match)) return match;
-    const before = match;
-    // If only 3 args, treat as radius only; if 4 args, radius+height
-    const mapObj = a4 ? `{ "radius": ${a3.trim()}, "height": ${a4.trim()} }` : `{ "radius": ${a3.trim()} }`;
-    const after = `opCylinder(${ctx.trim()}, ${id.trim()}, ${mapObj})`;
-    record('force_opCylinder_map_form', before, after);
-    return after;
+  // 3) Normalize legacy opCylinder calls to the documented primitive name fCylinder.
+  code = code.replace(/\bopCylinder\s*\(/g, (match) => {
+    record('normalize_opCylinder_to_fCylinder', match, 'fCylinder(');
+    return 'fCylinder(';
   });
 
   // 4) Ensure skSolve present before downstream ops (best-effort insertion)
   try {
-    const sketchCreateRegex = /(\bvar\s+([a-zA-Z0-9_$]+)\s*=\s*qSketch\s*\([^;]*\);?)/g;
+    const sketchCreateRegex = /(\bvar\s+([a-zA-Z0-9_$]+)\s*=\s*newSketch(?:OnPlane)?\s*\([^;]*\);?)/g;
     let sketchMatches = [];
     let m;
     while ((m = sketchCreateRegex.exec(code)) !== null) {
@@ -2033,10 +2173,18 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   }
 
   // 5) Sanitize qSketchRegion usage: qSketchRegion(sketchVar) -> qSketchRegion("sketch_<id>") best-effort
+  const sketchIdMap = new Map();
+  const sketchAssignmentRegex = /\bvar\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*newSketch(?:OnPlane)?\s*\(\s*context\s*,\s*(id\s*\+\s*"[^"]+")/g;
+  let assignmentMatch;
+  while ((assignmentMatch = sketchAssignmentRegex.exec(code)) !== null) {
+    sketchIdMap.set(assignmentMatch[1], assignmentMatch[2]);
+  }
+
   const qSketchRegionRegex = /qSketchRegion\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g;
   code = code.replace(qSketchRegionRegex, (match, varName) => {
     const before = match;
-    const after = `qSketchRegion("${varName}_sketch")`;
+    const sketchId = sketchIdMap.get(varName);
+    const after = sketchId ? `qSketchRegion(${sketchId})` : `qSketchRegion(id + "${varName}")`;
     record('sanitize_qSketchRegion_variable', before, after);
     return after;
   });
@@ -2081,6 +2229,7 @@ ROBOT_MECH    — robotic mech, mecha, blocky robot, android, humanoid robot,
                 robot made with cubes or cuboids; choose this over BOX if robot/mech appears
 BOX           — cube, block, rectangular solid, billet, slab (no holes)
 CYLINDER      — solid cylinder, rod, shaft, dowel, pin, post, standoff, peg, boss (no bore unless requested)
+                wheel or roller defaults should also map here when no richer wheel-specific template exists
 PLATE         — flat plate, sheet, panel (no holes; use PLATE_HOLES if holes present)
 POLYGON       — triangle, pentagon, hexagon, N-sided prism; set sides field
 LINKAGE       — connecting rod, link bar, rocker arm, crank arm, pitman arm, tie rod,
@@ -2092,6 +2241,7 @@ T_BRACKET     — T-bracket, T-plate
 FLANGE        — pipe flange, weld flange, bolt flange, circular plate with bolt circle
 HEX_NUT       — hex nut, jam nut, lock nut, castle nut
 WASHER        — washer, spacer disk, shim, flat ring
+                ring magnets should map here as well
 BUSHING       — bushing, sleeve, journal bearing, short hollow cylinder (length ≈ diameter)
 HITCH_PEG     — hitch peg, mushroom head pin, thumb peg, lollipop pin,
                 any pin with a domed or spherical head on a cylindrical shaft
@@ -2123,6 +2273,7 @@ ROBOT MECH — default widthInches=12, heightInches=12, depthInches=6; expose al
 CYLINDER WITH HOLE — keep shape as CYLINDER; if no bore is specified, set holeRadiusInches to roughly 30% to 45% of outer radius; never let holeRadiusInches >= radiusInches
 CONE/CARROT — use CONE shape (not CUSTOM); set holeRadiusInches=0 for a sharp tip; carrot = tall narrow cone
 PIPE vs BUSHING — PIPE when length > 2× outer diameter; BUSHING when length ≤ 2× outer diameter
+MAGNETS — bar magnet → BOX, ring magnet → WASHER, otherwise default to CYLINDER unless the prompt clearly asks for a block
 
 Unit rules:
 - All output in INCHES. Divide mm by 25.4.
@@ -2219,7 +2370,7 @@ function buildThinkingTrace(prompt, d, meta = {}) {
     lines.push(`Compound shape: cylindrical shaft + hemispherical dome`);
     lines.push(`  Shaft: radius ${d.widthInches/2} in, height ${d.depthInches} in`);
     lines.push(`  Dome:  radius ${d.radiusInches} in`);
-    lines.push(`  Build: opCylinder (shaft) + opRevolve (dome) + opBoolean union`);
+  lines.push(`  Build: fCylinder (shaft) + opRevolve (dome) + opBoolean union`);
   } else if (d.shape === "LINKAGE") {
     const hR = d.holeRadiusInches > 0 ? d.holeRadiusInches : d.widthInches * 0.18;
     lines.push(`  Length: ${d.shaftLengthInches} in  Width: ${d.widthInches} in  Thickness: ${d.depthInches} in`);
@@ -2284,9 +2435,10 @@ Return only compile-safe FeatureScript 2931 with this invariant set:
 const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring assistant. Follow these rules exactly:
 - Output only valid FeatureScript 2931 code and nothing else unless asked for explanation.
 - The exported feature signature must accept a single map parameter named "definition" declared in the precondition. Use isLength/isInteger/boolean/Query as appropriate. Do not emit alternate function signatures (e.g., "function(definition is map)").
-- Forbidden constructs: typed lambda parameter annotations (e.g., "is number"), any use of ".length" on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and opCylinder called with positional args instead of a map.
+- Forbidden constructs: typed lambda parameter annotations (e.g., "is number"), any use of ".length" on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and unsupported opCylinder calls.
 - Always include skSolve before any downstream opExtrude/opRevolve/opLoft/opSweep.
 - Expose user-editable parameters in the precondition using isLength/isInteger/boolean and sensible bounds.
+- For numeric quantity parameters, set the default in the bounds spec. Use IntegerBoundSpec for isInteger instead of string Default annotations.
 - If the shape is recognized (gear, pulley, flange, cylinder, box), prefer parameterized templates and include validation rules in comments.
 - If uncertain about an API key or environment, do not reference or output secrets.
 - If you must reference an example, only use sanitized examples that follow the above rules.
@@ -2367,7 +2519,7 @@ When DATABASE CONTEXT contains a "SHAPE REFERENCE TEMPLATE", do the following:
         "endBound"  : BoundingType.BLIND,
         "endDepth"  : definition.height
     });
-- NEVER use opCylinder — that function does NOT exist in FeatureScript and will cause a compile error.
+- NEVER use opCylinder — use fCylinder or sketch plus extrude instead.
   To create a solid cylinder, sketch a circle and extrude it:
     var cylSk = newSketchOnPlane(context, id + "cylSk", { "sketchPlane" : skPlane });
     skCircle(cylSk, "cyl", { "center" : vector(0, 0) * inch, "radius" : definition.radius });
@@ -2431,9 +2583,9 @@ When DATABASE CONTEXT contains a "SHAPE REFERENCE TEMPLATE", do the following:
 13. ARRAY .length — FeatureScript arrays have NO .length property.
     WRONG: arr[arr.length - 1]   → runtime error
     RIGHT: use a known index like arr[5], or track the count with a separate var.
-14. Using opCylinder — that function does NOT exist in FeatureScript and will produce a compile error.
+14. Using opCylinder — normalize it to fCylinder or to sketch + extrude.
     WRONG: opCylinder(context, id + "cyl1", { "bottomCenter": ..., ... })
-    RIGHT: use skCircle → skSolve → opExtrude for every cylinder/shaft/rod shape.
+    RIGHT: fCylinder(context, id + "cyl1", { "bottomCenter": ..., "topCenter": ..., "radius": ... })
 15. Using definition.param in the body without declaring it in the precondition.
     Every definition.param accessed in the body MUST have a matching isLength / isInteger /
     is boolean / is Query declaration in the precondition block. Missing declarations cause
@@ -2511,7 +2663,7 @@ Intermediate plane construction — how to make a plane at an offset or angle:
 
 ═══ GEAR GENERATION RULES (MUST USE INVOLUTE PROFILE) ═══\r\n-- For GEAR_SPUR shapes, you MUST use the full involute flank sampling approach:\r\n-- 1. Compute base circle, pitch circle, root circle, and tip circle radii from:\r\n--    - pitchRadius, pressureAngle, module (module = 2*pitchRadius / numTeeth)\r\n--    - tipRadius = pitchRadius + module\r\n--    - rootRadius = max(pitchRadius - 1.35*module, pitchRadius*0.5)\r\n--    - baseRadius = pitchRadius * cos(pressureAngle)\r\n-- 2. Draw the tooth profile using skArc for root arc, skArc for tip arc, and skFitSpline for involute flank\r\n-- 3. Create ONE tooth profile sketch, then use opPatternCircular with the body as target and axis for pattern\r\n-- 4. Create the hub/body as a cylinder (skCircle + opExtrude) with bore hole\r\n-- 5. UNION the tooth body with the hub body using opBoolean\r\n-- DO NOT use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.\r\n-- DO NOT use skCircle alone for root/tip without involute spline in between.\r\n-- Every gear must have: involute flank spline, root arc, tip arc, circular pattern, boolean union, bore cut.\r\n\r\n═══ MECH / MULTI-BODY STRATEGY ═══
 Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
-Build each section as its own opExtrude call (opCylinder does NOT exist — always use sketch circle + opExtrude
+Build each section as its own opExtrude call or fCylinder primitive
 for cylindrical parts), then union adjacent bodies:
 
   // Pattern: sketch circle → skSolve → opExtrude for each cylindrical part, then union
@@ -2581,9 +2733,10 @@ const MULTI_CANDIDATE_AUTHOR_SYSTEM = `SYSTEM: You are a strict FeatureScript 29
 NEVER include, reference, or request API keys, secrets, or internal key identifiers in any output.
 Output valid FeatureScript 2931 inside the JSON "code" field only.
 The exported feature signature must accept a single map parameter named definition declared in the precondition.
-Forbidden constructs: typed lambda parameter annotations, .length on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and positional opCylinder usage.
+Forbidden constructs: typed lambda parameter annotations, .length on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and unsupported opCylinder usage.
 Always include skSolve before opExtrude/opRevolve/opLoft/opSweep.
 Expose user-editable parameters in the precondition using isLength/isInteger/boolean/Query with sensible defaults.
+For numeric quantity parameters, place default values in the bound spec. Use IntegerBoundSpec for isInteger rather than string Default annotations.
 Use only sanitized retrieved snippets and local Omni-CAD summaries provided in the prompt; never invent provenance.
 Return JSON only with this schema:
 {
@@ -2932,7 +3085,7 @@ export async function generateFeatureScript(prompt, options = {}) {
   const learningContext = normalizeLearningContext(options.learningContext);
   const history = Array.isArray(options.history) ? options.history : [];
   const requestId = options.requestId || makeRequestId(prompt);
-  const dims = await extractDims(prompt, learningContext, history, { requestId });
+  const dims = applyPromptHeuristics(prompt, await extractDims(prompt, learningContext, history, { requestId }));
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
   // ── Geometric reasoning ──────────────────────────────────────────────────
@@ -3067,21 +3220,21 @@ export async function generateFeatureScript(prompt, options = {}) {
         throw new Error("No candidate passed local FeatureScript validation.");
       }
     } catch (err) {
-      if (ALLOW_TEMPLATE_FALLBACK && canUseTemplateFallback(dims)) {
+      if (ALLOW_TEMPLATE_FALLBACK) {
         console.warn(`[AI] Generation failed — emergency template fallback: ${err.message}`);
-        code = buildFeatureScript({
+        const fallbackDims = pickTemplateFallbackDims(prompt, {
           ...dims,
-          shape: canUseTemplateFallback(dims) ? dims.shape : "BOX",
           featureName: featureName || "customFeature",
           featureLabel: featureLabel || "Custom Feature",
         });
+        code = buildFeatureScript(fallbackDims);
         customReasoning = `Emergency template fallback after generation failure: ${err.message}`;
         return {
           code,
-          featureName: featureName || "customFeature",
-          featureLabel: featureLabel || "Custom Feature",
-          thinking: buildThinkingTrace(prompt, dims, { generationMode: "template_fallback", learningExamples: learningContext.examples.length, customReasoning }),
-          dims,
+          featureName: fallbackDims.featureName || featureName || "customFeature",
+          featureLabel: fallbackDims.featureLabel || featureLabel || "Custom Feature",
+          thinking: buildThinkingTrace(prompt, fallbackDims, { generationMode: "template_fallback", learningExamples: learningContext.examples.length, customReasoning }),
+          dims: fallbackDims,
           generationMode: "template_fallback",
           orchestration,
         };
@@ -3107,7 +3260,7 @@ export async function generateFeatureScript(prompt, options = {}) {
 // The debug function must know correct FeatureScript syntax precisely.
 // Common wrong fixes the AI tries that we must prevent:
 //   - "definition.radius is Length" → WRONG, Length is not a type
-//   - Adding startAngle/endAngle to opCylinder → those params don't exist
+//   - Adding startAngle/endAngle to cylinder creation calls → those params don't exist
 //   - Changing hardcoded * inch values to definition.param * inch → wrong if param isn't isLength
 
 const DEBUG_SYSTEM = ` DEBUG SYSTEM: You are a FeatureScript repair assistant.
@@ -3115,7 +3268,7 @@ Input: { code, issues }.
 For each issue:
 - typed_lambda_or_typed_param: remove all "is <type>" annotations from function parameter lists and typed lambdas.
 - array_length_indexing: replace dynamic length-based indexing with safe fixed-index logic or rewrite to use slice/pop semantics; prefer explicit indices when array length is known. If array length is unknown, add a defensive guard and a comment explaining the assumption.
-- opCylinder_positional_args: convert to map form with explicit keys (radius, height, center, axis) and preserve original numeric expressions.
+- opCylinder_positional_args: replace unsupported opCylinder usage with fCylinder(...) or sketch + extrude.
 - qSketchRegion_variable: replace with qSketchRegion("<sketchId>") where <sketchId> matches the created sketch id; if sketch id cannot be inferred, add a TODO comment and return diagnostics.
 - missing_skSolve: insert skSolve(sketchVar) immediately after the sketch creation block.
 - missing_precondition: add or restore the precondition block with isLength/isInteger/boolean declarations for all definition.* parameters used in the body.
@@ -3137,7 +3290,13 @@ PRECONDITION EXACT SYNTAX:
   NEVER:    definition.x is number;
   NEVER:    definition.x >= N;
 
-Cylinders — opCylinder does NOT exist in FeatureScript and causes a compile error. Replace with sketch + opExtrude:
+Cylinders — use one of these valid patterns:
+  fCylinder(context, id + "cyl1", {
+      "bottomCenter" : skPlane.origin,
+      "topCenter"    : skPlane.origin + skPlane.normal * definition.height,
+      "radius"       : definition.radius
+  });
+  Or use sketch + extrude:
   var cylSk = newSketchOnPlane(context, id + "cylSk", { "sketchPlane" : skPlane });
   skCircle(cylSk, "cyl", { "center" : vector(0, 0) * inch, "radius" : definition.radius });
   skSolve(cylSk);
@@ -3227,7 +3386,7 @@ FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse
 
 FIX RULES:
 1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
-2. opCylinder → opCylinder does NOT exist in FeatureScript; replace with skCircle + skSolve + opExtrude
+2. opCylinder → replace with fCylinder or with skCircle + skSolve + opExtrude
 3. definition.param * inch in body when param is isLength → remove the * inch
 4. Raw number without units in geometry (e.g. "endDepth" : 2) → add * inch or use a definition param
 5. newSketch used with evPlane result → change to newSketchOnPlane
@@ -3253,6 +3412,7 @@ export function validateFeatureScript(code) {
   const text = String(code || "");
   const lines = text.split(/\r?\n/);
   const issues = [];
+  const featureSignatureRegex = /\bdefineFeature\s*\(\s*function\s*\(\s*context\s+is\s+Context\s*,\s*id\s+is\s+Id\s*,\s*definition\s+is\s+map\s*\)/;
   const addIssue = (line, message, snippet) => {
     issues.push({ line, message, text: String(snippet || "").trim() });
   };
@@ -3261,6 +3421,9 @@ export function validateFeatureScript(code) {
     const lineNo = index + 1;
     if (/\bisInteger\s*\(\s*definition\.\w+\s*\)\s*;/.test(line)) {
       addIssue(lineNo, "isInteger() is missing the required FS 2931 bounds map.", line);
+    }
+    if (/\bisInteger\s*\(\s*definition\.\w+\s*,\s*\{\s*\(unitless\)\s*:\s*\[[^\]]+\]\s*\}\s*\)\s*;/.test(line)) {
+      addIssue(lineNo, "Custom isInteger bounds should be typed as IntegerBoundSpec.", line);
     }
     if (/"startAngle"\s*:|"endAngle"\s*:/.test(line)) {
       addIssue(lineNo, "opCylinder startAngle/endAngle keys do not exist — remove them.", line);
@@ -3287,7 +3450,8 @@ export function validateFeatureScript(code) {
     // Lambda parameters inside feature body CANNOT be typed — strips silently in sanitize
     // but flag here so the debug pass can also catch them before sanitize runs.
     if (/\bfunction\s*\([^)]*\s+is\s+(number|map|array|boolean|string)\b/.test(line) &&
-        !/^\s*\/\//.test(line)) {
+        !/^\s*\/\//.test(line) &&
+        !featureSignatureRegex.test(line)) {
       addIssue(lineNo, "Lambda parameters cannot have type annotations (e.g. 'x is number'). Use untyped params: function(x, y).", line);
     }
     // .length on FeatureScript arrays is invalid — FS has no .length property
@@ -3301,7 +3465,7 @@ export function validateFeatureScript(code) {
       addIssue(lineNo, "Sketch queries are not valid opRevolve axes; construct a Line value instead.", line);
     }
     if (/\bopCylinder\s*\(/.test(line)) {
-      addIssue(lineNo, "opCylinder does not exist in FeatureScript — replace with skCircle + skSolve + opExtrude to create a cylinder.", line);
+      addIssue(lineNo, "Unsupported opCylinder call — replace with fCylinder(...) or sketch + opExtrude.", line);
     }
   });
 
@@ -3378,6 +3542,10 @@ export function validateFeatureScript(code) {
  */
 export function hasFatalFeatureScriptPatterns(code) {
   const issues = [];
+  const withoutFeatureSignature = String(code || "").replace(
+    /\bdefineFeature\s*\(\s*function\s*\(\s*context\s+is\s+Context\s*,\s*id\s+is\s+Id\s*,\s*definition\s+is\s+map\s*\)/g,
+    "defineFeature(function(ALLOWED_FEATURE_SIGNATURE)"
+  );
 
   // 1) Missing precondition with isLength/isInteger/boolean
   if (!/precondition[\s\S]*?(isLength|isInteger|boolean)/.test(code)) {
@@ -3385,7 +3553,7 @@ export function hasFatalFeatureScriptPatterns(code) {
   }
 
   // 2) Typed lambda or typed param annotations
-  if (/\b([a-zA-Z0-9_$]+)\s+is\s+(number|string|boolean)\b/.test(code) || /\bfunction\s*\([^)]*\bis\s+/.test(code)) {
+  if (/\bfunction\s*\([^)]*\bis\s+/.test(withoutFeatureSignature)) {
     issues.push({ code: 'typed_lambda_or_typed_param', message: 'Typed parameter annotations detected (forbidden).' });
   }
 
@@ -3394,10 +3562,13 @@ export function hasFatalFeatureScriptPatterns(code) {
     issues.push({ code: 'array_length_indexing', message: 'Dynamic array length indexing detected (forbidden).' });
   }
 
-  // 4) opCylinder positional usage (positional args instead of map)
-  // Detect opCylinder( ... , ... , <non-map> )
-  if (/opCylinder\s*\(\s*[^,()]+,\s*[^,()]+,\s*[^({][^)]*\)/.test(code)) {
-    issues.push({ code: 'opCylinder_positional_args', message: 'opCylinder used with positional args; must use map form.' });
+  // 4) legacy cylinder creator usage that still needs normalization
+  if (/(?:opCylinder|fCylinder)\s*\(\s*[^,()]+,\s*[^,()]+,\s*[^({][^)]*\)/.test(code)) {
+    issues.push({ code: 'opCylinder_positional_args', message: 'Cylinder primitive used with positional args; convert to a definition map.' });
+  }
+
+  if (/\bopCylinder\s*\(/.test(code)) {
+    issues.push({ code: 'legacy_opCylinder_usage', message: 'Legacy opCylinder usage detected; replace it with fCylinder or a sketch/extrude workflow.' });
   }
 
   // 5) qSketchRegion called with variable

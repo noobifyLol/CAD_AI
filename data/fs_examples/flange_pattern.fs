@@ -23,8 +23,8 @@ export const flangeBoltPattern = defineFeature(function(context is Context, id i
         annotation { "Name" : "Bolt hole radius", "Default" : "0.1 * inch" }
         isLength(definition.boltHoleRadius, LENGTH_BOUNDS);
 
-        annotation { "Name" : "Bolt count", "Default" : "6" }
-        isInteger(definition.boltCount, { (unitless) : [3, 6, 16] });
+        annotation { "Name" : "Bolt count" }
+        isInteger(definition.boltCount, { (unitless) : [3, 6, 16] } as IntegerBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)

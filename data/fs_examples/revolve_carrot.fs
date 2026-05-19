@@ -13,8 +13,8 @@ export const organicRevolveCarrot = defineFeature(function(context is Context, i
         isLength(definition.height, LENGTH_BOUNDS);
         annotation { "Name" : "Tip Radius", "Default" : "0.06 * inch" }
         isLength(definition.tipRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Curvature Factor", "Default" : "100" }
-        isInteger(definition.curvatureFactor, {(unitless) : [60, 100, 140]});
+        annotation { "Name" : "Curvature Factor" }
+        isInteger(definition.curvatureFactor, { (unitless) : [60, 100, 140] } as IntegerBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)
