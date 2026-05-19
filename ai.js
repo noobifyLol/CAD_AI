@@ -1,3 +1,8 @@
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import Groq from "groq-sdk";
+
 const TEXT_MODEL = process.env.GROQ_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const FAST_MODEL = process.env.GROQ_FAST_MODEL || TEXT_MODEL;
 const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || TEXT_MODEL;
@@ -11,8 +16,6 @@ const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "t
 // Emergency fallback: if AI produces unfixable code after repair passes, fall back to template output.
 const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "true").toLowerCase() === "true";
 
-import Groq from "groq-sdk";
-
 // ------------------------------
 // Model configuration
 // ------------------------------
@@ -22,8 +25,140 @@ const GROQ_MAX_PROMPT_CHARS = Number(process.env.GROQ_MAX_PROMPT_CHARS || 160000
 const GROQ_TEMPERATURE = Number(process.env.GROQ_TEMPERATURE || 0.2);
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
+const CAD_CANDIDATE_COUNT = Math.max(1, Math.min(6, Number(process.env.CAD_CANDIDATE_COUNT || 3)));
+const CAD_REPAIR_ATTEMPTS = Math.max(1, Math.min(3, Number(process.env.CAD_REPAIR_ATTEMPTS || 3)));
+const CAD_RETRIEVAL_WORKERS = Math.max(1, Math.min(6, Number(process.env.CAD_RETRIEVAL_WORKERS || 3)));
+const MULTI_KEY_ENABLED = String(process.env.GROQ_MULTI_KEY_ENABLED || "true").toLowerCase() !== "false";
+const MAX_RETRIEVED_SNIPPETS = Math.max(1, Math.min(6, Number(process.env.CAD_MAX_RETRIEVED_SNIPPETS || 6)));
+const MAX_RETRIEVED_SNIPPET_CHARS = Math.max(400, Math.min(4000, Number(process.env.CAD_MAX_RETRIEVED_SNIPPET_CHARS || 2200)));
+const MAX_OMNI_SUMMARY_CHARS = Math.max(400, Math.min(2400, Number(process.env.CAD_MAX_OMNI_SUMMARY_CHARS || 1100)));
+const PROJECT_ROOT = fileURLToPath(new URL(".", import.meta.url));
+const FS_EXAMPLES_DIR = join(PROJECT_ROOT, "data", "fs_examples");
+const LOCAL_OMNI_SUMMARY_PATHS = [
+  join(PROJECT_ROOT, "docs", "research_summaries", "cad_mllm_and_omni_cad.md"),
+  join(PROJECT_ROOT, "docs", "research_summaries", "local_omni_cad_dataset.md"),
+  join(PROJECT_ROOT, "docs", "research_summaries", "deepcad.md"),
+  join(PROJECT_ROOT, "docs", "research_summaries", "cambridge_text_to_design.md"),
+];
+const STAGE_API_KEY_ENV = {
+  shared: ["GROQ_API_KEYS", "GROQ_API_KEY"],
+  dimensions: ["GROQ_DIM_API_KEYS", "GROQ_DIM_API_KEY"],
+  planning: ["GROQ_PLAN_API_KEYS", "GROQ_PLAN_API_KEY"],
+  retrieval: ["GROQ_RETRIEVAL_API_KEYS", "GROQ_RETRIEVAL_API_KEY"],
+  generation: ["GROQ_GENERATION_API_KEYS", "GROQ_GENERATION_API_KEY"],
+  repair: ["GROQ_REPAIR_API_KEYS", "GROQ_REPAIR_API_KEY"],
+  validation: ["GROQ_VALIDATION_API_KEYS", "GROQ_VALIDATION_API_KEY"],
+  vision: ["GROQ_VISION_API_KEYS", "GROQ_VISION_API_KEY"],
+};
+const groqClientCache = new Map();
+const stageCursor = new Map();
+let cachedFsExampleLibrary = null;
+let cachedOmniSummaryText = null;
+
+function splitEnvList(rawValue) {
+  return String(rawValue || "")
+    .split(/[\r\n,;]+/)
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function loadStageKeys(stage) {
+  const sharedKeys = uniqueStrings(
+    (STAGE_API_KEY_ENV.shared || []).flatMap(name => splitEnvList(process.env[name]))
+  );
+  const stageKeys = uniqueStrings(
+    (STAGE_API_KEY_ENV[stage] || []).flatMap(name => splitEnvList(process.env[name]))
+  );
+  return uniqueStrings(stageKeys.length ? stageKeys : sharedKeys);
+}
+
+function getStageKeyPool(stage = "generation") {
+  const requestedStage = Object.prototype.hasOwnProperty.call(STAGE_API_KEY_ENV, stage) ? stage : "generation";
+  const pool = loadStageKeys(requestedStage);
+  if (!pool.length) {
+    throw new Error("Missing Groq API key configuration. Set GROQ_API_KEY or GROQ_API_KEYS.");
+  }
+  return MULTI_KEY_ENABLED ? pool : [pool[0]];
+}
+
+function stableHash(input) {
+  let hash = 0;
+  const text = String(input || "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function pickStageCredential(stage = "generation", affinity = "") {
+  const pool = getStageKeyPool(stage);
+  let slotIndex = 0;
+
+  if (affinity) {
+    slotIndex = stableHash(`${stage}:${affinity}`) % pool.length;
+  } else {
+    const current = stageCursor.get(stage) || 0;
+    slotIndex = current % pool.length;
+    stageCursor.set(stage, current + 1);
+  }
+
+  return {
+    apiKey: pool[slotIndex],
+    slotIndex,
+    slotLabel: `${stage}-slot-${slotIndex + 1}`,
+    poolSize: pool.length,
+  };
+}
+
+function getGroqClient(apiKey, timeout) {
+  const cacheKey = `${timeout}:${apiKey}`;
+  if (!groqClientCache.has(cacheKey)) {
+    groqClientCache.set(cacheKey, new Groq({
+      apiKey,
+      timeout,
+      maxRetries: 0,
+    }));
+  }
+  return groqClientCache.get(cacheKey);
+}
+
+function loadFsExampleLibrary() {
+  if (cachedFsExampleLibrary) return cachedFsExampleLibrary;
+  if (!existsSync(FS_EXAMPLES_DIR)) {
+    cachedFsExampleLibrary = [];
+    return cachedFsExampleLibrary;
+  }
+
+  cachedFsExampleLibrary = readdirSync(FS_EXAMPLES_DIR)
+    .filter(fileName => fileName.endsWith(".fs"))
+    .map(fileName => {
+      const fullPath = join(FS_EXAMPLES_DIR, fileName);
+      return {
+        id: basename(fileName, ".fs"),
+        fileName,
+        content: readFileSync(fullPath, "utf8"),
+      };
+    });
+
+  return cachedFsExampleLibrary;
+}
+
+function loadLocalOmniSummaryText() {
+  if (cachedOmniSummaryText !== null) return cachedOmniSummaryText;
+  cachedOmniSummaryText = LOCAL_OMNI_SUMMARY_PATHS
+    .filter(filePath => existsSync(filePath))
+    .map(filePath => readFileSync(filePath, "utf8"))
+    .join("\n");
+  return cachedOmniSummaryText;
+}
 
 export function getModelConfig() {
+  const sharedKeyCount = loadStageKeys("shared").length;
   return {
     provider: "groq",
     text: TEXT_MODEL,
@@ -34,6 +169,19 @@ export function getModelConfig() {
     validatedTemplates: USE_VALIDATED_TEMPLATES,
     allowTemplateFallback: ALLOW_TEMPLATE_FALLBACK,
     vision: VISION_MODEL,
+    multiKeyEnabled: MULTI_KEY_ENABLED,
+    candidateCount: CAD_CANDIDATE_COUNT,
+    retrievalWorkers: CAD_RETRIEVAL_WORKERS,
+    sharedKeyCount,
+    stageKeyCounts: {
+      dimensions: safeStageKeyCount("dimensions"),
+      planning: safeStageKeyCount("planning"),
+      retrieval: safeStageKeyCount("retrieval"),
+      generation: safeStageKeyCount("generation"),
+      repair: safeStageKeyCount("repair"),
+      validation: safeStageKeyCount("validation"),
+      vision: safeStageKeyCount("vision"),
+    },
   };
 }
 
@@ -99,15 +247,9 @@ function normalizeMessageContent(content) {
   return "";
 }
 
-async function callGroqVisionLLM(messages, model = VISION_MODEL) {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("Missing GROQ_API_KEY");
-
-  const client = new Groq({
-    apiKey,
-    timeout: VISION_TIMEOUT_MS,
-    maxRetries: 0,
-  });
+async function callGroqVisionLLM(messages, model = VISION_MODEL, options = {}) {
+  const credential = pickStageCredential("vision", options.affinity);
+  const client = getGroqClient(credential.apiKey, VISION_TIMEOUT_MS);
 
   try {
     const completion = await client.chat.completions.create({
@@ -132,6 +274,8 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL) {
       cause: err?.cause?.message,
       stack: err?.stack,
       model,
+      slot: credential.slotLabel,
+      poolSize: credential.poolSize,
     });
     throw err;
   }
@@ -140,10 +284,9 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL) {
 // ------------------------------
 // 1. Text LLM via Groq
 // ------------------------------
-async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL) {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("Missing GROQ_API_KEY");
-
+async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {}) {
+  const stage = options.stage || "generation";
+  const credential = pickStageCredential(stage, options.affinity);
   const messages = Array.isArray(messagesOrPrompt)
     ? messagesOrPrompt
     : [{ role: "user", content: String(messagesOrPrompt) }];
@@ -155,15 +298,11 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL) {
     temperature: GROQ_TEMPERATURE,
   };
 
-  const client = new Groq({
-    apiKey,
-    timeout: GROQ_TIMEOUT_MS,
-    maxRetries: 0,
-  });
+  const client = getGroqClient(credential.apiKey, options.timeoutMs || GROQ_TIMEOUT_MS);
   const startedAt = Date.now();
 
   try {
-    console.log(`[Groq Text] model=${model} timeoutMs=${GROQ_TIMEOUT_MS}`);
+    console.log(`[Groq Text] stage=${stage} model=${model} timeoutMs=${options.timeoutMs || GROQ_TIMEOUT_MS} slot=${credential.slotLabel}/${credential.poolSize}`);
     console.log(`[Groq Text] outgoing=${truncateForLog(requestBody, 800)}`);
     const completion = await client.chat.completions.create({
       model,
@@ -179,10 +318,17 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL) {
       throw error;
     }
 
-    console.log(`[Groq Text] success model=${model} durationMs=${Date.now() - startedAt}`);
+    console.log(`[Groq Text] success stage=${stage} model=${model} durationMs=${Date.now() - startedAt} slot=${credential.slotLabel}`);
     return content;
   } catch (err) {
-    logFetchError("Groq Text", err, { model, durationMs: Date.now() - startedAt, timeoutMs: GROQ_TIMEOUT_MS });
+    logFetchError("Groq Text", err, {
+      model,
+      stage,
+      slot: credential.slotLabel,
+      poolSize: credential.poolSize,
+      durationMs: Date.now() - startedAt,
+      timeoutMs: options.timeoutMs || GROQ_TIMEOUT_MS,
+    });
     throw err;
   }
 }
@@ -193,9 +339,9 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL) {
  * callLLM accepts either a plain string or a messages array and always routes
  * text generation through Groq.
  */
-export async function callLLM(promptOrMessages, model = TEXT_MODEL) {
-  console.log(`[LLM Router] using Groq model=${model} render=${Boolean(process.env.RENDER)}`);
-  return await callGroqTextLLM(promptOrMessages, model);
+export async function callLLM(promptOrMessages, model = TEXT_MODEL, options = {}) {
+  console.log(`[LLM Router] stage=${options.stage || "generation"} model=${model} render=${Boolean(process.env.RENDER)}`);
+  return await callGroqTextLLM(promptOrMessages, model, options);
 }
 
 
@@ -243,7 +389,7 @@ function messagesToPrompt(messages = []) {
   }).join("\n\n");
 }
 
-async function chat(messages, model = TEXT_MODEL, fallbackModels = null, _options = {}) {
+async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
   const fallbackList = Array.isArray(fallbackModels)
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
@@ -252,8 +398,8 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, _option
   let lastError = null;
   for (const candidate of modelsToTry) {
     try {
-      const text = await callLLM(messages, candidate);
-      if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate}`);
+      const text = await callLLM(messages, candidate, options);
+      if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate} for stage=${options.stage || "generation"}`);
       return text;
     } catch (err) {
       lastError = err;
@@ -1247,6 +1393,213 @@ function withLearningContext(basePrompt, learningContext) {
   return `${basePrompt}\n\nDATABASE CONTEXT\n${learningText}`;
 }
 
+function makeRequestId(prompt = "") {
+  return `${Date.now()}-${stableHash(prompt).toString(36)}`;
+}
+
+function safeStageKeyCount(stage) {
+  try {
+    return getStageKeyPool(stage).length;
+  } catch {
+    return 0;
+  }
+}
+
+function getShapeSnippetKeywords(shape = "CUSTOM") {
+  const keywordMap = {
+    BOX: ["box", "enclosure", "shell", "block"],
+    CYLINDER: ["cylinder", "revolve", "bottle", "pipe"],
+    CONE: ["revolve", "carrot", "bottle"],
+    FLANGE: ["flange", "pattern", "bolt"],
+    GEAR_SPUR: ["gear", "spur"],
+    LINKAGE: ["sweep", "pipe", "elbow"],
+    PIPE: ["sweep", "pipe", "elbow"],
+    PLATE: ["fillet", "chamfer", "enclosure"],
+    PLATE_HOLES: ["flange", "pattern", "fillet"],
+    CUSTOM: ["loft", "sweep", "revolve"],
+  };
+  return keywordMap[shape] || keywordMap.CUSTOM;
+}
+
+function scoreFsSnippet(prompt, dims, snippet) {
+  const promptKeywords = extractPromptKeywords(prompt, 10);
+  const targetKeywords = [...promptKeywords, ...getShapeSnippetKeywords(dims.shape)];
+  const text = `${snippet.id} ${snippet.fileName} ${snippet.content.slice(0, 600)}`.toLowerCase();
+  return targetKeywords.reduce((score, keyword) => {
+    return text.includes(keyword.toLowerCase()) ? score + 1 : score;
+  }, 0);
+}
+
+function selectRetrievedSnippets(prompt, dims, learningContext = {}) {
+  const library = loadFsExampleLibrary();
+  const contextDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
+  const localSnippets = library
+    .map(snippet => ({ ...snippet, score: scoreFsSnippet(prompt, dims, snippet) }))
+    .sort((left, right) => right.score - left.score || left.fileName.localeCompare(right.fileName))
+    .slice(0, Math.max(1, MAX_RETRIEVED_SNIPPETS - Math.min(2, contextDocs.length)))
+    .map(snippet => ({
+      id: snippet.id,
+      code: compactFeaturePattern(snippet.content, MAX_RETRIEVED_SNIPPET_CHARS),
+      source: "fs_examples",
+    }));
+
+  const docSnippets = contextDocs
+    .slice(0, 2)
+    .map((doc, index) => ({
+      id: `context_doc_${index + 1}`,
+      code: compactFeaturePattern(doc.text || "", MAX_RETRIEVED_SNIPPET_CHARS),
+      source: doc.source || "learning_context",
+    }));
+
+  return [...docSnippets, ...localSnippets].slice(0, MAX_RETRIEVED_SNIPPETS);
+}
+
+function buildOmniCadSummary(prompt, dims, learningContext = {}) {
+  const promptKeywords = extractPromptKeywords(`${prompt} ${dims.shape}`, 10);
+  const researchSummary = loadLocalOmniSummaryText();
+  const contextNotes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
+  const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
+  const relevantKnowledge = knowledge
+    .filter(entry => {
+      const haystack = `${entry.title || ""} ${entry.summary || ""} ${(entry.keywords || []).join(" ")}`.toLowerCase();
+      return promptKeywords.some(keyword => haystack.includes(keyword));
+    })
+    .slice(0, 3)
+    .map(entry => normalizeText(`${entry.title || "knowledge"} ${entry.summary || ""}`));
+
+  const relevantLines = researchSummary
+    .split(/\r?\n/)
+    .map(line => normalizeText(line.replace(/^[-*]\s*/, "")))
+    .filter(Boolean)
+    .filter(line => promptKeywords.some(keyword => line.toLowerCase().includes(keyword)) || /feature|retriev|dataset|omni|cad|deepcad|loft|sweep|extrude|revolve/i.test(line))
+    .slice(0, 8);
+
+  const summary = normalizeText([
+    ...relevantLines,
+    ...relevantKnowledge,
+    ...contextNotes.slice(0, 2),
+  ].join(" "));
+
+  return truncateText(summary || "Use local Omni-CAD, CAD-MLLM, and DeepCAD summaries as retrieval guidance only; prefer semantic command-sequence patterns and sanitized FeatureScript snippets over raw archives.", MAX_OMNI_SUMMARY_CHARS);
+}
+
+function buildContextMeta(dims, learningContext = {}) {
+  return {
+    project: "CAD_AI",
+    units: "inch",
+    targetPlatform: "Onshape",
+    generatorVersion: "multi_key_candidate_pipeline_v1",
+    shape: dims.shape,
+    confidence: dims.confidence,
+    generationStrategy: GENERATION_STRATEGY,
+    validatedTemplates: USE_VALIDATED_TEMPLATES,
+    allowTemplateFallback: ALLOW_TEMPLATE_FALLBACK,
+    adaptiveExamples: Array.isArray(learningContext.examples) ? learningContext.examples.length : 0,
+    adaptiveKnowledge: Array.isArray(learningContext.knowledge) ? learningContext.knowledge.length : 0,
+  };
+}
+
+function buildCandidateStrategy(candidateId, dims) {
+  const strategies = {
+    c1: "Prioritize compile-safe, conservative geometry with the simplest valid operation chain.",
+    c2: "Lean on retrieved dataset patterns and local FeatureScript references for a closer structural match.",
+    c3: "Favor higher-fidelity geometry while staying within FeatureScript 2931 constraints and validator rules.",
+  };
+  return strategies[candidateId] || `Generate an independent ${dims.shape.toLowerCase()} candidate with diverse modeling choices and full parameter exposure.`;
+}
+
+function buildPlannerUserPrompt(prompt, dims) {
+  return [
+    `USER REQUEST: ${prompt}`,
+    `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+    `Return the planning JSON only.`,
+  ].join("\n");
+}
+
+function stripCodeFences(text = "") {
+  return String(text || "").replace(/```(?:json|javascript|featurescript)?/gi, "").replace(/```/g, "").trim();
+}
+
+function tryParseJson(text, fallback = null) {
+  try {
+    return JSON.parse(stripJson(stripCodeFences(text)));
+  } catch {
+    return fallback;
+  }
+}
+
+function hasBalancedTokens(code = "") {
+  const pairs = { "{": "}", "(": ")", "[": "]" };
+  const stack = [];
+  for (const char of String(code || "")) {
+    if (pairs[char]) stack.push(pairs[char]);
+    else if (Object.values(pairs).includes(char)) {
+      const expected = stack.pop();
+      if (char !== expected) return false;
+    }
+  }
+  return stack.length === 0;
+}
+
+function hasCompileSanity(code = "") {
+  const text = String(code || "");
+  return hasBalancedTokens(text)
+    && /FeatureScript 2931;/.test(text)
+    && /defineFeature\s*\(/.test(text)
+    && /export const\s+[A-Za-z_]\w*\s*=/.test(text);
+}
+
+function hasPreconditionExposure(code = "") {
+  return /precondition/.test(code) && /(isLength|isInteger|\sboolean;|\sis Query;)/.test(code);
+}
+
+function hasSkSolveBeforeDownstreamOps(code = "") {
+  const downstreamMatch = String(code || "").match(/\b(opExtrude|opRevolve|opLoft|opSweep)\b/);
+  if (!downstreamMatch) return true;
+  const downstreamIndex = downstreamMatch.index ?? -1;
+  const skSolveIndex = String(code || "").search(/\bskSolve\s*\(/);
+  return skSolveIndex >= 0 && skSolveIndex < downstreamIndex;
+}
+
+function humanizeSanitizationRule(rule = "") {
+  const labels = {
+    remove_typed_lambda_annotations: "removed typed lambda annotations for FeatureScript compatibility",
+    replace_length_index: "replaced forbidden array length indexing with a deterministic fixed index",
+    force_opCylinder_map_form: "normalized opCylinder usage into map form",
+    insert_skSolve_after_sketch: "inserted skSolve before downstream modeling operations",
+    sanitize_qSketchRegion_variable: "normalized qSketchRegion usage to an explicit sketch id",
+    repair_pass: "applied an automated repair pass to satisfy validator checks",
+  };
+  return labels[rule] || `applied automated rule ${rule}`;
+}
+
+function injectAutomationComments(code, sanitizations = []) {
+  const uniqueNotes = uniqueStrings(
+    sanitizations.map(item => humanizeSanitizationRule(item.rule)).filter(Boolean)
+  );
+  if (!uniqueNotes.length) return code;
+
+  const commentBlock = uniqueNotes
+    .map(note => `// AUTO-SANITIZE: ${note}.`)
+    .join("\n");
+
+  if (/FeatureScript 2931;[\r\n]+import\([^\n]+\);\s*/.test(code)) {
+    return code.replace(/(FeatureScript 2931;[\r\n]+import\([^\n]+\);\s*)/, `$1${commentBlock}\n`);
+  }
+
+  return `${commentBlock}\n${code}`;
+}
+
+function estimateTokenCount(text = "") {
+  return Math.max(1, Math.round(String(text || "").length / 4));
+}
+
+function estimateCostLabel(tokens = 0) {
+  if (tokens < 2500) return "low";
+  if (tokens < 6000) return "medium";
+  return "high";
+}
+
 function normalizeDims(dims) {
   const normalized = {
     featureName: String(dims.featureName || "aiShape").replace(/[^a-zA-Z0-9_]/g, "") || "aiShape",
@@ -1417,7 +1770,7 @@ function decideGenerationMode(prompt, dims) {
 //   const foo = function(x is number) { ... };
 // This function detects rogue named functions inside the feature body and
 // converts them to const lambda form so Onshape can parse the file.
-function sanitizeFeatureScript(code) {
+function _coreFeatureScriptSanitize(code) {
   let cleaned = String(code || "")
     .replace(/^```[\w-]*\s*/gm, "")
     .replace(/```$/gm, "")
@@ -1431,7 +1784,7 @@ function sanitizeFeatureScript(code) {
 
   // ── Basic token repairs ───────────────────────────────────────────────────
   cleaned = cleaned
-    // opCylinder IS the correct FS function — do NOT rename it
+    // Remove invalid angle keys that models incorrectly add (opCylinder does not exist — use sketch circle + opExtrude)
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     // operationType is a valid opCylinder key — do NOT strip it
@@ -1478,7 +1831,15 @@ function sanitizeFeatureScript(code) {
       const normalizedAfter = after.replace(/^\s*,\s*/, "").trim();
       return `function(${[normalizedBefore, normalizedAfter].filter(Boolean).join(", ")})`;
     })
-    .replace(/\bvar\s+([A-Za-z_]\w*)\s*=\s*function\s*\(/g, 'const $1 = function(');
+    .replace(/\bvar\s+([A-Za-z_]\w*)\s*=\s*function\s*\(/g, 'const $1 = function(')
+    // ── Restore 'definition is map' in defineFeature signature ────────────────
+    // The lambda type-strip replacements above inadvertently remove 'is map' from
+    // 'definition is map' because 'map' is in the stripped-types list.
+    // 'definition is map' is MANDATORY in the defineFeature signature and must always be present.
+    .replace(
+      /\bdefineFeature\s*\(\s*function\s*\(\s*context\s+is\s+Context\s*,\s*id\s+is\s+Id\s*,\s*definition\s*\)/g,
+      'defineFeature(function(context is Context, id is Id, definition is map)'
+    );
 
   // ── Structural fix: named typed functions inside feature body → const lambdas ──
   // Matches: function name(args) returns type { ... }
@@ -1590,6 +1951,99 @@ function sanitizeFeatureScript(code) {
   return cleaned.trim();
 }
 
+/**
+ * sanitizeFeatureScript
+ * - Applies the core FS sanitization, then deterministic logged transformations.
+ * - Returns { code: string, changes: Array<{rule, beforeSnippet, afterSnippet}> }
+ *
+ * Note: keep transformations conservative and log every change for traceability.
+ */
+function sanitizeFeatureScript(rawCode, opts = {}) {
+  const arrFixedIndexMap = opts.arrFixedIndexMap || {}; // optional mapping for known arrays
+  const changes = [];
+  // First run through the existing comprehensive sanitizer
+  let code = _coreFeatureScriptSanitize(rawCode);
+
+  function record(rule, before, after) {
+    changes.push({ rule, beforeSnippet: before.slice(0, 300), afterSnippet: after.slice(0, 300) });
+  }
+
+  // 1) Remove typed lambda annotations: function(x is number, y is number) -> function(x, y)
+  const typedLambdaRegex = /function\s*\(\s*([a-zA-Z0-9_$]+)\s+is\s+[a-zA-Z0-9_]+\s*(?:,\s*[a-zA-Z0-9_$]+\s+is\s+[a-zA-Z0-9_]+\s*)*\)/g;
+  code = code.replace(typedLambdaRegex, (match) => {
+    const before = match;
+    const after = match.replace(/\s+is\s+[a-zA-Z0-9_]+/g, '');
+    if (before !== after) record('remove_typed_lambda_annotations', before, after);
+    return after;
+  });
+
+  // 2) Replace dynamic .length indexing patterns when safe to do so
+  // Pattern: arr[arr.length - N] -> arr[<computed_index>] using arrFixedIndexMap or fallback heuristic
+  const lengthIndexRegex = /\b([a-zA-Z0-9_]+)\s*\[\s*\1\.length\s*-\s*([0-9]+)\s*\]/g;
+  code = code.replace(lengthIndexRegex, (match, arr, nStr) => {
+    const n = Number(nStr);
+    const fallbackIndex = (arrFixedIndexMap[arr] !== undefined) ? arrFixedIndexMap[arr] : Math.max(0, 6 - n);
+    const before = match;
+    const after = `${arr}[${fallbackIndex}]`;
+    record('replace_length_index', before, after);
+    return after;
+  });
+
+  // 3) Force opCylinder to use map form
+  // Convert opCylinder(context, id, radius, height) -> opCylinder(context, id, { radius:..., height:... })
+  // Conservative: only convert when 3rd and 4th args look like numeric expressions or simple vars
+  const opCylinderRegex = /opCylinder\s*\(\s*([^,()]+)\s*,\s*([^,()]+)\s*,\s*([^,()]+)\s*(?:,\s*([^,()]+)\s*)?\)/g;
+  code = code.replace(opCylinderRegex, (match, ctx, id, a3, a4) => {
+    // If already map-like, skip
+    if (/\{[\s\S]*:/.test(match)) return match;
+    const before = match;
+    // If only 3 args, treat as radius only; if 4 args, radius+height
+    const mapObj = a4 ? `{ "radius": ${a3.trim()}, "height": ${a4.trim()} }` : `{ "radius": ${a3.trim()} }`;
+    const after = `opCylinder(${ctx.trim()}, ${id.trim()}, ${mapObj})`;
+    record('force_opCylinder_map_form', before, after);
+    return after;
+  });
+
+  // 4) Ensure skSolve present before downstream ops (best-effort insertion)
+  try {
+    const sketchCreateRegex = /(\bvar\s+([a-zA-Z0-9_$]+)\s*=\s*qSketch\s*\([^;]*\);?)/g;
+    let sketchMatches = [];
+    let m;
+    while ((m = sketchCreateRegex.exec(code)) !== null) {
+      sketchMatches.push({ full: m[1], varName: m[2], index: m.index });
+    }
+    if (sketchMatches.length) {
+      sketchMatches.reverse(); // process from bottom to top to keep indices valid
+      for (const s of sketchMatches) {
+        const varName = s.varName;
+        const afterSketch = code.slice(s.index + s.full.length);
+        const hasSkSolve = new RegExp(`skSolve\\s*\\(\\s*${varName}\\s*\\)`).test(afterSketch);
+        const hasDownstreamOp = /(opExtrude|opRevolve|opLoft|opSweep)/.test(afterSketch);
+        if (hasDownstreamOp && !hasSkSolve) {
+          const insertion = `\n// AUTO-INSERTED: ensure sketch solved before downstream ops\nskSolve(${varName});\n`;
+          const insertPos = s.index + s.full.length;
+          code = code.slice(0, insertPos) + insertion + code.slice(insertPos);
+          record('insert_skSolve_after_sketch', s.full, insertion.trim());
+        }
+      }
+    }
+  } catch (e) {
+    // never throw; log as change
+    record('skSolve_insertion_error', '', `error:${String(e).slice(0, 200)}`);
+  }
+
+  // 5) Sanitize qSketchRegion usage: qSketchRegion(sketchVar) -> qSketchRegion("sketch_<id>") best-effort
+  const qSketchRegionRegex = /qSketchRegion\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g;
+  code = code.replace(qSketchRegionRegex, (match, varName) => {
+    const before = match;
+    const after = `qSketchRegion("${varName}_sketch")`;
+    record('sanitize_qSketchRegion_variable', before, after);
+    return after;
+  });
+
+  return { code, changes };
+}
+
 // ─── Dimension extractor ────────────────────────────────────────────────────── CHANGE THIS
 
 const DIM_SYSTEM = `You are a mechanical CAD dimension extractor with engineering knowledge.
@@ -1680,7 +2134,7 @@ Unit rules:
 - Missing dims: use sensible mechanical defaults, never 0 for main dimensions
 - confidence: HIGH if all dims explicit, MEDIUM if some inferred, LOW if mostly guessed`;
 
-async function extractDims(prompt, learningContext = {}, history = []) {
+async function extractDims(prompt, learningContext = {}, history = [], options = {}) {
   const context = normalizeLearningContext(learningContext);
   const messages = [{ role: "system", content: withLearningContext(DIM_SYSTEM, context) }];
 
@@ -1694,7 +2148,10 @@ async function extractDims(prompt, learningContext = {}, history = []) {
 
   const extractorModel = promptNeedsHighFidelityModel(prompt) ? DIM_MODEL : FAST_MODEL;
   try {
-    const raw = await chat(messages, extractorModel, [DIM_MODEL, TEXT_MODEL, FALLBACK_MODEL]);
+    const raw = await chat(messages, extractorModel, [DIM_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
+      stage: "dimensions",
+      affinity: options.affinity || options.requestId || makeRequestId(prompt),
+    });
     const parsed = JSON.parse(stripJson(raw));
     const d = normalizeDims({
       featureName:         String(parsed.featureName         ?? "aiShape").replace(/[^a-zA-Z0-9_]/g,""),
@@ -1824,7 +2281,17 @@ Return only compile-safe FeatureScript 2931 with this invariant set:
 - no unused helper variables
 - if validation fails, repair from pruning rules; after repair failure, use the nearest validated template.`;
 
-const CUSTOM_FEATURE_SYSTEM = `You are an expert Onshape FeatureScript author. You write production-quality custom features.
+const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring assistant. Follow these rules exactly:
+- Output only valid FeatureScript 2931 code and nothing else unless asked for explanation.
+- The exported feature signature must accept a single map parameter named "definition" declared in the precondition. Use isLength/isInteger/boolean/Query as appropriate. Do not emit alternate function signatures (e.g., "function(definition is map)").
+- Forbidden constructs: typed lambda parameter annotations (e.g., "is number"), any use of ".length" on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and opCylinder called with positional args instead of a map.
+- Always include skSolve before any downstream opExtrude/opRevolve/opLoft/opSweep.
+- Expose user-editable parameters in the precondition using isLength/isInteger/boolean and sensible bounds.
+- If the shape is recognized (gear, pulley, flange, cylinder, box), prefer parameterized templates and include validation rules in comments.
+- If uncertain about an API key or environment, do not reference or output secrets.
+- If you must reference an example, only use sanitized examples that follow the above rules.
+- If any rule would be violated by the intended output, respond with a short JSON diagnostics object: {"error":"violation","reasons":[...]} and do not emit code.
+
 Return ONLY a JSON object — no markdown, no explanation outside the JSON:
 {
   "featureName": "camelCaseName",
@@ -1900,12 +2367,16 @@ When DATABASE CONTEXT contains a "SHAPE REFERENCE TEMPLATE", do the following:
         "endBound"  : BoundingType.BLIND,
         "endDepth"  : definition.height
     });
-- If you do use opCylinder, the safe form is:
-    opCylinder(context, id + "cyl1", {
-        "bottomCenter"  : skPlane.origin,
-        "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
-        "radius"        : definition.radius,
-        "operationType" : NewBodyOperationType.NEW
+- NEVER use opCylinder — that function does NOT exist in FeatureScript and will cause a compile error.
+  To create a solid cylinder, sketch a circle and extrude it:
+    var cylSk = newSketchOnPlane(context, id + "cylSk", { "sketchPlane" : skPlane });
+    skCircle(cylSk, "cyl", { "center" : vector(0, 0) * inch, "radius" : definition.radius });
+    skSolve(cylSk);
+    opExtrude(context, id + "cyl1", {
+        "entities"  : qSketchRegion(id + "cylSk"),
+        "direction" : skPlane.normal,
+        "endBound"  : BoundingType.BLIND,
+        "endDepth"  : definition.height
     });
 - opRevolve: { "entities": Query, "axis": Line, "angleForward": 2 * PI * radian }
 - The revolve axis must be a Line value, not a query. For a profile drawn with radius on sketch X and height on sketch Y, use line(skPlane.origin, cross(skPlane.normal, skPlane.x)).
@@ -1960,6 +2431,13 @@ When DATABASE CONTEXT contains a "SHAPE REFERENCE TEMPLATE", do the following:
 13. ARRAY .length — FeatureScript arrays have NO .length property.
     WRONG: arr[arr.length - 1]   → runtime error
     RIGHT: use a known index like arr[5], or track the count with a separate var.
+14. Using opCylinder — that function does NOT exist in FeatureScript and will produce a compile error.
+    WRONG: opCylinder(context, id + "cyl1", { "bottomCenter": ..., ... })
+    RIGHT: use skCircle → skSolve → opExtrude for every cylinder/shaft/rod shape.
+15. Using definition.param in the body without declaring it in the precondition.
+    Every definition.param accessed in the body MUST have a matching isLength / isInteger /
+    is boolean / is Query declaration in the precondition block. Missing declarations cause
+    runtime "undefined" or type errors.
 
 ═══ GEARS / TOOTHED PARTS ═══
 - Gear helper lambdas MUST use untyped parameters (rule 10 above):
@@ -2033,10 +2511,19 @@ Intermediate plane construction — how to make a plane at an offset or angle:
 
 ═══ GEAR GENERATION RULES (MUST USE INVOLUTE PROFILE) ═══\r\n-- For GEAR_SPUR shapes, you MUST use the full involute flank sampling approach:\r\n-- 1. Compute base circle, pitch circle, root circle, and tip circle radii from:\r\n--    - pitchRadius, pressureAngle, module (module = 2*pitchRadius / numTeeth)\r\n--    - tipRadius = pitchRadius + module\r\n--    - rootRadius = max(pitchRadius - 1.35*module, pitchRadius*0.5)\r\n--    - baseRadius = pitchRadius * cos(pressureAngle)\r\n-- 2. Draw the tooth profile using skArc for root arc, skArc for tip arc, and skFitSpline for involute flank\r\n-- 3. Create ONE tooth profile sketch, then use opPatternCircular with the body as target and axis for pattern\r\n-- 4. Create the hub/body as a cylinder (skCircle + opExtrude) with bore hole\r\n-- 5. UNION the tooth body with the hub body using opBoolean\r\n-- DO NOT use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.\r\n-- DO NOT use skCircle alone for root/tip without involute spline in between.\r\n-- Every gear must have: involute flank spline, root arc, tip arc, circular pattern, boolean union, bore cut.\r\n\r\n═══ MECH / MULTI-BODY STRATEGY ═══
 Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
-Build each section as its own opExtrude or opCylinder call, then union adjacent bodies:
+Build each section as its own opExtrude call (opCylinder does NOT exist — always use sketch circle + opExtrude
+for cylindrical parts), then union adjacent bodies:
 
-  // Pattern: build body, build part, union them
-  opCylinder(context, id + "leg1", { "bottomCenter": ..., "topCenter": ..., "radius": ..., "operationType": NewBodyOperationType.NEW });
+  // Pattern: sketch circle → skSolve → opExtrude for each cylindrical part, then union
+  var legSk = newSketchOnPlane(context, id + "legSk", { "sketchPlane" : skPlane });
+  skCircle(legSk, "leg1c", { "center" : vector(sideOff, 0) * inch, "radius" : definition.legRadius });
+  skSolve(legSk);
+  opExtrude(context, id + "leg1", {
+      "entities"  : qSketchRegion(id + "legSk"),
+      "direction" : skPlane.normal,
+      "endBound"  : BoundingType.BLIND,
+      "endDepth"  : definition.legLength
+  });
   opExtrude(context, id + "foot1", { "entities": qSketchRegion(id + "footSk"), ... });
   opBoolean(context, id + "joinLeg1", {
       "tools": qCreatedBy(id + "foot1", EntityType.BODY),
@@ -2046,7 +2533,7 @@ Build each section as its own opExtrude or opCylinder call, then union adjacent 
 
 For robot/mech shapes:
 - Build the torso first as a BOX (opExtrude of a rectangle)
-- Add limbs as cylinders (opCylinder) positioned relative to the torso
+- Add limbs as cylinders (sketch circle + opExtrude) positioned relative to the torso
 - Use vector arithmetic for positioning: skPlane.origin + skPlane.normal * offset + skPlane.x * sideOffset
 - UNION all parts that should be one body; leave separate bodies as separate if they are distinct parts
 
@@ -2090,6 +2577,292 @@ Use a revolved spline profile for any organic tapered shape:
 - Prefer simple, robust geometry over clever but brittle geometry.
 - The code must compile and produce visible 3D geometry with zero errors.`;
 
+const MULTI_CANDIDATE_AUTHOR_SYSTEM = `SYSTEM: You are a strict FeatureScript 2931 authoring assistant used inside a multi-key, multi-model CAD orchestration pipeline.
+NEVER include, reference, or request API keys, secrets, or internal key identifiers in any output.
+Output valid FeatureScript 2931 inside the JSON "code" field only.
+The exported feature signature must accept a single map parameter named definition declared in the precondition.
+Forbidden constructs: typed lambda parameter annotations, .length on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and positional opCylinder usage.
+Always include skSolve before opExtrude/opRevolve/opLoft/opSweep.
+Expose user-editable parameters in the precondition using isLength/isInteger/boolean/Query with sensible defaults.
+Use only sanitized retrieved snippets and local Omni-CAD summaries provided in the prompt; never invent provenance.
+Return JSON only with this schema:
+{
+  "featureName": "camelCaseFeature",
+  "featureLabel": "Human Readable Name",
+  "notes": ["short design notes"],
+  "code": "full FeatureScript 2931 file"
+}`;
+
+function buildRetrievedSnippetsText(snippets = []) {
+  if (!snippets.length) return "No retrieved snippets provided.";
+  return snippets.map(snippet => `SNIPPET_ID: ${snippet.id}\n${snippet.code}`).join("\n\n");
+}
+
+async function buildCadPlan(prompt, dims, learningContext, requestId) {
+  const messages = [
+    { role: "system", content: withLearningContext(CAD_MLLM_PLAN_PROMPT_TEMPLATE, learningContext) },
+    { role: "user", content: buildPlannerUserPrompt(prompt, dims) },
+  ];
+
+  const raw = await chat(messages, COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "planning",
+    affinity: `${requestId}:plan`,
+  });
+
+  return tryParseJson(raw, {
+    shapeClass: dims.shape.toLowerCase(),
+    parameters: [],
+    subtasks: [],
+    fallbackTemplate: dims.shape.toLowerCase(),
+  });
+}
+
+async function buildRetrievalBriefs(prompt, dims, learningContext, retrievedSnippets, omniCadSummary, plan, requestId) {
+  const workerPrompts = [
+    {
+      id: "dataset",
+      goal: "Summarize only the local Omni-CAD / CAD-MLLM / DeepCAD dataset lessons relevant to this request in 3 sentences max.",
+    },
+    {
+      id: "rules",
+      goal: "Summarize the most important compile-safety and validator rules for this request in 4 sentences max.",
+    },
+    {
+      id: "snippets",
+      goal: "Summarize the strongest reusable structural patterns from the retrieved FeatureScript snippets in 4 sentences max.",
+    },
+  ].slice(0, CAD_RETRIEVAL_WORKERS);
+
+  const retrievalContext = [
+    `USER REQUEST: ${prompt}`,
+    `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+    `PLAN: ${JSON.stringify(plan)}`,
+    `OMNI CAD SUMMARY: ${omniCadSummary}`,
+    `RETRIEVED SNIPPETS:\n${buildRetrievedSnippetsText(retrievedSnippets)}`,
+    `LEARNING NOTES: ${(learningContext.notes || []).slice(0, 4).join(" | ")}`,
+  ].join("\n\n");
+
+  const settled = await Promise.allSettled(workerPrompts.map(worker => chat([
+    {
+      role: "system",
+      content: "You are a CAD retrieval analyst. Use only the provided local context. Never mention secrets or URLs. Return plain text only.",
+    },
+    {
+      role: "user",
+      content: `${worker.goal}\n\n${retrievalContext}`,
+    },
+  ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "retrieval",
+    affinity: `${requestId}:retrieval:${worker.id}`,
+    timeoutMs: Math.min(GROQ_TIMEOUT_MS, 90000),
+  })));
+
+  return settled.map((result, index) => {
+    const workerId = workerPrompts[index]?.id || `worker_${index + 1}`;
+    if (result.status === "fulfilled") {
+      return { id: workerId, summary: truncateText(normalizeText(result.value), 700) };
+    }
+    return {
+      id: workerId,
+      summary: workerId === "dataset"
+        ? omniCadSummary
+        : workerId === "rules"
+          ? "Keep sketches solved before downstream ops, expose all editable parameters in precondition, and avoid forbidden FeatureScript patterns."
+          : "Prefer retrieved compile-safe snippet structure, especially sketch -> skSolve -> downstream solid operations.",
+    };
+  });
+}
+
+function buildCandidateUserPrompt({
+  prompt,
+  dims,
+  history,
+  plan,
+  retrievedSnippets,
+  omniCadSummary,
+  retrievalBriefs,
+  candidateId,
+  contextMeta,
+  tabCitations,
+}) {
+  const recentHistory = history.slice(-3).map(turn => ({
+    prompt: turn.prompt,
+    dims: turn.dims,
+    code: summarizeFeatureScript(turn.code || "", 10),
+  }));
+
+  return [
+    `USER REQUEST: ${prompt}`,
+    `CONTEXT META: ${JSON.stringify(contextMeta)}`,
+    `CANDIDATE ID: ${candidateId}`,
+    `CANDIDATE STRATEGY: ${buildCandidateStrategy(candidateId, dims)}`,
+    `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+    `PLAN: ${JSON.stringify(plan)}`,
+    `RETRIEVED_SNIPPETS:\n${buildRetrievedSnippetsText(retrievedSnippets)}`,
+    `OMNI_CAD_DATA_SUMMARY: ${omniCadSummary}`,
+    `RETRIEVAL_BRIEFS:\n${retrievalBriefs.map(brief => `- ${brief.id}: ${brief.summary}`).join("\n")}`,
+    `TAB_CITATIONS: ${JSON.stringify(tabCitations)}`,
+    recentHistory.length ? `RECENT HISTORY: ${JSON.stringify(recentHistory)}` : "",
+    `Return JSON only: {"featureName":"...","featureLabel":"...","notes":["..."],"code":"..."}`,
+  ].filter(Boolean).join("\n\n");
+}
+
+function formatSanitizations(changes = []) {
+  return changes.map(change => ({
+    rule: change.rule,
+    before: change.beforeSnippet,
+    after: change.afterSnippet,
+  }));
+}
+
+function evaluateCandidateChecks(code) {
+  const validationIssues = validateFeatureScript(code);
+  const fatalIssues = hasFatalFeatureScriptPatterns(code);
+  return {
+    validationIssues,
+    fatalIssues,
+    checks: {
+      precondition: hasPreconditionExposure(code),
+      forbidden_patterns: fatalIssues.map(issue => issue.code),
+      skSolve_present: hasSkSolveBeforeDownstreamOps(code),
+      compile_sanity: hasCompileSanity(code),
+    },
+  };
+}
+
+async function generateStructuredCandidate({
+  candidateId,
+  prompt,
+  dims,
+  learningContext,
+  history,
+  plan,
+  retrievedSnippets,
+  omniCadSummary,
+  retrievalBriefs,
+  requestId,
+}) {
+  const contextMeta = buildContextMeta(dims, learningContext);
+  const tabCitations = Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [];
+  const messages = [
+    { role: "system", content: withLearningContext(MULTI_CANDIDATE_AUTHOR_SYSTEM, learningContext) },
+    {
+      role: "user",
+      content: buildCandidateUserPrompt({
+        prompt,
+        dims,
+        history,
+        plan,
+        retrievedSnippets,
+        omniCadSummary,
+        retrievalBriefs,
+        candidateId,
+        contextMeta,
+        tabCitations,
+      }),
+    },
+  ];
+
+  const authoringModel = promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL;
+  const raw = await chat(messages, authoringModel, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "generation",
+    affinity: `${requestId}:${candidateId}:generation`,
+  });
+  const parsed = tryParseJson(raw, null);
+  const featureName = String(parsed?.featureName || dims.featureName || candidateId).replace(/[^a-zA-Z0-9_]/g, "") || dims.featureName;
+  const featureLabel = String(parsed?.featureLabel || dims.featureLabel || "Custom Feature");
+  const draftNotes = Array.isArray(parsed?.notes) ? parsed.notes.map(note => normalizeText(note)).filter(Boolean) : [];
+  const sanitized = sanitizeFeatureScript(parsed?.code || raw);
+
+  return {
+    candidate_id: candidateId,
+    featureName,
+    featureLabel,
+    notes: draftNotes,
+    code: sanitized.code,
+    sanitizations: formatSanitizations(sanitized.changes),
+  };
+}
+
+function summarizeIssues(validationIssues = [], fatalIssues = []) {
+  return [
+    ...fatalIssues.map(issue => `${issue.code}: ${issue.message}`),
+    ...validationIssues.map(issue => `${issue.line || "?"}: ${issue.message}`),
+  ].slice(0, 12);
+}
+
+async function repairCandidate(candidate, learningContext, requestId) {
+  let workingCode = candidate.code;
+  const repairAttempts = [];
+  let combinedSanitizations = [...candidate.sanitizations];
+  let status = "ok";
+  let issues = [];
+
+  for (let attemptNumber = 1; attemptNumber <= CAD_REPAIR_ATTEMPTS; attemptNumber += 1) {
+    const { validationIssues, fatalIssues, checks } = evaluateCandidateChecks(workingCode);
+    if (!validationIssues.length && !fatalIssues.length && checks.compile_sanity) {
+      return {
+        ...candidate,
+        status,
+        code: injectAutomationComments(workingCode, combinedSanitizations),
+        sanitizations: combinedSanitizations,
+        checks,
+        repairAttempts,
+        issues,
+      };
+    }
+
+    status = attemptNumber < CAD_REPAIR_ATTEMPTS ? "needs_repair" : "failed";
+    issues = summarizeIssues(validationIssues, fatalIssues);
+    const repaired = await debugFeatureScript(workingCode, JSON.stringify({ validationIssues, fatalIssues }), {
+      learningContext,
+      affinity: `${requestId}:${candidate.candidate_id}:repair:${attemptNumber}`,
+      stage: "repair",
+    });
+    const sanitized = sanitizeFeatureScript(repaired.fixed || workingCode);
+    workingCode = sanitized.code;
+    const repairSanitizations = [
+      ...formatSanitizations(sanitized.changes),
+      { rule: "repair_pass", before: repaired.explanation || "repair", after: repaired.explanation || "repair" },
+    ];
+    combinedSanitizations = [...combinedSanitizations, ...repairSanitizations];
+    repairAttempts.push({
+      attempt_number: attemptNumber,
+      changes: repairSanitizations,
+      result_checks: evaluateCandidateChecks(workingCode).checks,
+    });
+  }
+
+  const finalChecks = evaluateCandidateChecks(workingCode).checks;
+  return {
+    ...candidate,
+    status,
+    code: injectAutomationComments(workingCode, combinedSanitizations),
+    sanitizations: combinedSanitizations,
+    checks: finalChecks,
+    repairAttempts,
+    issues,
+    repair_plan: status === "failed"
+      ? "Fallback to the nearest validated template or reduce geometric complexity before another attempt."
+      : undefined,
+  };
+}
+
+function scoreCandidate(candidate) {
+  const forbiddenPenalty = candidate.checks.forbidden_patterns.length * 100;
+  const repairPenalty = (candidate.repairAttempts || []).length * 10;
+  const sanitizePenalty = candidate.sanitizations.length;
+  const compileBonus = candidate.checks.compile_sanity ? 50 : 0;
+  const statusBonus = candidate.status === "ok" ? 100 : candidate.status === "needs_repair" ? 25 : 0;
+  return statusBonus + compileBonus - forbiddenPenalty - repairPenalty - sanitizePenalty;
+}
+
+function selectBestCandidate(candidates = []) {
+  const passing = candidates.filter(candidate => candidate.status === "ok" && candidate.checks.compile_sanity);
+  if (!passing.length) return null;
+  return [...passing].sort((left, right) => scoreCandidate(right) - scoreCandidate(left))[0] || null;
+}
+
 async function generateCustomFeatureScript(prompt, dims, learningContext = {}, history = []) {
   const context = normalizeLearningContext(learningContext);
   const hasTemplateRef = Array.isArray(context.featureScriptDocs) &&
@@ -2128,7 +2901,10 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
   messages.push({ role: "user", content: userPrompt });
 
   const authoringModel = promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL;
-  const raw = await chat(messages, authoringModel, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL]);
+  const raw = await chat(messages, authoringModel, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "generation",
+    affinity: `${makeRequestId(prompt)}:single`,
+  });
 
   try {
     const parsed = JSON.parse(stripJson(raw));
@@ -2136,14 +2912,14 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
       featureName: String(parsed.featureName || dims.featureName || "customFeature"),
       featureLabel: String(parsed.featureLabel || dims.featureLabel || "Custom Feature"),
       reasoning: String(parsed.reasoning || ""),
-      code: sanitizeFeatureScript(parsed.code || raw),
+      code: sanitizeFeatureScript(parsed.code || raw).code,
     };
   } catch {
     return {
       featureName: dims.featureName || "customFeature",
       featureLabel: dims.featureLabel || "Custom Feature",
       reasoning: "The generator returned a non-JSON response; raw output was sanitized.",
-      code: sanitizeFeatureScript(raw),
+      code: sanitizeFeatureScript(raw).code,
     };
   }
 }
@@ -2155,7 +2931,8 @@ export async function generateFeatureScript(prompt, options = {}) {
 
   const learningContext = normalizeLearningContext(options.learningContext);
   const history = Array.isArray(options.history) ? options.history : [];
-  const dims = await extractDims(prompt, learningContext, history);
+  const requestId = options.requestId || makeRequestId(prompt);
+  const dims = await extractDims(prompt, learningContext, history, { requestId });
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
   // ── Geometric reasoning ──────────────────────────────────────────────────
@@ -2189,61 +2966,105 @@ export async function generateFeatureScript(prompt, options = {}) {
   let customReasoning = "";
   let featureName = dims.featureName;
   let featureLabel = dims.featureLabel;
+  let orchestration = null;
 
   if (generationMode === "template") {
     // Only reached when GENERATION_STRATEGY=template_only (CI/testing override)
     code = buildFeatureScript(dims);
   } else {
     try {
-      console.log("[AI] Authoring FeatureScript (template injected as reference)...");
-      const custom = await generateCustomFeatureScript(prompt, dims, learningContext, history);
-      featureName = String(custom.featureName || featureName).replace(/[^a-zA-Z0-9_]/g, "") || featureName;
-      featureLabel = custom.featureLabel || featureLabel;
-      customReasoning = custom.reasoning;
-      code = sanitizeFeatureScript(custom.code);
+      console.log("[AI] Running multi-key candidate orchestration...");
+      const plan = await buildCadPlan(prompt, dims, learningContext, requestId);
+      const retrievedSnippets = selectRetrievedSnippets(prompt, dims, learningContext);
+      const omniCadSummary = buildOmniCadSummary(prompt, dims, learningContext);
+      const retrievalBriefs = await buildRetrievalBriefs(
+        prompt,
+        dims,
+        learningContext,
+        retrievedSnippets,
+        omniCadSummary,
+        plan,
+        requestId,
+      );
+      const candidateCount = Math.max(1, Number(options.candidateCount || CAD_CANDIDATE_COUNT));
+      const candidateIds = Array.from({ length: candidateCount }, (_entry, index) => `c${index + 1}`);
 
-      // ── Validation + repair loop ─────────────────────────────────────────
-      let validationIssues = validateFeatureScript(code);
-      if (validationIssues.length || hasFatalFeatureScriptPatterns(code)) {
-        if (validationIssues.length) {
-          console.log(`[AI] Repair pass 1 — ${validationIssues.length} issues: ${validationIssues.map(i => i.message).slice(0, 3).join(" | ")}`);
-        }
-        const repaired = await debugFeatureScript(code, "", { learningContext });
-        code = sanitizeFeatureScript(repaired.fixed);
-        validationIssues = validateFeatureScript(code);
-      }
+      const draftedCandidates = await Promise.allSettled(candidateIds.map(candidateId => generateStructuredCandidate({
+        candidateId,
+        prompt,
+        dims,
+        learningContext,
+        history,
+        plan,
+        retrievedSnippets,
+        omniCadSummary,
+        retrievalBriefs,
+        requestId,
+      })));
 
-      if (validationIssues.length) {
-        const issueText = validationIssues
-          .slice(0, 12)
-          .map(i => `Line ${i.line || "?"}: ${i.message}${i.text ? ` [${i.text}]` : ""}`)
-          .join("\n");
-        console.log(`[AI] Repair pass 2 — ${validationIssues.length} remaining issues`);
-        const repairedAgain = await debugFeatureScript(code, issueText, { learningContext });
-        code = sanitizeFeatureScript(repairedAgain.fixed);
-        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Second repair pass for ${validationIssues.length} validator issue(s).`;
-        validationIssues = validateFeatureScript(code);
-      }
+      const candidateDrafts = draftedCandidates.map((result, index) => {
+        if (result.status === "fulfilled") return result.value;
+        return {
+          candidate_id: candidateIds[index],
+          featureName,
+          featureLabel,
+          notes: [`Draft generation failed: ${result.reason?.message || String(result.reason)}`],
+          code: "",
+          sanitizations: [],
+          status: "failed",
+          checks: {
+            precondition: false,
+            forbidden_patterns: ["draft_generation_failed"],
+            skSolve_present: false,
+            compile_sanity: false,
+          },
+          repairAttempts: [],
+          issues: [result.reason?.message || String(result.reason)],
+        };
+      });
 
-      // ── Emergency template fallback (last resort only) ───────────────────
-      if (hasFatalFeatureScriptPatterns(code)) {
-        if (ALLOW_TEMPLATE_FALLBACK && canUseTemplateFallback(dims)) {
-          console.warn("[AI] Fatal patterns after repair — emergency template fallback.");
-          code = buildFeatureScript({
-            ...dims,
-            shape: ["CUSTOM", "UNKNOWN"].includes(dims.shape) ? "BOX" : dims.shape,
-          });
-          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Emergency template fallback: AI code still had fatal syntax after two repair passes.`;
-          return {
-            code, featureName, featureLabel,
-            thinking: buildThinkingTrace(prompt, dims, { generationMode: "template_fallback", learningExamples: learningContext.examples.length, customReasoning }),
-            dims,
-            generationMode: "template_fallback",
-          };
-        } else {
-          console.warn("[AI] Fatal patterns after repair — preserving output (template fallback disabled).");
-          customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Validator warnings remain; template fallback disabled.`;
-        }
+      const repairedCandidates = await Promise.all(candidateDrafts.map(candidate => {
+        if (candidate.status === "failed") return candidate;
+        return repairCandidate(candidate, learningContext, requestId);
+      }));
+      const selectedCandidate = selectBestCandidate(repairedCandidates);
+
+      orchestration = {
+        user_request: prompt,
+        context_meta: buildContextMeta(dims, learningContext),
+        omni_cad_summary: omniCadSummary,
+        candidates: repairedCandidates.map(candidate => ({
+          candidate_id: candidate.candidate_id,
+          status: candidate.status,
+          code: candidate.code,
+          sanitizations: candidate.sanitizations,
+          checks: candidate.checks,
+          estimated_tokens: estimateTokenCount(candidate.code || ""),
+          estimated_cost: estimateCostLabel(estimateTokenCount(candidate.code || "")),
+          notes: candidate.notes || [],
+          repairAttempts: candidate.repairAttempts || [],
+          issues: candidate.issues || [],
+          repair_plan: candidate.repair_plan || undefined,
+        })),
+        selected_candidate_id: selectedCandidate?.candidate_id || null,
+        summary: selectedCandidate
+          ? `Generated ${repairedCandidates.length} independent candidates and selected ${selectedCandidate.candidate_id} after local sanitization, validation, and repair.`
+          : `Generated ${repairedCandidates.length} independent candidates, but none passed all local checks.`,
+        provenance: {
+          snippets_used: retrievedSnippets.map(snippet => snippet.id),
+          tab_citations: Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [],
+        },
+        plan,
+        retrieval_briefs: retrievalBriefs,
+      };
+
+      if (selectedCandidate) {
+        code = selectedCandidate.code;
+        featureName = selectedCandidate.featureName || featureName;
+        featureLabel = selectedCandidate.featureLabel || featureLabel;
+        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Selected ${selectedCandidate.candidate_id} from ${repairedCandidates.length} candidates after local validation.`;
+      } else {
+        throw new Error("No candidate passed local FeatureScript validation.");
       }
     } catch (err) {
       if (ALLOW_TEMPLATE_FALLBACK && canUseTemplateFallback(dims)) {
@@ -2262,6 +3083,7 @@ export async function generateFeatureScript(prompt, options = {}) {
           thinking: buildThinkingTrace(prompt, dims, { generationMode: "template_fallback", learningExamples: learningContext.examples.length, customReasoning }),
           dims,
           generationMode: "template_fallback",
+          orchestration,
         };
       } else {
         console.error("[AI] Generation failed and template fallback disabled.", err?.message || String(err));
@@ -2278,7 +3100,7 @@ export async function generateFeatureScript(prompt, options = {}) {
   });
 
   console.log(`[AI] done — ${code.length} chars`);
-  return { code, featureName, featureLabel, thinking, dims, generationMode };
+  return { code, featureName, featureLabel, thinking, dims, generationMode: generationMode === "template" ? "template" : "multi_candidate_ai", orchestration };
 }
 
 // ─── Public: Debug ────────────────────────────────────────────────────────────
@@ -2288,11 +3110,20 @@ export async function generateFeatureScript(prompt, options = {}) {
 //   - Adding startAngle/endAngle to opCylinder → those params don't exist
 //   - Changing hardcoded * inch values to definition.param * inch → wrong if param isn't isLength
 
-const DEBUG_SYSTEM = `You are an Onshape FeatureScript debugger. You know the exact API precisely.
-
-Return ONLY a JSON object with no markdown:
-{ "explanation": "plain English summary of what was wrong and what you fixed",
-  "fixed": "the complete corrected raw FeatureScript — no backticks, no markdown" }
+const DEBUG_SYSTEM = ` DEBUG SYSTEM: You are a FeatureScript repair assistant.
+Input: { code, issues }.
+For each issue:
+- typed_lambda_or_typed_param: remove all "is <type>" annotations from function parameter lists and typed lambdas.
+- array_length_indexing: replace dynamic length-based indexing with safe fixed-index logic or rewrite to use slice/pop semantics; prefer explicit indices when array length is known. If array length is unknown, add a defensive guard and a comment explaining the assumption.
+- opCylinder_positional_args: convert to map form with explicit keys (radius, height, center, axis) and preserve original numeric expressions.
+- qSketchRegion_variable: replace with qSketchRegion("<sketchId>") where <sketchId> matches the created sketch id; if sketch id cannot be inferred, add a TODO comment and return diagnostics.
+- missing_skSolve: insert skSolve(sketchVar) immediately after the sketch creation block.
+- missing_precondition: add or restore the precondition block with isLength/isInteger/boolean declarations for all definition.* parameters used in the body.
+Always:
+- Preserve precondition parameter exposure; do not remove isLength/isInteger/boolean declarations.
+- Add a short comment above each automated fix explaining the change and why it was safe.
+- Return JSON: { fixed: "<full_fixed_code>", explanation: ["<step1>", "<step2>", ...], warnings: ["..."] }.
+If you cannot deterministically fix an issue, return { fixed: null, explanation: [], warnings: ["cannot fix: reason"] }.
 
 FEATURESCRIPT API FACTS (use these exactly, do not invent):
 
@@ -2306,15 +3137,16 @@ PRECONDITION EXACT SYNTAX:
   NEVER:    definition.x is number;
   NEVER:    definition.x >= N;
 
-opCylinder signature (correct Onshape standard library function — use this for all cylinders):
-  opCylinder(context, id + "cyl1", {
-      "bottomCenter"  : skPlane.origin,
-      "topCenter"     : skPlane.origin + skPlane.normal * definition.height,
-      "radius"        : definition.radius,
-      "operationType" : NewBodyOperationType.NEW
+Cylinders — opCylinder does NOT exist in FeatureScript and causes a compile error. Replace with sketch + opExtrude:
+  var cylSk = newSketchOnPlane(context, id + "cylSk", { "sketchPlane" : skPlane });
+  skCircle(cylSk, "cyl", { "center" : vector(0, 0) * inch, "radius" : definition.radius });
+  skSolve(cylSk);
+  opExtrude(context, id + "cyl1", {
+      "entities"  : qSketchRegion(id + "cylSk"),
+      "direction" : skPlane.normal,
+      "endBound"  : BoundingType.BLIND,
+      "endDepth"  : definition.height
   });
-  Valid keys: bottomCenter (Vector), topCenter (Vector), radius (Length), operationType.
-  NO startAngle. NO endAngle. Those keys DO NOT EXIST on opCylinder.
 
 isLength in precondition:
   annotation { "Name" : "My Param", "Default" : "1 * inch" }
@@ -2395,7 +3227,7 @@ FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse
 
 FIX RULES:
 1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
-2. opCylinder with startAngle/endAngle → remove those invalid keys; opCylinder is correct
+2. opCylinder → opCylinder does NOT exist in FeatureScript; replace with skCircle + skSolve + opExtrude
 3. definition.param * inch in body when param is isLength → remove the * inch
 4. Raw number without units in geometry (e.g. "endDepth" : 2) → add * inch or use a definition param
 5. newSketch used with evPlane result → change to newSketchOnPlane
@@ -2468,7 +3300,15 @@ export function validateFeatureScript(code) {
     if (/\bqSketchEntity\s*\(|\bqCreatedBy\s*\([^)]*(sk|sketch\w*)/.test(line)) {
       addIssue(lineNo, "Sketch queries are not valid opRevolve axes; construct a Line value instead.", line);
     }
+    if (/\bopCylinder\s*\(/.test(line)) {
+      addIssue(lineNo, "opCylinder does not exist in FeatureScript — replace with skCircle + skSolve + opExtrude to create a cylinder.", line);
+    }
   });
+
+  // Check that defineFeature has 'definition is map'
+  if (/\bdefineFeature\s*\(\s*function\s*\(/.test(text) && !/\bdefinition\s+is\s+map\b/.test(text)) {
+    addIssue(0, "defineFeature third parameter must be typed as 'definition is map' — the 'is map' annotation is missing or was stripped.", "(global)");
+  }
 
   const isLengthParams = new Set();
   lines.forEach(line => {
@@ -2531,74 +3371,50 @@ export function validateFeatureScript(code) {
   return issues;
 }
 
-function hasFatalFeatureScriptPatterns(code) {
-  const text = String(code || "");
+/**
+ * hasFatalFeatureScriptPatterns
+ * - Returns an array of { code: string, message: string, snippet?: string }
+ * - Use this to decide whether to trigger the repair loop.
+ */
+export function hasFatalFeatureScriptPatterns(code) {
+  const issues = [];
 
-  // Each entry is [regex, description] — only the regex is used for the boolean check,
-  // the description aids future debugging.
-  const fatalPatterns = [
-    // FeatureScript type errors
-    [/\bdefinition\.\w+\s+is\s+Length\s*;/, "definition.x is Length (invalid type specifier)"],
-    [/\bdefinition\.\w+\s+is\s+number\s*;/, "definition.x is number (invalid feature precondition syntax)"],
-    [/isLength\(\s*definition\.\w+\s*,\s*\{/, "isLength with inline bounds map (use LENGTH_BOUNDS)"],
-    [/\bisInteger\(\s*definition\.\w+\s*\)\s*;/, "isInteger missing required bounds map"],
-    [/\"startAngle\"\s*:/, "startAngle on opCylinder — key does not exist"],
-
-    // Invalid opCylinder params (these map keys don't exist on opCylinder)
-    [/"startAngle"\s*:/, "startAngle on opCylinder (invalid key)"],
-    [/"endAngle"\s*:/, "endAngle on opCylinder (invalid key)"],
-    [/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/, "qSketchRegion called with a sketch variable instead of sketch id expression"],
-    [/\bqSketchEntity\s*\(/, "qSketchEntity query used where a Line or sketch id is expected"],
-    [/\bopLoft[\s\S]*?"(edges|sections|vertices)"\s*:/, "opLoft with obsolete keys instead of profileSubqueries"],
-
-    // FS has no ++ or -- operators — causes "no viable alternative" parse error
-    [/\b\w+\s*\+\+\s*[;)\]]/, "increment operator ++ not valid in FeatureScript; use += 1"],
-    [/\b\w+\s*--\s*[;)\]]/, "decrement operator -- not valid in FeatureScript; use -= 1"],
-
-    // Typed lambda params inside feature body — causes "Error in initializer function arguments"
-    // Lambda parameters must be untyped: function(x, y) not function(x is number, y is map)
-    [/\bfunction\s*\([^)]*\s+is\s+(number|vector|map|array|boolean|string)\b[^)]*\)/, "typed parameter in lambda inside feature body; use untyped params: function(x, y)"],
-
-    // .length on FS arrays is invalid — FS has no .length property
-    [/\[\s*\w+\.length\b/, "array index using .length — FeatureScript arrays have no .length; use a hardcoded index"],
-
-    // STRUCTURE CHECKS: FS requires ) { (no newline) and }; at end\r\n  // The defineFeature body must open with ) { on the same line, no newline between ) and {\r\n  if (/defineFeature\\s*\\(\\s*function\\s*\\([^)]*\\)\\s*\\n\\s*precondition/.test(text)) { return true; /* newline before precondition — FS requires defineFeature(...) precondition { */ } if (/defineFeature\\s*\\(\\s*function\\s*\\([^)]*\\)\\s*\\n\\s*\{/.test(text)) { return true; /* newline between ) and { */ } // FeatureScript requires closing }); (paren-brace-semicolon) at the end of the defineFeature declaration. if (/\\}\\);\\s*$/m.test(text)) { /* good */ } else if (/export const \\w+ = defineFeature/.test(text) && /\\}\\);/.test(text) === false) { return true; /* missing }; */ } // Named top-level function declared INSIDE the feature body.
-    // FS spec (toplevel.md): only lambdas (const x = function(...){}) are valid inside bodies.
-    // A named typed function like: function foo(x is number) returns vector { ... }
-    // is only legal at module top level. Detecting this inside a feature body block.
-    // Heuristic: if "function" keyword is followed by an identifier and typed args inside
-    // the feature body (i.e. after defineFeature), flag it.
-    [/defineFeature[\s\S]*?\bfunction\s+[a-zA-Z_]\w*\s*\(/, "named function declaration inside feature body"],
-
-    // A sketch is created but skSolve is never called — geometry won't generate.
-    // Only flag when there's a sketch creation but no skSolve anywhere in the code.
-    // (We check as a pair: sketch present + skSolve absent = fatal)
-    // Handled separately below as a compound check.
-  ];
-
-  if (fatalPatterns.some(([pattern]) => pattern.test(text))) return true;
-
-  // GEAR-SPECIFIC: if the code looks like a gear (mentions gear/numTeeth/pressureAngle) but uses ONLY circles/lines without any spline for involute, flag it\r\n  const looksLikeGear = /\\bgear\\b/i.test(text) || /\\bnumTeeth\\w*\\b/.test(text) || /\\bpressureAngle\\w*\\b/.test(text);\r\n  const hasInvoluteSpline = /\\bskFitSpline\\s*\\([^)]*involute/i.test(text) || /\\binvoluteFlank\\s*:/i.test(text);\r\n  const hasToothArcs = /skArc.*(?:root|tip|flank)/i.test(text);\r\n  if (looksLikeGear && /numTeeth/i.test(text) && /skCircle/i.test(text) && !hasInvoluteSpline && !hasToothArcs) {\r\n    addIssue(0, "Gear geometry is over-simplified: concentric circles alone are not a valid finished spur gear tooth profile. Use involute-style flank splines with tip/root arcs or a robust gear example.", "(global)");\r\n  }\r\n  if (looksLikeGear && /opBoolean\\s*\\([\\s\\S]*?BooleanOperationType\\.UNION/.test(text) && /id\\s*\\+\\s*"ext1"/.test(text) && /id\\s*\\+\\s*"ext2"/.test(text)) {\r\n    addIssue(0, "Two generated gears were unioned into one body. Gear pairs should stay as separate bodies unless the prompt explicitly asks for a merged solid.", "(global)");\r\n  }\r\n\r\n  // Compound check: sketch created but skSolve never called
-  const hasSketch = /\bnewSketchOnPlane\s*\(|\bnewSketch\s*\(/.test(text);
-  const hasSolve  = /\bskSolve\s*\(/.test(text);
-  if (hasSketch && !hasSolve) return true;
-
-  // Nested named function check (more targeted): look for 'function <id>(' that
-  // appears AFTER the feature body opening brace and before the file ends.
-  // The defineFeature body is a lambda, so named function decls inside it are illegal.
-  const bodyMatch = text.match(/defineFeature\s*\(\s*function\s*\([^)]*\)[^{]*\{[^{]*\{/);
-  if (bodyMatch) {
-    const bodyStart = text.indexOf(bodyMatch[0]) + bodyMatch[0].length;
-    const bodyText = text.slice(bodyStart);
-    // Match: function <name>( — the presence of a named function declaration in body
-    if (/\bfunction\s+[a-zA-Z_]\w*\s*\(/.test(bodyText)) return true;
+  // 1) Missing precondition with isLength/isInteger/boolean
+  if (!/precondition[\s\S]*?(isLength|isInteger|boolean)/.test(code)) {
+    issues.push({ code: 'missing_precondition', message: 'Missing precondition block exposing parameters with isLength/isInteger/boolean.' });
   }
 
-  return false;
+  // 2) Typed lambda or typed param annotations
+  if (/\b([a-zA-Z0-9_$]+)\s+is\s+(number|string|boolean)\b/.test(code) || /\bfunction\s*\([^)]*\bis\s+/.test(code)) {
+    issues.push({ code: 'typed_lambda_or_typed_param', message: 'Typed parameter annotations detected (forbidden).' });
+  }
+
+  // 3) .length dynamic indexing
+  if (/\.\s*length\b/.test(code)) {
+    issues.push({ code: 'array_length_indexing', message: 'Dynamic array length indexing detected (forbidden).' });
+  }
+
+  // 4) opCylinder positional usage (positional args instead of map)
+  // Detect opCylinder( ... , ... , <non-map> )
+  if (/opCylinder\s*\(\s*[^,()]+,\s*[^,()]+,\s*[^({][^)]*\)/.test(code)) {
+    issues.push({ code: 'opCylinder_positional_args', message: 'opCylinder used with positional args; must use map form.' });
+  }
+
+  // 5) qSketchRegion called with variable
+  if (/qSketchRegion\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/.test(code)) {
+    issues.push({ code: 'qSketchRegion_variable', message: 'qSketchRegion called with a variable; must use explicit sketch id string.' });
+  }
+
+  // 6) Missing skSolve before downstream ops
+  if (/(opExtrude|opRevolve|opLoft|opSweep)/.test(code) && !/skSolve\s*\(/.test(code)) {
+    issues.push({ code: 'missing_skSolve', message: 'Downstream op found without skSolve present.' });
+  }
+
+  return issues;
 }
 
 export async function debugFeatureScript(code, errors, options = {}) {
-  const sanitizedInput = sanitizeFeatureScript(code);
+  const sanitizedInput = sanitizeFeatureScript(code).code;
   const learningContext = normalizeLearningContext(options.learningContext);
   console.log(`[AI] Debugging (${sanitizedInput.length} chars)`);
 
@@ -2606,9 +3422,12 @@ export async function debugFeatureScript(code, errors, options = {}) {
     const raw = await chat([
       { role: "system", content: withLearningContext(DEBUG_SYSTEM, learningContext) },
       { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
-    ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL]);
+    ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+      stage: options.stage || "repair",
+      affinity: options.affinity || `repair:${stableHash(sanitizedInput)}`,
+    });
     const parsed = JSON.parse(stripJson(raw));
-    const fixed = sanitizeFeatureScript(parsed.fixed || sanitizedInput);
+    const fixed = sanitizeFeatureScript(parsed.fixed || sanitizedInput).code;
     return { fixed, explanation: parsed.explanation || "Fixed." };
   } catch (err) {
     console.warn(`[AI] Debug fallback used: ${err.message}`);

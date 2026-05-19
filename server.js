@@ -68,6 +68,7 @@ function generationResponse(result, generationLog, learningContext, diagnostics 
     description: result.description,
     thinking: result.thinking,
     generationMode: result.generationMode,
+    orchestration: result.orchestration || null,
     generationId: dbLog.id || null,
     createdAt: dbLog.createdAt,
     database: {

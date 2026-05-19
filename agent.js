@@ -8,6 +8,7 @@ import {
   CAD_MLLM_PLAN_PROMPT_TEMPLATE,
   debugFeatureScript,
   generateFeatureScript,
+  hasFatalFeatureScriptPatterns,
   validateFeatureScript,
 } from "./ai.js";
 import { candidateFeatureVector } from "./adaptiveNetwork.js";
@@ -197,6 +198,14 @@ function validateAgentFeatureScript(code, plan) {
   }
   if (/"(edges|sections|vertices)"\s*:/.test(text) && /\bopLoft\s*\(/.test(text)) {
     add("Replace old opLoft edges/sections/vertices keys with profileSubqueries.");
+  }
+
+  // Run fatal pattern detection and merge into issues
+  const fatalIssues = hasFatalFeatureScriptPatterns(code);
+  if (fatalIssues.length > 0) {
+    for (const fi of fatalIssues) {
+      add(`[FATAL] ${fi.message} (${fi.code})`);
+    }
   }
 
   return issues;

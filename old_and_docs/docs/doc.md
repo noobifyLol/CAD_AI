@@ -1128,3 +1128,6 @@ Making notes on the many of the files, removing and redesigning things since the
 
 **5/15/26 Breakthrought**
 There is other modeling LLM that I can reference my data base off of. Now all the thinking code is done, now it's all importing data. Changing AI models since groq have to little limits while deepseek has better thinking capabilites and better token usage. 
+
+**5/17/26**
+Groq model rotation is about to come out. We use mutipel request for one prompt to generate the best of the best FS.

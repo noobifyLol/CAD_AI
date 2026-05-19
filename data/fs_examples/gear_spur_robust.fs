@@ -24,13 +24,13 @@ export const robustSpurGear = defineFeature(function(context is Context, id is I
             : evPlane(context, { "face" : definition.location });
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
 
-        const invPoint = function(t is number, rb is number)
+        const invPoint = function(t, rb)
         {
             return vector((rb * (cos(t) + t * sin(t))) * inch,
                           (rb * (sin(t) - t * cos(t))) * inch);
         };
 
-        const rotPoint = function(p, a is number)
+        const rotPoint = function(p, a)
         {
             return vector(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));
         };
@@ -89,7 +89,7 @@ export const robustSpurGear = defineFeature(function(context is Context, id is I
                 rotPoint(lf[5], a)
             ];
             const tipMid = vector(ra * cos(a) * inch, ra * sin(a) * inch);
-            const lfRoot = lfK[lfK.length - 1];
+            const lfRoot = lfK[5];
             const nextA = (2 * PI * (k + 1)) / N;
             const nextRF0 = rotPoint(rf[0], nextA);
             const a1 = atan2(lfRoot.y, lfRoot.x);
@@ -98,7 +98,7 @@ export const robustSpurGear = defineFeature(function(context is Context, id is I
                 a2 += 2 * PI;
             const rootMid = vector(rd * cos((a1 + a2) / 2) * inch, rd * sin((a1 + a2) / 2) * inch);
             skFitSpline(sketch1, "rf" ~ k, { "points" : rfK });
-            skArc(sketch1, "tip" ~ k, { "start" : rfK[rfK.length - 1], "mid" : tipMid, "end" : lfK[0] });
+            skArc(sketch1, "tip" ~ k, { "start" : rfK[5], "mid" : tipMid, "end" : lfK[0] });
             skFitSpline(sketch1, "lf" ~ k, { "points" : lfK });
             skArc(sketch1, "root" ~ k, { "start" : lfRoot, "mid" : rootMid, "end" : nextRF0 });
         }
