@@ -63,17 +63,27 @@ function formatOrchestration(orchestration) {
   const passes = orchestration.passes || {};
   const lines = [
     `Status: ${orchestration.status || 'unknown'}`,
+    `Completion level: ${orchestration.completionLevel || 'unknown'}`,
     `Failed pass: ${orchestration.failedPass || 'none'}`,
   ];
 
   if (passes.decomposition?.steps?.length) {
     lines.push(`Decomposition steps: ${passes.decomposition.steps.length}`);
   }
+  if (passes.operationPlan?.family) {
+    lines.push(`Operation family: ${passes.operationPlan.family}`);
+  }
   if (passes.blocks?.selectedCandidateId) {
     lines.push(`Selected block candidate: ${passes.blocks.selectedCandidateId}`);
   }
   if (passes.weave?.status) {
     lines.push(`Weave status: ${passes.weave.status}`);
+  }
+  if (Array.isArray(orchestration.omissions) && orchestration.omissions.length) {
+    lines.push(`Omissions: ${orchestration.omissions.join(' | ')}`);
+  }
+  if (Array.isArray(orchestration.warnings) && orchestration.warnings.length) {
+    lines.push(`Warnings: ${orchestration.warnings.join(' | ')}`);
   }
   if (Array.isArray(orchestration.blockers) && orchestration.blockers.length) {
     lines.push(`Blockers: ${orchestration.blockers.join(' | ')}`);
@@ -316,15 +326,20 @@ async function generate() {
     if (!r.ok) throw new Error(data.error || 'Generation failed');
     setOutput('gen-output', data.code, 'copy-btn', data.generationId);
     setThinking('gen', data.thinking || '');
-    const blocked = data.generationMode === 'blocked_trace_only';
+    const blocked = data.completionLevel === 'blocked' || data.generationMode === 'blocked_trace_only';
+    const partial = data.completionLevel === 'partial';
     setStatus('gen-status', blocked
       ? `Blocked "${data.featureLabel}" - ${databaseStatusText(data.database)}`
+      : partial
+      ? `Generated partial "${data.featureLabel}" - ${databaseStatusText(data.database)}`
       : `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`, blocked ? 'error' : 'ok');
     showRunModal({
-      title: blocked ? 'Generation blocked' : 'Generation complete',
+      title: blocked ? 'Generation blocked' : partial ? 'Generation partial' : 'Generation complete',
       ok: !blocked,
       message: blocked
         ? `Blocked "${data.featureLabel}". ${data.orchestration?.blockers?.join(' | ') || 'No compile-safe result was produced.'}`
+        : partial
+        ? `Generated partial "${data.featureLabel}". ${data.omissions?.join(' | ') || 'Some features were safely omitted.'}`
         : `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
       createdAt: data.createdAt,
       database: data.database,

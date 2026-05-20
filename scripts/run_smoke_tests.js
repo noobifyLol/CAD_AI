@@ -10,14 +10,16 @@ const BASE_URL = process.env.CAD_AI_BASE_URL || "http://localhost:10000";
 const ENDPOINT = process.argv[2] || process.env.CAD_SMOKE_ENDPOINT || "/agent/run";
 
 const prompts = [
-  "Create an organic carrot using a 5-point spline at 0%,20%,45%,70%,100% heights. Expose baseRadius, height, curvatureFactor, tipRadius. Use axis line at x=0, skSolve, opRevolve 360°. Return only compile-safe FeatureScript.",
-  "Create a transition from 2 inch square to 1 inch circle over 3 inches using opLoft. Expose height and profile offsets.",
-  "Create a 90-degree elbow pipe with 0.5 inch outer radius and 2 inch bend radius using opSweep.",
-  "Create an open-top electronics enclosure 4x3x1.5 inches with 0.1 inch walls using opShell after extrude. Expose wallThickness and openFace boolean.",
+  "Create me a cube with the sides filleted.",
+  "Create an open-top electronics enclosure 4x3x1.5 inches with 0.1 inch walls.",
+  "Create a filleted and chamfered rectangular block with editable radius and chamfer width.",
+  "Create me a spur gear with a gear ratio of 2:1.",
+  "Create me a realistic carrot.",
+  "Create me a mushroom.",
   "Create me a swerve module.",
-  "Create a train cab.",
   "Create a 2x1 FRC tube with bearing and mounting pattern.",
   "Create a belt-driven side plate using standard pulley spacing rules.",
+  "Create me a cube with the letter E imprinted into it.",
 ];
 
 function stamp() {
@@ -92,10 +94,9 @@ async function main() {
       status: generation.status,
       ok: generation.ok,
       blocked,
+      completionLevel: generation.json.completionLevel || (blocked ? "blocked" : "full"),
       validationIssues: issues,
-      compileProxyOk: blocked
-        ? Array.isArray(generation.json.orchestration?.blockers) && generation.json.orchestration.blockers.length > 0
-        : issues.length === 0,
+      compileProxyOk: Boolean(code) && issues.length === 0,
       generation: generation.json,
       debug,
     });

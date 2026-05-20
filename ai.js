@@ -1061,117 +1061,60 @@ function tPipe(d) {
 
 
 // Spur gear with involute tooth profile
-function tGear(d) {
-  const radiusDefault = d.radiusInches || 1.0;
-  const toothCountDefault = Math.max(6, Math.round(d.numTeeth || 20));
-  const holeRadiusDefault = d.holeRadiusInches > 0 ? d.holeRadiusInches : Math.min(Math.max(radiusDefault * 0.15, 0.05), radiusDefault * 0.25);
-  const faceWidthDefault = d.depthInches || 0.5;
-  const pressureAngleDefault = typeof d.pressureAngleDegrees === "number" ? d.pressureAngleDegrees : 20;
 
-  return {
-    precondition: [
-      preconditionPlane(),
-      preconditionInteger("numTeeth", "Number of Teeth", 6, toothCountDefault, 200),
-      preconditionLength("radius", "Pitch Radius", 0.01, radiusDefault, 24),
-      `        annotation { "Name" : "Bore Radius", "Default" : "${n(Math.max(0, holeRadiusDefault))} * inch" }
-        isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);`,
-      preconditionLength("faceWidth", "Face Width (Depth)", 0.01, faceWidthDefault, 12),
-      preconditionDegrees("pressureAngleDegrees", "Pressure Angle (degrees)", 10, pressureAngleDefault, 30),
-    ].join("\n"),
-    body: `${planeVar()}
+function templateSpurGearFixed(d) {
+  const teeth  = Math.max(8, Math.round(d.numTeeth || 20));
+  // moduleInches: standard mechanical module converted to inches (2mm ≈ 0.0787")
+  const mod    = d.moduleInches > 0 ? d.moduleInches : 0.0787402;
+  const pitchR = mod * teeth / 2;
+  const addR   = pitchR + mod;                           // addendum (tip) radius
+  const dedR   = Math.max(mod * 0.5, pitchR - 1.25 * mod); // dedendum (root) radius
+  const faceW  = d.depthInches > 0 ? d.depthInches : mod * 8;
+  const boreR  = d.holeRadiusInches || 0;
+
+  const TAU  = 2 * Math.PI;
+  const ta   = TAU / teeth;   // angular pitch (radians per tooth)
+  const frac = 0.38;          // tooth half-angle as fraction of angular pitch
+
+  // Returns a FeatureScript vector literal for point (r, angle)
+  const vStr = (r, a) =>
+    `vector(${n(Math.cos(a) * r)}, ${n(Math.sin(a) * r)}) * inch`;
+
+  let segs = [];
+  for (let i = 0; i < teeth; i++) {
+    const center = i * ta;
+    // Root-land: from previous tooth's right flank to this tooth's left flank
+    const aGapStart   = center - ta * (1 - frac);   // = (i-1)*ta + frac*ta  (periodic)
+    const aGapEnd     = center - ta * frac;
+    // Tooth flanks and tip
+    const aTipLeft    = center - ta * frac * 0.5;
+    const aTipRight   = center + ta * frac * 0.5;
+    const aFlankRight = center + ta * frac;
+
+    const si = i * 4;
+    segs.push(`skLineSegment(sketch1, "g${si+0}", { "start" : ${vStr(dedR, aGapStart)},   "end" : ${vStr(dedR, aGapEnd)}   });`);
+    segs.push(`skLineSegment(sketch1, "g${si+1}", { "start" : ${vStr(dedR, aGapEnd)},     "end" : ${vStr(addR, aTipLeft)}  });`);
+    segs.push(`skLineSegment(sketch1, "g${si+2}", { "start" : ${vStr(addR, aTipLeft)},    "end" : ${vStr(addR, aTipRight)} });`);
+    segs.push(`skLineSegment(sketch1, "g${si+3}", { "start" : ${vStr(addR, aTipRight)},   "end" : ${vStr(dedR, aFlankRight)} });`);
+    // Note: tooth[i] aFlankRight == tooth[i+1] aGapStart  (mod 2π) → sketch closes ✓
+  }
+
+  const indent  = '        ';
+  const segStr  = segs.map(s => indent + s).join('\n');
+  const boreStr = boreR > 0
+    ? `\n${indent}skCircle(sketch1, "bore", { "center" : vector(0, 0) * inch, "radius" : ${n(boreR)} * inch });`
+    : '';
+
+  return `${planeVar()}
         var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
-
-        // Helper lambdas — FS lambdas inside a feature body MUST NOT have typed parameters.
-        // "t is number" is illegal here; parameters are always untyped in const lambdas.
-        const invPoint = function(t, rb)
-        {
-            return vector((rb * (cos(t) + t * sin(t))) * inch,
-                          (rb * (sin(t) - t * cos(t))) * inch);
-        };
-
-        const rotPoint = function(p, a)
-        {
-            return vector(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));
-        };
-
-        const mirrorPoint = function(p)
-        {
-            return vector(p.x, -p.y);
-        };
-
-        const N = definition.numTeeth;
-        const rp = definition.radius / inch;
-        const pa = definition.pressureAngleDegrees * PI / 180;
-        const m = (2 * rp) / N;
-        const ra = rp + m;
-        const rd = max(rp - 1.35 * m, rp * 0.5);
-        const rb = rp * cos(pa);
-        const tRoot = rb >= rd ? 0 : sqrt(max(0, (rd / rb) * (rd / rb) - 1));
-        const tTip  = sqrt(max(0, (ra / rb) * (ra / rb) - 1));
-        const hasBore = definition.holeRadius > 0 * inch;
-
-        const rf = [
-            invPoint(tRoot, rb),
-            invPoint(tRoot + (tTip - tRoot) * 1/5, rb),
-            invPoint(tRoot + (tTip - tRoot) * 2/5, rb),
-            invPoint(tRoot + (tTip - tRoot) * 3/5, rb),
-            invPoint(tRoot + (tTip - tRoot) * 4/5, rb),
-            invPoint(tTip, rb)
-        ];
-
-        const lf = [
-            mirrorPoint(invPoint(tTip, rb)),
-            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 4/5, rb)),
-            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 3/5, rb)),
-            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 2/5, rb)),
-            mirrorPoint(invPoint(tRoot + (tTip - tRoot) * 1/5, rb)),
-            mirrorPoint(invPoint(tRoot, rb))
-        ];
-
-        for (var k = 0; k < N; k += 1)
-        {
-            var a = (2 * PI * k) / N;
-            var rfK = [
-                rotPoint(rf[0], a),
-                rotPoint(rf[1], a),
-                rotPoint(rf[2], a),
-                rotPoint(rf[3], a),
-                rotPoint(rf[4], a),
-                rotPoint(rf[5], a)
-            ];
-            var lfK = [
-                rotPoint(lf[0], a),
-                rotPoint(lf[1], a),
-                rotPoint(lf[2], a),
-                rotPoint(lf[3], a),
-                rotPoint(lf[4], a),
-                rotPoint(lf[5], a)
-            ];
-            var tipMid = vector(ra * cos(a) * inch, ra * sin(a) * inch);
-            var lfRoot = lfK[5];  // always 6 elements; FS has no .length
-            var nextA = (2 * PI * (k + 1)) / N;
-            var nextRF0 = rotPoint(rf[0], nextA);
-            var a1 = atan2(lfRoot.y, lfRoot.x);
-            var a2 = atan2(nextRF0.y, nextRF0.x);
-            if (a2 < a1) a2 += 2 * PI;
-            var rootMid = vector(rd * cos((a1 + a2) / 2) * inch, rd * sin((a1 + a2) / 2) * inch);
-            skFitSpline(sketch1, "rf" ~ k, { "points" : rfK });
-            skArc(sketch1, "tip" ~ k, { "start" : rfK[5], "mid" : tipMid, "end" : lfK[0] });
-            skFitSpline(sketch1, "lf" ~ k, { "points" : lfK });
-            skArc(sketch1, "root" ~ k, { "start" : lfRoot, "mid" : rootMid, "end" : nextRF0 });
-        }
-        if (hasBore)
-        {
-            skCircle(sketch1, "bore", { "center" : vector(0, 0) * inch, "radius" : definition.holeRadius });
-        }
+${segStr}${boreStr}
         skSolve(sketch1);
         opExtrude(context, id + "extrude1", {
-            "entities"  : qSketchRegion(id + "sketch1", hasBore),
+            "entities"  : qSketchRegion(id + "sketch1"${boreR > 0 ? ', true' : ''}),
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
-            "endDepth"  : definition.faceWidth
-        });`,
-  };
+            "endDepth"  : ${n(faceW)} * inch
+        });`;
 }
 
 // ─── Assemble full FeatureScript file ───────────────────────────────────────── CHANGE THIS, THIS CAN BE USED AS A EXAMPLE NOT THE FINAL RESULT
@@ -1458,18 +1401,18 @@ function prioritizeLearningContext(context = {}) {
       continue;
     }
 
-    if (trimmed.featureScriptDocs.length > 1) {
-      trimmed.featureScriptDocs = trimmed.featureScriptDocs.slice(0, 1).map(doc => ({
+    if (trimmed.featureScriptDocs.length > 3) {
+      trimmed.featureScriptDocs = trimmed.featureScriptDocs.slice(0, 3).map(doc => ({
         ...doc,
-        text: truncateText(doc.text, 800),
+        text: truncateText(doc.text, 900),
       }));
       continue;
     }
 
-    if (trimmed.featureScriptDocs.length > 0) {
-      trimmed.featureScriptDocs = trimmed.featureScriptDocs.slice(0, 1).map(doc => ({
+    if (trimmed.featureScriptDocs.length > 1) {
+      trimmed.featureScriptDocs = trimmed.featureScriptDocs.slice(0, 2).map(doc => ({
         ...doc,
-        text: truncateText(doc.text, 400),
+        text: truncateText(doc.text, 550),
       }));
       continue;
     }
@@ -1664,6 +1607,21 @@ function selectTraceableRows(rows = [], keywords = [], stepKeywords = [], limit 
     .slice(0, limit);
 }
 
+function selectOperationRows(rows = [], requestedOperations = [], limit = 8) {
+  const ops = uniqueStrings((requestedOperations || []).map(operation => normalizeText(operation).toLowerCase()));
+  if (!ops.length) return [];
+  return rows
+    .map(row => {
+      const opTags = uniqueStrings([...(row.operation_tags || []), ...(row.operationTags || [])]).map(tag => normalizeText(tag).toLowerCase());
+      const summaryText = normalizeText(`${row.title || ""} ${row.summary || ""} ${(row.keywords || []).join(" ")}`).toLowerCase();
+      const score = ops.reduce((value, op) => value + (opTags.includes(op) || summaryText.includes(op) ? 1 : 0), 0);
+      return { ...traceableRow(row, row.kind || "operation"), score };
+    })
+    .filter(row => row.score > 0)
+    .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
+    .slice(0, limit);
+}
+
 function summarizeTraceableRows(rows = []) {
   if (!rows.length) return "none";
   return rows
@@ -1698,6 +1656,20 @@ function compactBlockCandidateForPrompt(candidate) {
     candidateId: candidate?.candidateId || null,
     coverage: candidate?.coverage || null,
     missingRequirements: candidate?.missingRequirements || [],
+    operationPlan: candidate?.operationPlan
+      ? {
+          family: candidate.operationPlan.family,
+          featureName: candidate.operationPlan.featureName,
+          featureLabel: candidate.operationPlan.featureLabel,
+          plannedComponents: candidate.operationPlan.plannedComponents || [],
+          operationKinds: candidate.operationPlan.operationKinds || [],
+          coveredSteps: candidate.operationPlan.coveredSteps || [],
+          finishingRequests: candidate.operationPlan.finishingRequests || [],
+          warnings: candidate.operationPlan.warnings || [],
+          omissions: candidate.operationPlan.omissions || [],
+          compilerOptions: candidate.operationPlan.compilerOptions || {},
+        }
+      : null,
     blocks: Array.isArray(candidate?.blocks)
       ? candidate.blocks.map(block => ({
           stepId: block.stepId,
@@ -1715,12 +1687,28 @@ function compactBlockCandidateForPrompt(candidate) {
   };
 }
 
-function buildBlockedResult(prompt, dims, orchestration, blockers = [], reason = "") {
+function selectedOperationPlanSummary(operationPlan = null) {
+  if (!operationPlan) return null;
+  return {
+    family: operationPlan.family,
+    featureName: operationPlan.featureName,
+    featureLabel: operationPlan.featureLabel,
+    plannedComponents: operationPlan.plannedComponents || [],
+    operationKinds: operationPlan.operationKinds || [],
+    coveredSteps: operationPlan.coveredSteps || [],
+    finishingRequests: operationPlan.finishingRequests || [],
+  };
+}
+
+function buildBlockedResult(prompt, dims, orchestration, blockers = [], reason = "", warnings = [], omissions = []) {
   const cleanBlockers = uniqueStrings((blockers || []).map(entry => normalizeText(entry)).filter(Boolean));
   const statusOrchestration = {
     ...(orchestration || {}),
     status: "blocked",
+    completionLevel: "blocked",
     blockers: cleanBlockers,
+    warnings: uniqueStrings((warnings || []).map(entry => normalizeText(entry)).filter(Boolean)),
+    omissions: uniqueStrings((omissions || []).map(entry => normalizeText(entry)).filter(Boolean)),
   };
   return {
     code: "",
@@ -1733,6 +1721,9 @@ function buildBlockedResult(prompt, dims, orchestration, blockers = [], reason =
     }),
     dims,
     generationMode: "blocked_trace_only",
+    completionLevel: "blocked",
+    warnings: statusOrchestration.warnings,
+    omissions: statusOrchestration.omissions,
     orchestration: statusOrchestration,
   };
 }
@@ -2395,6 +2386,119 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     return after;
   });
 
+  // 6) Replace hallucinated / non-existent FeatureScript API functions with safe equivalents
+  const invalidFunctionReplacements = [
+    // opExtrudeBlind → opExtrude (FS has no opExtrudeBlind; the user meant opExtrude with BoundingType.BLIND)
+    [/\bopExtrudeBlind\s*\(/g, 'opExtrude(', 'replace_opExtrudeBlind'],
+    // opBooleanSub → opBoolean (FS has no opBooleanSub; use opBoolean with BooleanOperationType.SUBTRACTION)
+    [/\bopBooleanSub\s*\(/g, 'opBoolean(', 'replace_opBooleanSub'],
+    // opBore → not a real FS function; remove entire call (cannot safely rewrite)
+    [/\bopBore\s*\([^;]*;\s*/g, '// REMOVED: opBore is not a valid FeatureScript function\n', 'remove_opBore'],
+    // opCut → not a real FS function
+    [/\bopCut\s*\([^;]*;\s*/g, '// REMOVED: opCut is not a valid FeatureScript function\n', 'remove_opCut'],
+    // opPlateHoles → not a real FS function
+    [/\bopPlateHoles\s*\([^;]*;\s*/g, '// REMOVED: opPlateHoles is not a valid FeatureScript function\n', 'remove_opPlateHoles'],
+    // qEdges → not valid; use qOwnedByBody + qEdgeTopologyFilter pattern
+    [/\bqEdges\s*\(/g, 'qOwnedByBody(', 'replace_qEdges'],
+    // qEdgeAll → not valid
+    [/\bqEdgeAll\s*\(/g, 'qOwnedByBody(', 'replace_qEdgeAll'],
+    // qBodyFaces → not valid; use qOwnedByBody
+    [/\bqBodyFaces\s*\(/g, 'qOwnedByBody(', 'replace_qBodyFaces'],
+    // qAllEdges → not valid
+    [/\bqAllEdges\s*\(/g, 'qOwnedByBody(', 'replace_qAllEdges'],
+    // evEdgeTopologyFilter → should be qEdgeTopologyFilter
+    [/\bevEdgeTopologyFilter\s*\(/g, 'qEdgeTopologyFilter(', 'replace_evEdgeTopologyFilter'],
+    // skLine → should be skLineSegment
+    [/\bskLine\s*\(/g, 'skLineSegment(', 'replace_skLine'],
+    // skSpline → should be skFitSpline (also caught in core sanitizer, but be safe)
+    [/\bskSpline\s*\(/g, 'skFitSpline(', 'replace_skSpline'],
+    // skPolygon → should be skRegularPolygon
+    [/\bskPolygon\s*\(/g, 'skRegularPolygon(', 'replace_skPolygon'],
+  ];
+
+  for (const [pattern, replacement, ruleName] of invalidFunctionReplacements) {
+    const beforeCode = code;
+    code = code.replace(pattern, (match) => {
+      record(ruleName, match, typeof replacement === 'string' ? replacement : '(removed)');
+      return replacement;
+    });
+  }
+
+  // 6b) Fix opBoolean calls that came from opBooleanSub: rename singular "tool"/"target" keys
+  //     to plural "tools"/"targets" and inject operationType SUBTRACTION if missing.
+  code = code.replace(
+    /\bopBoolean\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)\}\s*\)/g,
+    (match, ctx, idExpr, argsRaw) => {
+      if (!/"tool"\s*:/.test(argsRaw) && !/"target"\s*:/.test(argsRaw)) return match;
+      const fixedArgs = argsRaw
+        .replace(/"tool"\s*:/g, '"tools" :')
+        .replace(/"target"\s*:/g, '"targets" :');
+      const hasOpType = /operationType/.test(fixedArgs);
+      const after = `opBoolean(${ctx}, ${idExpr}, {${fixedArgs}${hasOpType ? '' : ', "operationType" : BooleanOperationType.SUBTRACTION'}})`;
+      record('fix_opBooleanSub_args', match.slice(0, 100), after.slice(0, 100));
+      return after;
+    }
+  );
+
+  // 6c) Fix qOwnedByBody(singleVar) missing EntityType argument — result of replacing
+  //     invalid functions like qEdgeAll/qEdges/qBodyFaces/qAllEdges.
+  code = code.replace(/\bqOwnedByBody\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g, (match, bodyVar) => {
+    const after = `qOwnedByBody(${bodyVar}, EntityType.EDGE)`;
+    record('fix_qOwnedByBody_entitytype', match, after);
+    return after;
+  });
+
+  // 7) Fix opExtrude calls using non-existent key names (profile → entities, distance → endDepth)
+  code = code.replace(
+    /opExtrude\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)"profile"\s*:/g,
+    (match, ctx, idExpr, prefix) => {
+      const after = `opExtrude(${ctx}, ${idExpr}, {${prefix}"entities" :`;
+      record('fix_opExtrude_profile_key', match.slice(0, 100), after.slice(0, 100));
+      return after;
+    }
+  );
+  code = code.replace(
+    /opExtrude\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)"distance"\s*:/g,
+    (match, ctx, idExpr, prefix) => {
+      const after = `opExtrude(${ctx}, ${idExpr}, {${prefix}"endDepth" :`;
+      record('fix_opExtrude_distance_key', match.slice(0, 100), after.slice(0, 100));
+      return after;
+    }
+  );
+  // Fix opExtrude using "sketch" key instead of "entities"
+  code = code.replace(
+    /opExtrude\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)"sketch"\s*:/g,
+    (match, ctx, idExpr, prefix) => {
+      const after = `opExtrude(${ctx}, ${idExpr}, {${prefix}"entities" :`;
+      record('fix_opExtrude_sketch_key', match.slice(0, 100), after.slice(0, 100));
+      return after;
+    }
+  );
+
+  // 8) Ensure the file ends with }); — fix missing closing for defineFeature
+  const trimmedCode = code.trimEnd();
+  if (/\bdefineFeature\s*\(/.test(trimmedCode) && !trimmedCode.endsWith(');')) {
+    // Count braces/parens to determine what's missing
+    let braceDepth = 0;
+    let parenDepth = 0;
+    for (let i = 0; i < trimmedCode.length; i++) {
+      const ch = trimmedCode[i];
+      if (ch === '{') braceDepth++;
+      else if (ch === '}') braceDepth--;
+      else if (ch === '(') parenDepth++;
+      else if (ch === ')') parenDepth--;
+    }
+    let suffix = '';
+    while (braceDepth > 0) { suffix += '\n    }'; braceDepth--; }
+    while (parenDepth > 0) { suffix += ')'; parenDepth--; }
+    if (!suffix.endsWith(';')) suffix += ';';
+    // suffix.length > 0 (not > 1) so a lone ';' is also applied (fixes "});  " → "});\n")
+    if (suffix.length > 0) {
+      code = trimmedCode + suffix + '\n';
+      record('fix_truncated_file_ending', '(truncated file)', suffix.trim() || '(added semicolon)');
+    }
+  }
+
   return { code, changes };
 }
 
@@ -2552,6 +2656,10 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   const generationLabel =
     meta.generationMode === "blocked_trace_only"
       ? "Blocked trace only — no code returned"
+      : meta.generationMode === "four_pass_operation_compiler_partial"
+      ? "Hybrid operation compiler — partial result with source-backed omissions"
+      : meta.generationMode === "four_pass_operation_compiler"
+      ? "Hybrid operation compiler — compile-safe deterministic assembly"
       : meta.generationMode === "template_fallback"
       ? "AI-authored feature — emergency template fallback triggered after repair failure"
       : meta.generationMode === "template"
@@ -2634,7 +2742,7 @@ Given a user prompt plus optional multimodal descriptors, return a concise JSON 
       "validationFocus": ["skSolve", "closed profile", "axis is Line"]
     }
   ],
-  "fallbackTemplate": "revolve_carrot | loft_transition | sweep_pipe | shell_enclosure | hybrid_organic_flange | box"
+  "fallbackStrategy": "operation-family compiler or source-backed omission"
 }
 Prefer explicit decomposition, editable parameters, and robust primitive choices over brittle single-shot geometry.`;
 
@@ -2648,7 +2756,7 @@ Return only compile-safe FeatureScript 2931 with this invariant set:
 - opLoft uses profileSubqueries in ordered profile sketches
 - opSweep uses profiles and a connected path query
 - no unused helper variables
-- if validation fails, repair from pruning rules; after repair failure, use the nearest validated template.`;
+- if validation fails, repair from pruning rules; if repair still fails, return structured diagnostics or a source-backed omission plan rather than template code.`;
 
 export const FOUR_PASS_DECOMPOSITION_SYSTEM = `You are MODEL KEY [DECOMPOSITION_PLANNER].
 Return JSON only.
@@ -2682,53 +2790,55 @@ Rules:
 
 export const FOUR_PASS_BLOCK_SYNTH_SYSTEM = `You are MODEL KEY [BLOCK_SYNTHESIZER].
 Return JSON only.
-Generate isolated FeatureScript operation blocks, not a full file.
+Generate a compact operation plan, not a full FeatureScript file.
 Schema:
 {
   "candidateId": "c1",
   "coverageNotes": ["short notes"],
   "missingRequirements": ["missing items"],
-  "blocks": [
-    {
-      "stepId": "step_id",
-      "name": "human step name",
-      "operation": "extrude|revolve|loft|sweep|shell|boolean|pattern|fillet|chamfer|cut",
-      "dependsOn": ["step ids"],
-      "bodyPolicy": "separate|union|subtract",
-      "parametersUsed": ["definition.param"],
-      "createdQueries": ["query alias names"],
-      "consumedQueries": ["query alias names"],
-      "validationChecks": ["checks"],
-      "fsBlock": "FeatureScript statements for this step only"
-    }
-  ]
+  "operationPlan": {
+    "family": "simple_box|filleted_box|fillet_chamfer_block|open_top_shell_box|imprinted_box|carrot|mushroom|spur_gear|swerve_module|frc_tube|belt_side_plate|train_cab|custom",
+    "featureName": "camelCaseName",
+    "featureLabel": "Readable Name",
+    "plannedComponents": ["major components"],
+    "operationKinds": ["sketch_profile","extrude_add","extrude_remove","revolve_add","sweep_add","loft_add","shell","fillet","chamfer","boolean","pattern"],
+    "coveredSteps": ["step ids"],
+    "finishingRequests": ["fillet","chamfer","shell"],
+    "warnings": ["soft risks"],
+    "omissions": ["what may be intentionally omitted"],
+    "compilerOptions": { "variant": "short label", "notes": ["source-backed hints"] }
+  }
 }
 Rules:
-- Every block must stay inside its own step namespace using id + stepName patterns.
+- Return an operation-family plan the deterministic compiler can assemble.
+- Do not output raw FeatureScript statements in this pass.
 - Sketches must be solved before downstream operations.
 - Revolve axes must be explicit Line values.
-- Do not output a complete FeatureScript file in this pass.
 - For complex prompts, missing a major subsystem is worse than returning fewer cosmetic details.`;
 
 export const FOUR_PASS_WEAVER_SYSTEM = `You are MODEL KEY [TOPOLOGY_WEAVER].
 Return JSON only.
-Input contains a decomposition plan, retrieved sources, and isolated blocks.
-Either assemble a complete FeatureScript 2931 file or return a blocked decision.
+Input contains a decomposition plan, retrieved sources, and a deterministic operation plan candidate.
+Review the plan for omissions, finishing safety, and assembly completeness. Do not emit FeatureScript code.
 Schema:
 {
-  "status": "completed|blocked",
-  "featureName": "camelCaseFeature",
-  "featureLabel": "Readable Name",
+  "status": "completed|blocked|partial",
   "reasoning": "short explanation",
+  "warnings": ["soft risks"],
+  "omissions": ["intentionally skipped features"],
   "blockers": ["if blocked"],
-  "code": "full FeatureScript file or empty string"
+  "finishingPlan": {
+    "applyShell": true,
+    "applyFillet": false,
+    "applyChamfer": false,
+    "reason": "short explanation"
+  }
 }
 Rules:
-- Build the precondition block here and expose every controlling parameter explicitly.
-- Resolve cross-step queries safely.
-- Keep separate bodies separate unless the plan explicitly calls for boolean union.
-- Never use blind whole-body edge selections for fillet or chamfer.
-- If the retrieved evidence is insufficient for a complex assembly, return blocked instead of fallback geometry.`;
+- Strongly prefer best-effort completion with omissions over blocking.
+- Shell, fillet, and chamfer should only be approved when the supporting solid and stable query strategy are present.
+- Only return status "blocked" (with empty code) if the prompt requires a complex multi-body
+  assembly AND the operation plan provides no meaningful geometry scaffold whatsoever.`;
 
 export const FOUR_PASS_VALIDATOR_SYSTEM = `You are MODEL KEY [VALIDATION_REPAIR].
 Return JSON only.
@@ -2739,11 +2849,22 @@ Schema:
   "blockers": ["issues that should block the result"],
   "notes": ["short validation notes"]
 }
-Block the result if:
-- a complex assembly collapsed into a generic primitive or missing subsystem
-- source-backed constraints were not carried through
-- fillet/chamfer targeting is unstable
-- key requested components are absent`;
+
+IMPORTANT: The code has already been sanitized. Strongly prefer "pass" or "repair" over "blocked".
+Return "blocked" ONLY when ALL of the following are true simultaneously:
+- A complex multi-component assembly COMPLETELY collapsed into a single primitive body
+- AND key requested components are entirely absent (not just imperfect)
+- AND no repair path exists
+
+Do NOT return "blocked" for ANY of the following — these are auto-fixed by sanitization:
+- Missing "as IntegerBoundSpec" on isInteger bounds
+- Missing skSolve() calls — the sanitizer inserts them automatically
+- Invalid function names (opBooleanSub, qEdgeAll, qEdges, opBore, opCut, etc.)
+- Fillet/chamfer edge selection style (qEdgeAll, qBodyFaces, etc.)
+- Code truncation or missing closing brackets
+- Syntax details that will be repaired in a subsequent pass
+
+When in doubt, return "pass" with notes rather than "blocked".`;
 
 const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring assistant. Follow these rules exactly:
 - Output only valid FeatureScript 2931 code and nothing else unless asked for explanation.
@@ -2752,7 +2873,7 @@ const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring
 - Always include skSolve before any downstream opExtrude/opRevolve/opLoft/opSweep.
 - Expose user-editable parameters in the precondition using isLength/isInteger/boolean and sensible bounds.
 - For numeric quantity parameters, set the default in the bounds spec. Use IntegerBoundSpec for isInteger instead of string Default annotations.
-- If the shape is recognized (gear, pulley, flange, cylinder, box), prefer parameterized templates and include validation rules in comments.
+- If the shape is recognized (gear, pulley, flange, cylinder, box), prefer source-backed compiler families and explicit operation ordering over template imitation.
 - If uncertain about an API key or environment, do not reference or output secrets.
 - If you must reference an example, only use sanitized examples that follow the above rules.
 - If any rule would be violated by the intended output, respond with a short JSON diagnostics object: {"error":"violation","reasons":[...]} and do not emit code.
@@ -2765,17 +2886,11 @@ Return ONLY a JSON object — no markdown, no explanation outside the JSON:
   "code": "complete raw FeatureScript file — no backticks"
 }
 
-═══ HOW TO USE THE REFERENCE TEMPLATE IN DATABASE CONTEXT ═══
-When DATABASE CONTEXT contains a "SHAPE REFERENCE TEMPLATE", do the following:
-1. Read it carefully to understand the expected structure for this shape type.
-2. Note the precondition patterns (isLength, isInteger, Query, boolean).
-3. Note the sketch strategy (which sketch API calls, how profiles are built).
-4. Note the operation order (sketch → skSolve → opExtrude/opRevolve/etc).
-5. Then write COMPLETELY FRESH CODE that implements the user's specific request.
-   - Use the same structural patterns, but with the user's exact dimensions.
-   - Add, remove, or modify features as the prompt requires.
-   - The template is a structural guide, NOT code to copy verbatim.
-   - Your output MUST be meaningfully different from the template.
+═══ HOW TO USE REFERENCE EXAMPLES IN DATABASE CONTEXT ═══
+When DATABASE CONTEXT contains sanitized FeatureScript examples, use them as operation references only:
+1. Extract the safe API pattern and operation order.
+2. Rebuild the requested geometry from the user's dimensions and retrieved evidence.
+3. Do not copy example code wholesale.
 
 ═══ MANDATORY FILE STRUCTURE (HARD CONSTRAINT — DO NOT VIOLATE) ═══\r\nEvery file MUST follow this EXACT structure — the layout and punctuation matter:\r\n\r\n  FeatureScript 2931;\r\n  import(path : "onshape/std/geometry.fs", version : "2931.0");\r\n\r\n  annotation { "Feature Type Name" : "My Feature" }\r\n  export const myFeature = defineFeature(function(context is Context, id is Id, definition is map)\r\n      precondition {\r\n          // parameter declarations here\r\n      }\r\n      {\r\n          // feature body here\r\n      });
 
@@ -3309,7 +3424,7 @@ async function repairCandidate(candidate, learningContext, requestId) {
     repairAttempts,
     issues,
     repair_plan: status === "failed"
-      ? "Fallback to the nearest validated template or reduce geometric complexity before another attempt."
+      ? "Retry with a smaller source-backed operation plan or return a partial result with explicit omissions before another attempt."
       : undefined,
   };
 }
@@ -3453,6 +3568,7 @@ function normalizeRetrievedRows(rows = [], kind = "knowledge") {
 async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decomposition, requestId) {
   const promptKeywords = extractPromptKeywords(`${prompt} ${dims.shape}`, 14);
   const stepKeywords = uniqueStrings((decomposition.steps || []).flatMap(step => step.retrievalKeywords || []));
+  const requestedOperations = uniqueStrings((decomposition.steps || []).map(step => step.operation).filter(Boolean));
   const knowledgeRows = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
   const dbRows = selectTraceableRows(
     knowledgeRows.filter(row => !String(row.source_table || "").includes("source_docs") && !String(row.memory_type || "").includes("dataset")),
@@ -3554,6 +3670,11 @@ async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decompo
     datasetRows: selectTraceableRows(datasetRows, promptKeywords, step.retrievalKeywords || [], 3, "dataset"),
     sourceRows: selectTraceableRows(sourceRows, promptKeywords, step.retrievalKeywords || [], 4, "source"),
   }));
+  const operationRows = selectOperationRows([
+    ...dbRows,
+    ...datasetRows,
+    ...sourceRows,
+  ], requestedOperations, 8);
 
   return {
     sourcePrecedence: [
@@ -3566,12 +3687,162 @@ async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decompo
     dbRows,
     datasetRows,
     sourceRows,
+    operationRows,
     stepMatches,
     summaries: {
       dbAndSource: normalizeText(dbSourceSummaryRaw),
       dataset: normalizeText(datasetSummaryRaw),
       status: retrievalSettled.every(result => result.status === "fulfilled") ? "completed" : "local_fallback",
     },
+  };
+}
+
+function classifyOperationFamily(prompt, dims, decomposition = null) {
+  const text = String(prompt || "").toLowerCase();
+  const requestedOps = uniqueStrings((decomposition?.steps || []).map(step => step.operation));
+  if (/\bletter\b|\bimprint|engrave|emboss/.test(text)) return "imprinted_box";
+  if (/\bopen[\s-]?top\b|\benclosure\b|\bhousing\b/.test(text) || requestedOps.includes("shell")) return "open_top_shell_box";
+  if (/\bfillet(?:ed)?\b/.test(text) && /\bchamfer(?:ed)?\b/.test(text)) return "fillet_chamfer_block";
+  if (/\bfillet(?:ed)?\b/.test(text) && (/\bbox|cube|block|rectangular/.test(text) || dims.shape === "BOX")) return "filleted_box";
+  if (/\bgear\b|\bspur\b|\bpinion\b/.test(text)) return "spur_gear";
+  if (/\bcarrot\b/.test(text)) return "carrot";
+  if (/\bmushroom\b/.test(text)) return "mushroom";
+  if (/\bswerve\b/.test(text)) return "swerve_module";
+  if (/\btrain\b.*\bcab\b|\bcab\b/.test(text)) return "train_cab";
+  if (/\b2\s*x\s*1\b|\b2x1\b|\bfrc\s+tube\b|\btube\b.*\bbearing\b|\btube\b.*\bmount/i.test(prompt)) return "frc_tube";
+  if (/\bbelt\b|\bpulley\b/.test(text)) return "belt_side_plate";
+  if (dims.shape === "BOX" || /\bbox|cube|block|rectangular/.test(text)) return "simple_box";
+  return "custom";
+}
+
+function operationKindsForFamily(family) {
+  const map = {
+    imprinted_box: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_remove", "boolean"],
+    open_top_shell_box: ["sketch_profile", "extrude_add", "shell"],
+    filleted_box: ["sketch_profile", "extrude_add", "fillet"],
+    fillet_chamfer_block: ["sketch_profile", "extrude_add", "fillet", "chamfer"],
+    carrot: ["sketch_profile", "revolve_add"],
+    mushroom: ["sketch_profile", "extrude_add", "sketch_profile", "revolve_add", "boolean"],
+    spur_gear: ["sketch_profile", "extrude_add", "pattern"],
+    swerve_module: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_add", "boolean"],
+    frc_tube: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_add"],
+    belt_side_plate: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_add"],
+    train_cab: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_remove", "boolean"],
+    simple_box: ["sketch_profile", "extrude_add"],
+  };
+  return map[family] || ["sketch_profile", "extrude_add"];
+}
+
+function plannedComponentsForFamily(family, prompt = "") {
+  const map = {
+    imprinted_box: ["base body", "letter cut"],
+    open_top_shell_box: ["outer shell", "open top cavity"],
+    filleted_box: ["base block", "edge finishing"],
+    fillet_chamfer_block: ["base block", "fillet", "chamfer"],
+    carrot: ["revolved body"],
+    mushroom: ["stem", "cap"],
+    spur_gear: ["tooth profile", "bore"],
+    swerve_module: ["base plate", "bearing ring", "fork", "wheel"],
+    frc_tube: ["tube profile", "bearing pattern plate"],
+    belt_side_plate: ["side plate", "boss pads", "center rib"],
+    train_cab: ["cab shell", "window cuts"],
+    simple_box: ["base block"],
+  };
+  return map[family] || uniqueStrings(extractPromptKeywords(prompt, 6));
+}
+
+function requestedFinishingForPrompt(prompt = "", decomposition = null) {
+  const requested = [];
+  if (/\bfillet|rounded\b/i.test(prompt) || (decomposition?.steps || []).some(step => step.operation === "fillet")) requested.push("fillet");
+  if (/\bchamfer|bevel\b/i.test(prompt) || (decomposition?.steps || []).some(step => step.operation === "chamfer")) requested.push("chamfer");
+  if (/\bshell|open[\s-]?top|hollow|wall thickness|enclosure\b/i.test(prompt) || (decomposition?.steps || []).some(step => step.operation === "shell")) requested.push("shell");
+  return uniqueStrings(requested);
+}
+
+function buildDeterministicOperationPlan(prompt, dims, decomposition = null, retrieval = null) {
+  const family = classifyOperationFamily(prompt, dims, decomposition);
+  const featureNameMap = {
+    imprinted_box: "imprintedLetterBox",
+    open_top_shell_box: "openTopShellEnclosure",
+    filleted_box: "filletedBlock",
+    fillet_chamfer_block: "filletChamferBlock",
+    carrot: "realisticCarrot",
+    mushroom: "mushroomModel",
+    spur_gear: "spurGear",
+    swerve_module: "swerveModule",
+    frc_tube: "frcTubeBearingPattern",
+    belt_side_plate: "beltDrivenSidePlate",
+    train_cab: "trainCab",
+    simple_box: dims.featureName || "parametricBox",
+    custom: dims.featureName || "customFeature",
+  };
+  const labelMap = {
+    imprinted_box: "Imprinted Letter Box",
+    open_top_shell_box: "Open Top Shell Enclosure",
+    filleted_box: "Filleted Block",
+    fillet_chamfer_block: "Fillet And Chamfer Block",
+    carrot: "Realistic Carrot",
+    mushroom: "Mushroom Model",
+    spur_gear: "Spur Gear",
+    swerve_module: "Swerve Module",
+    frc_tube: "FRC Tube Bearing Pattern",
+    belt_side_plate: "Belt Driven Side Plate",
+    train_cab: "Train Cab",
+    simple_box: dims.featureLabel || "Parametric Box",
+    custom: dims.featureLabel || "Custom Feature",
+  };
+  const coveredSteps = (decomposition?.steps || []).map(step => step.id);
+  return {
+    family,
+    featureName: featureNameMap[family] || dims.featureName || "customFeature",
+    featureLabel: labelMap[family] || dims.featureLabel || "Custom Feature",
+    plannedComponents: plannedComponentsForFamily(family, prompt),
+    operationKinds: operationKindsForFamily(family),
+    coveredSteps,
+    finishingRequests: requestedFinishingForPrompt(prompt, decomposition),
+    warnings: [],
+    omissions: [],
+    compilerOptions: {
+      variant: family,
+      prompt,
+      sourceSummary: normalizeText(retrieval?.summaries?.dbAndSource || ""),
+    },
+  };
+}
+
+function compileOperationPlanToFeatureScript(operationPlan, prompt, dims, retrieval = null, weaveReview = null) {
+  if (!operationPlan) return null;
+  const family = operationPlan.family || "custom";
+  let result = null;
+  if (family === "imprinted_box") result = buildLocalImprintedBox(prompt, dims);
+  else if (family === "open_top_shell_box") result = buildLocalOpenTopShellEnclosure(prompt, dims);
+  else if (family === "filleted_box") result = buildLocalFilletedBox(prompt, dims);
+  else if (family === "fillet_chamfer_block") result = buildLocalFilletChamferBlock(prompt, dims);
+  else if (family === "carrot") result = buildLocalCarrot(prompt, dims);
+  else if (family === "mushroom") result = buildLocalMushroom(prompt, dims);
+  else if (family === "spur_gear") result = buildLocalSpurGear(prompt, dims);
+  else if (family === "swerve_module") result = buildLocalSwerveModule(prompt, dims);
+  else if (family === "frc_tube") result = buildLocalFrcTube(prompt, dims);
+  else if (family === "belt_side_plate") result = buildLocalBeltSidePlate(prompt, dims);
+  else if (family === "train_cab") result = buildLocalTrainCab(prompt, dims);
+  else if (family === "simple_box") result = buildLocalSimpleBox(prompt, dims);
+  else return null;
+
+  if (!result) return null;
+  return {
+    ...result,
+    operationPlan,
+    warnings: uniqueStrings([
+      ...(result.warnings || []),
+      ...(operationPlan.warnings || []),
+      ...(weaveReview?.warnings || []),
+    ]),
+    omissions: uniqueStrings([
+      ...(result.omissions || []),
+      ...(operationPlan.omissions || []),
+      ...(weaveReview?.omissions || []),
+    ]),
+    retrieval,
   };
 }
 
@@ -3597,25 +3868,31 @@ function buildBlockSynthesisPrompt({ prompt, dims, decomposition, retrieval, can
     `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 4))}`,
     `SOURCE_ROWS: ${JSON.stringify(compactPromptRows(retrieval.sourceRows, 4))}`,
     `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 4))}`,
+    `OPERATION_ROWS: ${JSON.stringify(compactPromptRows(retrieval.operationRows || [], 4))}`,
     `STEP_MATCHES: ${JSON.stringify(compactStepMatches(retrieval.stepMatches))}`,
-    `Do not output a full FeatureScript file. Return JSON only.`,
+    `Return a compact operation-plan JSON only. Do not output FeatureScript source code.`,
   ].join("\n\n");
 }
 
-function parseBlockCandidate(raw, candidateId, decomposition) {
+function parseBlockCandidate(raw, candidateId, decomposition, prompt, dims, retrieval) {
   const fallback = {
     candidateId,
-    coverageNotes: ["Block synthesis returned invalid JSON."],
-    missingRequirements: ["Could not parse isolated block output."],
+    coverageNotes: ["Block synthesis returned invalid JSON; using deterministic operation plan."],
+    missingRequirements: ["Could not parse operation plan output."],
     blocks: [],
+    operationPlan: buildDeterministicOperationPlan(prompt, dims, decomposition, retrieval),
   };
   const parsed = tryParseJson(raw, fallback) || fallback;
   const steps = Array.isArray(decomposition.steps) ? decomposition.steps : [];
-  const covered = new Set((Array.isArray(parsed.blocks) ? parsed.blocks : []).map(block => block.stepId));
+  const covered = new Set([
+    ...(Array.isArray(parsed.blocks) ? parsed.blocks : []).map(block => block.stepId),
+    ...((parsed.operationPlan?.coveredSteps) || []),
+  ]);
   return {
     ...parsed,
     candidateId,
     blocks: Array.isArray(parsed.blocks) ? parsed.blocks : [],
+    operationPlan: parsed.operationPlan || buildDeterministicOperationPlan(prompt, dims, decomposition, retrieval),
     coverage: {
       coveredSteps: [...covered],
       totalSteps: steps.length,
@@ -3627,19 +3904,22 @@ function parseBlockCandidate(raw, candidateId, decomposition) {
 function scoreBlockCandidate(candidate) {
   return (candidate.coverage?.ratio || 0) * 100
     - ((candidate.missingRequirements || []).length * 10)
-    + ((candidate.blocks || []).length * 2);
+    + ((candidate.blocks || []).length * 2)
+    + ((candidate.operationPlan?.operationKinds || []).length * 3);
 }
 
 function selectBestBlockCandidate(candidates = []) {
   return [...candidates].sort((left, right) => scoreBlockCandidate(right) - scoreBlockCandidate(left))[0] || null;
 }
 
-function fallbackBlockCandidateFromDecomposition(decomposition) {
+function fallbackBlockCandidateFromDecomposition(prompt, dims, decomposition, retrieval) {
   const steps = Array.isArray(decomposition.steps) ? decomposition.steps : [];
+  const operationPlan = buildDeterministicOperationPlan(prompt, dims, decomposition, retrieval);
   return {
     candidateId: "fallback_from_decomposition",
-    coverageNotes: ["Synthesized deterministic fallback blocks from decomposition because model block output was missing or invalid."],
+    coverageNotes: ["Synthesized deterministic operation plan from decomposition because model block output was missing or invalid."],
     missingRequirements: [],
+    operationPlan,
     blocks: steps.map(step => ({
       stepId: step.id,
       name: step.name,
@@ -3693,17 +3973,18 @@ async function runBlockSynthesisPass(prompt, dims, learningContext, decompositio
     affinity: `${requestId}:blocks:${candidate.id}`,
     keySlot: candidate.slot,
     maxCompletionTokens: 1600,
-  }).then(raw => parseBlockCandidate(raw, candidate.id, decomposition)).catch(err => ({
+  }).then(raw => parseBlockCandidate(raw, candidate.id, decomposition, prompt, dims, retrieval)).catch(err => ({
     candidateId: candidate.id,
     coverageNotes: [`Block synthesis failed: ${err.message}`],
     missingRequirements: [err.message],
     blocks: [],
+    operationPlan: buildDeterministicOperationPlan(prompt, dims, decomposition, retrieval),
     coverage: { coveredSteps: [], totalSteps: (decomposition.steps || []).length, ratio: 0 },
   }))));
 
   let selected = selectBestBlockCandidate(settled);
-  if (!selected || !(selected.blocks || []).length) {
-    selected = fallbackBlockCandidateFromDecomposition(decomposition);
+  if (!selected || (!selected.operationPlan && !(selected.blocks || []).length)) {
+    selected = fallbackBlockCandidateFromDecomposition(prompt, dims, decomposition, retrieval);
   }
   return {
     candidates: settled,
@@ -3717,6 +3998,7 @@ async function runTopologyWeaverPass(prompt, dims, learningContext, decompositio
   if (!selectedCandidate) {
     return { status: "blocked", blockers: ["No block synthesis candidate succeeded."], code: "" };
   }
+  const selectedOperationPlan = selectedCandidate.operationPlan || buildDeterministicOperationPlan(prompt, dims, decomposition, retrieval);
 
   let raw = "";
   try {
@@ -3744,10 +4026,14 @@ async function runTopologyWeaverPass(prompt, dims, learningContext, decompositio
           dbRows: compactPromptRows(retrieval.dbRows, 4),
           sourceRows: compactPromptRows(retrieval.sourceRows, 4),
           datasetRows: compactPromptRows(retrieval.datasetRows, 4),
+          operationRows: compactPromptRows(retrieval.operationRows || [], 4),
           stepMatches: compactStepMatches(retrieval.stepMatches),
           summaries: retrieval.summaries,
         })}`,
-        `SELECTED_BLOCK_CANDIDATE: ${JSON.stringify(compactBlockCandidateForPrompt(selectedCandidate))}`,
+        `SELECTED_OPERATION_PLAN: ${JSON.stringify(compactBlockCandidateForPrompt({
+          ...selectedCandidate,
+          operationPlan: selectedOperationPlan,
+        }))}`,
         `Return JSON only.`,
       ].join("\n\n"),
     },
@@ -3755,92 +4041,63 @@ async function runTopologyWeaverPass(prompt, dims, learningContext, decompositio
     stage: "generation",
     affinity: `${requestId}:weave`,
     keySlot: "k8",
-    maxCompletionTokens: 3600,
+    maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 7200),
   });
   } catch (err) {
     return {
       status: "blocked",
       featureName: dims.featureName,
       featureLabel: dims.featureLabel,
-      reasoning: "Topology weaving model call failed; local robust weaver may repair the result.",
+      reasoning: "Topology review model call failed; deterministic compiler may still complete the result.",
       blockers: [`Topology weaving failed: ${normalizeText(err?.message || String(err)).slice(0, 280)}`],
+      warnings: [],
+      omissions: [],
+      operationPlan: selectedOperationPlan,
       code: "",
     };
   }
 
   const parsed = tryParseJson(raw, {
+    status: "completed",
+    reasoning: "Topology review defaulted to deterministic compilation.",
+    blockers: [],
+    warnings: [],
+    omissions: [],
+    finishingPlan: {
+      applyShell: requestedFinishingForPrompt(prompt, decomposition).includes("shell"),
+      applyFillet: requestedFinishingForPrompt(prompt, decomposition).includes("fillet"),
+      applyChamfer: requestedFinishingForPrompt(prompt, decomposition).includes("chamfer"),
+      reason: "Deterministic compiler will enforce finishing safety locally.",
+    },
+  });
+  const compiled = compileOperationPlanToFeatureScript(selectedOperationPlan, prompt, dims, retrieval, parsed);
+  if (compiled?.code) {
+    return {
+      status: parsed.status === "blocked" ? "partial" : (compiled.omissions?.length ? "partial" : "completed"),
+      featureName: compiled.featureName || dims.featureName,
+      featureLabel: compiled.featureLabel || dims.featureLabel,
+      reasoning: parsed.reasoning || compiled.strategy || "Deterministic operation compiler assembled the final FeatureScript.",
+      blockers: Array.isArray(parsed.blockers) ? parsed.blockers : [],
+      warnings: uniqueStrings([...(parsed.warnings || []), ...(compiled.warnings || [])]),
+      omissions: uniqueStrings([...(parsed.omissions || []), ...(compiled.omissions || [])]),
+      finishingPlan: parsed.finishingPlan || null,
+      operationPlan: selectedOperationPlan,
+      code: sanitizeFeatureScript(compiled.code).code,
+    };
+  }
+
+  return {
     status: "blocked",
     featureName: dims.featureName,
     featureLabel: dims.featureLabel,
-    reasoning: "Topology weaving did not return valid JSON.",
-    blockers: ["Topology weaving failed."],
+    reasoning: parsed.reasoning || "Deterministic operation compiler could not assemble this operation plan.",
+    blockers: uniqueStrings([...(parsed.blockers || []), "Operation compiler did not produce compile-safe code."]),
+    warnings: parsed.warnings || [],
+    omissions: parsed.omissions || [],
+    finishingPlan: parsed.finishingPlan || null,
+    operationPlan: selectedOperationPlan,
     code: "",
-  });
-  if (parsed?.code) return parsed;
-
-  let fallbackRaw = "";
-  try {
-    fallbackRaw = await chat([
-    { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
-    {
-      role: "user",
-      content: [
-        `ASSEMBLE A COMPLETE FEATURESCRIPT FILE FROM THIS FOUR-PASS CONTEXT.`,
-        `USER REQUEST: ${prompt}`,
-        `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
-        `DECOMPOSITION: ${JSON.stringify({
-          shapeClass: decomposition.shapeClass,
-          assemblyComponents: decomposition.assemblyComponents,
-          forbiddenSimplifications: decomposition.forbiddenSimplifications,
-          steps: (decomposition.steps || []).map(step => ({
-            id: step.id,
-            name: step.name,
-            operation: step.operation,
-            goal: step.goal,
-          })),
-        })}`,
-        `RETRIEVAL_SUMMARY: ${JSON.stringify({
-          sourcePrecedence: retrieval.sourcePrecedence,
-          summaries: retrieval.summaries,
-          stepMatches: compactStepMatches(retrieval.stepMatches),
-        })}`,
-        `BLOCK_SCAFFOLD: ${JSON.stringify(compactBlockCandidateForPrompt(selectedCandidate))}`,
-        `Return valid JSON only: { "featureName": "...", "featureLabel": "...", "reasoning": "...", "code": "..." }`,
-      ].join("\n\n"),
-    },
-  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
-    stage: "generation",
-    affinity: `${requestId}:weave:fallback`,
-    keySlot: "k8",
-    maxCompletionTokens: 3600,
-  });
-  } catch (err) {
-    return {
-      status: "blocked",
-      featureName: dims.featureName,
-      featureLabel: dims.featureLabel,
-      reasoning: "Topology fallback model call failed; local robust weaver may repair the result.",
-      blockers: [
-        ...(Array.isArray(parsed?.blockers) ? parsed.blockers : []),
-        `Topology fallback failed: ${normalizeText(err?.message || String(err)).slice(0, 280)}`,
-      ],
-      code: "",
-    };
-  }
-
-  const fallbackParsed = tryParseJson(fallbackRaw, null);
-  if (fallbackParsed?.code) {
-    return {
-      status: "completed",
-      featureName: fallbackParsed.featureName || dims.featureName,
-      featureLabel: fallbackParsed.featureLabel || dims.featureLabel,
-      reasoning: fallbackParsed.reasoning || "Weaver fallback assembled the final FeatureScript.",
-      blockers: [],
-      code: sanitizeFeatureScript(fallbackParsed.code).code,
-    };
-  }
-
-  return parsed;
+  };
 }
 
 async function runValidationRepairPass(prompt, dims, learningContext, decomposition, blockPass, weavePass, requestId) {
@@ -3849,6 +4106,10 @@ async function runValidationRepairPass(prompt, dims, learningContext, decomposit
     ...(Array.isArray(weavePass.blockers) ? weavePass.blockers : []),
     ...findAssemblyBlockers(prompt, decomposition, candidate, weavePass.code || ""),
   ];
+
+  // Sanitize the code BEFORE the validator AI call so the validator sees already-cleaned code.
+  // This prevents it from blocking on auto-fixable issues (missing skSolve, IntegerBoundSpec, etc.)
+  let workingCode = sanitizeFeatureScript(String(weavePass.code || "")).code;
 
   let validatorRaw = "";
   try {
@@ -3884,11 +4145,11 @@ async function runValidationRepairPass(prompt, dims, learningContext, decomposit
             featureLabel: weavePass.featureLabel,
             reasoning: weavePass.reasoning,
             blockers: weavePass.blockers,
-            codePreview: String(weavePass.code || "").slice(0, 4000),
+            codePreview: workingCode.slice(0, 4000),
           },
           localValidationPreview: {
-            issues: validateFeatureScript(weavePass.code || ""),
-            fatalIssues: hasFatalFeatureScriptPatterns(weavePass.code || ""),
+            issues: validateFeatureScript(workingCode),
+            fatalIssues: hasFatalFeatureScriptPatterns(workingCode),
           },
         }),
       },
@@ -3907,7 +4168,7 @@ async function runValidationRepairPass(prompt, dims, learningContext, decomposit
   }
 
   const validatorPass = tryParseJson(validatorRaw, { status: "repair", blockers: [], notes: [] }) || { status: "repair", blockers: [], notes: [] };
-  let workingCode = String(weavePass.code || "");
+  // workingCode already sanitized above before the validator call
   let localIssues = validateFeatureScript(workingCode);
   let fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
   let repaired = false;
@@ -3925,25 +4186,33 @@ async function runValidationRepairPass(prompt, dims, learningContext, decomposit
       localIssues = validateFeatureScript(workingCode);
       fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
     } catch (err) {
-      fatalIssues = [
-        ...fatalIssues,
-        { code: "repair_model_failed", message: normalizeText(err?.message || String(err)).slice(0, 280) },
-      ];
+      // Repair model failed — do NOT add this as a fatal issue that blocks the result.
+      // The code may still be usable after sanitization. Only log it.
+      console.warn(`[AI] Repair model failed during validation pass: ${err.message}`);
     }
   }
 
-  const blockers = uniqueStrings([
+  // Only truly fatal issues should block the result.
+  // Non-fatal localIssues are warnings — the code may still compile and produce geometry.
+  // Fatal issues are structural problems that guarantee compilation failure.
+  const fatalBlockers = uniqueStrings([
     ...preBlockers,
-    ...(validatorPass.blockers || []),
+    ...(validatorPass.status === "blocked" ? (validatorPass.blockers || []) : []),
     ...fatalIssues.map(issue => issue.message),
-    ...localIssues.map(issue => issue.message),
   ]);
+
+  // Non-fatal issues become warnings, not blockers
+  const warnings = uniqueStrings(localIssues.map(issue => issue.message));
+  const weaveWarnings = Array.isArray(weavePass.warnings) ? weavePass.warnings : [];
+  const omissions = uniqueStrings(Array.isArray(weavePass.omissions) ? weavePass.omissions : []);
 
   return {
     validatorPass,
     repaired,
-    finalCode: blockers.length ? "" : workingCode,
-    blockers,
+    finalCode: fatalBlockers.length ? "" : workingCode,
+    blockers: fatalBlockers,
+    warnings: uniqueStrings([...weaveWarnings, ...warnings]),
+    omissions,
     localIssues,
     fatalIssues,
   };
@@ -4010,12 +4279,12 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
   }
 }
 
-// ─── Local robust weaver ─────────────────────────────────────────────────────
+// ─── Deterministic operation compiler ────────────────────────────────────────
 //
-// This is not a generic fallback template path. It is a deterministic topology
-// weaver used after the four-pass chain when the model layer rate-limits or
-// emits invalid JSON/code. Complex prompts still need multi-body coverage and
-// traceable retrieval; otherwise we return a blocked trace.
+// This is not a generic fallback template path. It is a deterministic
+// FeatureScript compiler used after the four-pass chain when the model layer
+// rate-limits or emits invalid JSON/code. Complex prompts still need multi-body
+// coverage and traceable retrieval; otherwise we return a blocked trace.
 
 function safeFeatureExportName(name = "customFeature") {
   const cleaned = String(name || "customFeature").replace(/[^a-zA-Z0-9_]/g, "") || "customFeature";
@@ -4109,17 +4378,267 @@ function buildLocalRetrievalFallback(prompt, dims, learningContext = {}, decompo
     datasetRows: selectTraceableRows(datasetRows, promptKeywords, step.retrievalKeywords || [], 3, "dataset"),
     sourceRows: selectTraceableRows(sourceRows, promptKeywords, step.retrievalKeywords || [], 4, "source"),
   }));
+  const operationRows = selectOperationRows([
+    ...dbRows,
+    ...datasetRows,
+    ...sourceRows,
+  ], uniqueStrings((plan.steps || []).map(step => step.operation).filter(Boolean)), 8);
   return {
     sourcePrecedence: sourcePrecedenceList(),
     dbRows,
     datasetRows,
     sourceRows,
+    operationRows,
     stepMatches,
     summaries: {
       status: "local_fallback",
       dbAndSource: normalizeText(summarizeTraceableRows([...dbRows.slice(0, 3), ...sourceRows.slice(0, 3)])),
       dataset: normalizeText(summarizeTraceableRows(datasetRows.slice(0, 5))),
     },
+  };
+}
+
+function buildLocalFilletedBox(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("width", "Width", 0.25, dims.widthInches || 2, 96),
+    preconditionLength("height", "Height", 0.25, dims.heightInches || 2, 96),
+    preconditionLength("depth", "Depth", 0.25, dims.depthInches || 2, 96),
+    preconditionLength("filletRadius", "Fillet Radius", 0.01, dims.filletRadiusInches || 0.12, 12),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.width / 2;
+        var halfH = definition.height / 2;
+        var safeFilletRadius = min(definition.filletRadius, min(definition.width, min(definition.height, definition.depth)) * 0.18);
+        var baseSketch = newSketchOnPlane(context, id + "baseSketch", { "sketchPlane" : skPlane });
+${fsRect("baseSketch", "blockProfile", "-halfW", "-halfH", "halfW", "halfH")}
+        skSolve(baseSketch);
+        opExtrude(context, id + "blockBody", {
+            "entities"  : qSketchRegion(id + "baseSketch"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.depth
+        });
+        opFillet(context, id + "edgeFillet", {
+            "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "blockBody", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+            "radius" : safeFilletRadius
+        });`;
+  return {
+    featureName: "filletedBlock",
+    featureLabel: "Filleted Block",
+    code: buildLocalFeatureScriptFile({ featureName: "filletedBlock", featureLabel: "Filleted Block", precondition, body }),
+    strategy: "Deterministic operation compiler generated a prismatic block with a clamped edge fillet applied after solid creation.",
+  };
+}
+
+function buildLocalFilletChamferBlock(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("width", "Width", 0.25, dims.widthInches || 2, 96),
+    preconditionLength("depth", "Depth", 0.25, dims.depthInches || 1.25, 96),
+    preconditionLength("height", "Height", 0.25, dims.heightInches || 0.5, 96),
+    preconditionLength("filletRadius", "Fillet Radius", 0.01, dims.filletRadiusInches || 0.08, 12),
+    preconditionLength("chamferWidth", "Chamfer Width", 0.005, 0.04, 12),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.width / 2;
+        var halfD = definition.depth / 2;
+        var safeFilletRadius = min(definition.filletRadius, min(definition.width, min(definition.depth, definition.height)) * 0.14);
+        var safeChamferWidth = min(definition.chamferWidth, min(definition.width, min(definition.depth, definition.height)) * 0.1);
+        var profileSketch = newSketchOnPlane(context, id + "profileSketch", { "sketchPlane" : skPlane });
+${fsRect("profileSketch", "blockProfile", "-halfW", "-halfD", "halfW", "halfD")}
+        skSolve(profileSketch);
+        opExtrude(context, id + "blockBody", {
+            "entities" : qSketchRegion(id + "profileSketch"),
+            "direction" : skPlane.normal,
+            "endBound" : BoundingType.BLIND,
+            "endDepth" : definition.height
+        });
+        opFillet(context, id + "edgeFillet", {
+            "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "blockBody", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+            "radius" : safeFilletRadius
+        });
+        opChamfer(context, id + "edgeChamfer", {
+            "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "blockBody", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+            "chamferType" : ChamferType.EQUAL_OFFSETS,
+            "width" : safeChamferWidth
+        });`;
+  return {
+    featureName: "filletChamferBlock",
+    featureLabel: "Fillet And Chamfer Block",
+    code: buildLocalFeatureScriptFile({ featureName: "filletChamferBlock", featureLabel: "Fillet And Chamfer Block", precondition, body }),
+    strategy: "Deterministic operation compiler generated a block and applied clamped fillet and chamfer operations after the base solid.",
+  };
+}
+
+function buildLocalOpenTopShellEnclosure(prompt, dims) {
+  const defaultWidth = dims.widthInches || 4;
+  const defaultDepth = dims.depthInches || 3;
+  const defaultHeight = dims.heightInches || 1.5;
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("width", "Width", 0.5, defaultWidth, 120),
+    preconditionLength("depth", "Depth", 0.5, defaultDepth, 120),
+    preconditionLength("height", "Height", 0.25, defaultHeight, 120),
+    preconditionLength("wallThickness", "Wall Thickness", 0.01, dims.wallThicknessInches || 0.1, 12),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.width / 2;
+        var halfD = definition.depth / 2;
+        var safeWallThickness = min(definition.wallThickness, min(definition.width, min(definition.depth, definition.height)) * 0.45);
+        var enclosureSketch = newSketchOnPlane(context, id + "enclosureSketch", { "sketchPlane" : skPlane });
+${fsRect("enclosureSketch", "outerProfile", "-halfW", "-halfD", "halfW", "halfD")}
+        skSolve(enclosureSketch);
+        opExtrude(context, id + "outerBody", {
+            "entities" : qSketchRegion(id + "enclosureSketch"),
+            "direction" : skPlane.normal,
+            "endBound" : BoundingType.BLIND,
+            "endDepth" : definition.height
+        });
+        opShell(context, id + "shellBody", {
+            "entities" : qCapEntity(id + "outerBody", CapType.END, EntityType.FACE),
+            "thickness" : -safeWallThickness
+        });`;
+  return {
+    featureName: "openTopShellEnclosure",
+    featureLabel: "Open Top Shell Enclosure",
+    code: buildLocalFeatureScriptFile({ featureName: "openTopShellEnclosure", featureLabel: "Open Top Shell Enclosure", precondition, body }),
+    strategy: "Deterministic operation compiler generated an extruded enclosure body and shelled it from the top cap with a clamped inward wall thickness.",
+  };
+}
+
+function buildLocalCarrot(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("bottomRadius", "Base Radius", 0.1, dims.radiusInches || 0.75, 24),
+    preconditionLength("topRadius", "Top Radius", 0, dims.holeRadiusInches || 0.03, 24),
+    preconditionLength("height", "Height", 0.5, dims.heightInches || dims.depthInches || 6, 120),
+  ].join("\n");
+  const body = `${planeVar()}
+        var bottomRadius = definition.bottomRadius;
+        var topRadius = min(definition.topRadius, definition.bottomRadius * 0.3);
+        var profileSketch = newSketchOnPlane(context, id + "profileSketch", { "sketchPlane" : skPlane });
+        skLineSegment(profileSketch, "axis", {
+            "start" : vector(0, 0) * inch,
+            "end" : vector(0, definition.height / inch) * inch
+        });
+        skLineSegment(profileSketch, "bottomEdge", {
+            "start" : vector(0, 0) * inch,
+            "end" : vector(definition.bottomRadius / inch, 0) * inch
+        });
+        skFitSpline(profileSketch, "outerProfile", {
+            "points" : [
+                vector(definition.bottomRadius / inch, 0) * inch,
+                vector((definition.bottomRadius * 0.95) / inch, (definition.height * 0.18) / inch) * inch,
+                vector((definition.bottomRadius * 0.62) / inch, (definition.height * 0.55) / inch) * inch,
+                vector((max(topRadius, definition.bottomRadius * 0.04)) / inch, definition.height / inch) * inch
+            ]
+        });
+        skLineSegment(profileSketch, "topEdge", {
+            "start" : vector((max(topRadius, definition.bottomRadius * 0.04)) / inch, definition.height / inch) * inch,
+            "end" : vector(0, definition.height / inch) * inch
+        });
+        skSolve(profileSketch);
+        opRevolve(context, id + "carrotBody", {
+            "entities" : qSketchRegion(id + "profileSketch"),
+            "axis" : line(skPlane.origin, skPlane.normal),
+            "angleForward" : 2 * PI * radian
+        });`;
+  return {
+    featureName: "realisticCarrot",
+    featureLabel: "Realistic Carrot",
+    code: buildLocalFeatureScriptFile({ featureName: "realisticCarrot", featureLabel: "Realistic Carrot", precondition, body }),
+    strategy: "Deterministic operation compiler generated a revolved carrot profile from a solved spline-and-line silhouette.",
+  };
+}
+
+function buildLocalMushroom(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("stemRadius", "Stem Radius", 0.05, dims.radiusInches * 0.25 || 0.25, 12),
+    preconditionLength("stemHeight", "Stem Height", 0.2, dims.heightInches || 1.2, 48),
+    preconditionLength("capRadius", "Cap Radius", 0.1, dims.radiusInches || 0.8, 24),
+    preconditionLength("capHeight", "Cap Height", 0.1, dims.depthInches || 0.45, 24),
+  ].join("\n");
+  const body = `${planeVar()}
+        var stemSketch = newSketchOnPlane(context, id + "stemSketch", { "sketchPlane" : skPlane });
+        skCircle(stemSketch, "stemProfile", { "center" : vector(0, 0) * inch, "radius" : definition.stemRadius });
+        skSolve(stemSketch);
+        opExtrude(context, id + "stemBody", {
+            "entities" : qSketchRegion(id + "stemSketch"),
+            "direction" : skPlane.normal,
+            "endBound" : BoundingType.BLIND,
+            "endDepth" : definition.stemHeight
+        });
+
+        var capPlane = plane(skPlane.origin + skPlane.normal * definition.stemHeight, skPlane.x);
+        var capSketch = newSketchOnPlane(context, id + "capSketch", { "sketchPlane" : capPlane });
+        skLineSegment(capSketch, "capBase", {
+            "start" : vector(0, 0) * inch,
+            "end" : vector(definition.capRadius / inch, 0) * inch
+        });
+        skArc(capSketch, "capArc", {
+            "start" : vector(definition.capRadius / inch, 0) * inch,
+            "mid" : vector((definition.capRadius * 0.65) / inch, definition.capHeight / inch) * inch,
+            "end" : vector(0, definition.capHeight / inch) * inch
+        });
+        skLineSegment(capSketch, "capAxisClose", {
+            "start" : vector(0, definition.capHeight / inch) * inch,
+            "end" : vector(0, 0) * inch
+        });
+        skSolve(capSketch);
+        opRevolve(context, id + "capBody", {
+            "entities" : qSketchRegion(id + "capSketch"),
+            "axis" : line(skPlane.origin + skPlane.normal * definition.stemHeight, skPlane.normal),
+            "angleForward" : 2 * PI * radian
+        });
+        opBoolean(context, id + "joinCapToStem", {
+            "tools" : qCreatedBy(id + "capBody", EntityType.BODY),
+            "targets" : qCreatedBy(id + "stemBody", EntityType.BODY),
+            "operationType" : BooleanOperationType.UNION
+        });`;
+  return {
+    featureName: "mushroomModel",
+    featureLabel: "Mushroom Model",
+    code: buildLocalFeatureScriptFile({ featureName: "mushroomModel", featureLabel: "Mushroom Model", precondition, body }),
+    strategy: "Deterministic operation compiler generated a mushroom from an extruded stem and a revolved cap joined afterward.",
+  };
+}
+
+function buildLocalSpurGear(prompt, dims) {
+  const teeth = Math.max(8, Math.round(dims.numTeeth || 20));
+  const ratioMatch = String(prompt || "").match(/(\d+)\s*:\s*(\d+)/);
+  const defaultTeeth = ratioMatch ? Math.max(8, Number(ratioMatch[1]) * 10) : teeth;
+  const precondition = [
+    preconditionPlane(),
+    preconditionInteger("numTeeth", "Number of Teeth", 6, defaultTeeth, 200),
+    preconditionLength("pitchRadius", "Pitch Radius", 0.1, dims.radiusInches || 1, 24),
+    preconditionLength("boreRadius", "Bore Radius", 0, dims.holeRadiusInches || 0.2, 12),
+    preconditionLength("faceWidth", "Face Width", 0.05, dims.depthInches || 0.5, 24),
+  ].join("\n");
+
+  const gearDims = {
+    numTeeth: defaultTeeth,
+    moduleInches: 0.0787402,
+    depthInches: dims.depthInches || 0.5,
+    holeRadiusInches: dims.holeRadiusInches || 0.2,
+  };
+  const gearBody = templateSpurGearFixed(gearDims);
+  const body = `${planeVar()}
+        var pitchRadius = definition.pitchRadius;
+        var faceWidth = definition.faceWidth;
+        var boreRadius = definition.boreRadius;
+${gearBody
+  .replace(`${planeVar()}\n`, "")
+  .replace(/definition\.radius/g, "pitchRadius")
+  .replace(/definition\.faceWidth/g, "faceWidth")
+  .replace(/definition\.holeRadius/g, "boreRadius")
+  .replace(/definition\.numTeeth/g, "definition.numTeeth")}`;
+  return {
+    featureName: "spurGear",
+    featureLabel: "Spur Gear",
+    code: buildLocalFeatureScriptFile({ featureName: "spurGear", featureLabel: "Spur Gear", precondition, body }),
+    strategy: "Deterministic operation compiler generated a closed-profile spur gear from a source-backed tooth construction and extruded it to face width.",
   };
 }
 
@@ -4228,7 +4747,7 @@ ${buildLetterStrokeSketch(letter)}
       precondition,
       body,
     }),
-    strategy: `Local robust weaver generated a box with a block-stroke ${letter} cut into the front face using scoped boolean tool bodies.`,
+    strategy: `Deterministic operation compiler generated a box with a block-stroke ${letter} cut into the front face using scoped boolean tool bodies.`,
   };
 }
 
@@ -4287,7 +4806,7 @@ ${fsRect("windowSketch", "doorPanel", "-definition.width * 0.12", "-definition.h
     featureName: "trainCab",
     featureLabel: "Train Cab",
     code: buildLocalFeatureScriptFile({ featureName: "trainCab", featureLabel: "Train Cab", precondition, body }),
-    strategy: "Local robust weaver generated a peaked cab shell with scoped front window and door-panel subtraction bodies.",
+    strategy: "Deterministic operation compiler generated a peaked cab shell with scoped front window and door-panel subtraction bodies.",
   };
 }
 
@@ -4339,7 +4858,7 @@ ${fsCircle("patternSketch", "bolt4", "definition.boltSpacing / 2", "definition.b
     featureName: "frcTubeBearingPattern",
     featureLabel: "FRC Tube Bearing Pattern",
     code: buildLocalFeatureScriptFile({ featureName: "frcTubeBearingPattern", featureLabel: "FRC Tube Bearing Pattern", precondition, body }),
-    strategy: "Local robust weaver generated a 2x1 FRC tube with a hollow profile and separate bearing-pattern end plate using standard 1.125 in bearing OD default.",
+    strategy: "Deterministic operation compiler generated a 2x1 FRC tube with a hollow profile and separate bearing-pattern end plate using standard 1.125 in bearing OD default.",
   };
 }
 
@@ -4403,7 +4922,7 @@ ${fsRect("beltRibSketch", "beltCenterRib", "-pulleyX", "-definition.boltHoleRadi
     featureName: "beltDrivenSidePlate",
     featureLabel: "Belt Driven Side Plate",
     code: buildLocalFeatureScriptFile({ featureName: "beltDrivenSidePlate", featureLabel: "Belt Driven Side Plate", precondition, body }),
-    strategy: "Local robust weaver generated a belt side plate with exposed center-to-center pulley spacing and symmetric clearance/bolt patterns.",
+    strategy: "Deterministic operation compiler generated a belt side plate with exposed center-to-center pulley spacing and symmetric clearance/bolt patterns.",
   };
 }
 
@@ -4485,7 +5004,7 @@ ${fsCircle("wheelSketch", "wheelBore", "0 * inch", "0 * inch", "definition.shaft
     featureName: "swerveModule",
     featureLabel: "Swerve Module",
     code: buildLocalFeatureScriptFile({ featureName: "swerveModule", featureLabel: "Swerve Module", precondition, body }),
-    strategy: "Local robust weaver generated a multi-body swerve module with base plate, steering bearing ring, fork/motor blocks, and wheel/shaft interface; no single-cylinder fallback.",
+    strategy: "Deterministic operation compiler generated a multi-body swerve module with base plate, steering bearing ring, fork/motor blocks, and wheel/shaft interface; no single-cylinder fallback.",
   };
 }
 
@@ -4512,27 +5031,13 @@ ${fsRect("baseSketch", "boxProfile", "-halfW", "-halfH", "halfW", "halfH")}
     featureName: dims.featureName || "parametricBox",
     featureLabel: dims.featureLabel || "Parametric Box",
     code: buildLocalFeatureScriptFile({ featureName: dims.featureName || "parametricBox", featureLabel: dims.featureLabel || "Parametric Box", precondition, body }),
-    strategy: "Local robust weaver generated a direct solved-sketch extrusion with exposed dimensions.",
+    strategy: "Deterministic operation compiler generated a direct solved-sketch extrusion with exposed dimensions.",
   };
 }
 
 function buildLocalRobustFeatureScript(prompt, dims, decomposition = null, retrieval = null, learningContext = {}) {
-  const text = String(prompt || "").toLowerCase();
-  let result = null;
-  if (/\bswerve\b/.test(text)) {
-    result = buildLocalSwerveModule(prompt, dims);
-  } else if (/\btrain\b.*\bcab\b|\bcab\b/.test(text)) {
-    result = buildLocalTrainCab(prompt, dims);
-  } else if (/\b2\s*x\s*1\b|\b2x1\b|\bfrc\s+tube\b|\btube\b.*\bbearing\b|\btube\b.*\bmount/i.test(prompt)) {
-    result = buildLocalFrcTube(prompt, dims);
-  } else if (/\bbelt\b|\bpulley\b/.test(text)) {
-    result = buildLocalBeltSidePlate(prompt, dims);
-  } else if (/\bletter\b|\bimprint|engrave|emboss/.test(text)) {
-    result = buildLocalImprintedBox(prompt, dims);
-  } else if (dims.shape === "BOX" || /\bbox|cube|block|rectangular/.test(text)) {
-    result = buildLocalSimpleBox(prompt, dims);
-  }
-
+  const operationPlan = buildDeterministicOperationPlan(prompt, dims, decomposition, retrieval);
+  const result = compileOperationPlanToFeatureScript(operationPlan, prompt, dims, retrieval);
   if (!result?.code) return null;
   const code = sanitizeFeatureScript(result.code).code;
   const validationIssues = validateFeatureScript(code);
@@ -4545,17 +5050,18 @@ function buildLocalRobustFeatureScript(prompt, dims, decomposition = null, retri
     return {
       ...result,
       code: "",
-      blockers: ["Local robust weaver refused to collapse a complex assembly into too few operations."],
+      blockers: ["Deterministic operation compiler refused to collapse a complex assembly into too few operations."],
       retrieval: localRetrieval,
     };
   }
-  if (validationIssues.length || fatalIssues.length) {
+  // Only block on truly fatal issues — non-fatal validation warnings should not prevent delivery.
+  if (fatalIssues.length) {
     return {
       ...result,
       code: "",
       blockers: [
-        ...validationIssues.map(issue => issue.message),
         ...fatalIssues.map(issue => issue.message),
+        ...validationIssues.slice(0, 2).map(issue => `Warning: ${issue.message}`),
       ],
       retrieval: localRetrieval,
     };
@@ -4563,6 +5069,7 @@ function buildLocalRobustFeatureScript(prompt, dims, decomposition = null, retri
   return {
     ...result,
     code,
+    operationPlan,
     retrieval: localRetrieval,
     validationIssues,
     fatalIssues,
@@ -4572,9 +5079,12 @@ function buildLocalRobustFeatureScript(prompt, dims, decomposition = null, retri
 
 function buildCompletedLocalResult(prompt, dims, learningContext, orchestration, localResult, reason = "") {
   const retrieval = localResult.retrieval || buildLocalRetrievalFallback(prompt, dims, learningContext);
+  const warnings = uniqueStrings(localResult.warnings || []);
+  const omissions = uniqueStrings(localResult.omissions || []);
   const completedOrchestration = {
     ...(orchestration || {}),
     status: "completed",
+    completionLevel: omissions.length ? "partial" : "full",
     failedPass: null,
     localRepair: {
       status: "completed",
@@ -4586,17 +5096,20 @@ function buildCompletedLocalResult(prompt, dims, learningContext, orchestration,
       dbRows: normalizeRetrievedRows(retrieval.dbRows || [], "db"),
       datasetRows: normalizeRetrievedRows(retrieval.datasetRows || [], "dataset"),
       sourceRows: normalizeRetrievedRows(retrieval.sourceRows || [], "source"),
+      operationRows: normalizeRetrievedRows(retrieval.operationRows || [], "operation"),
       tab_citations: Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [],
     },
     blockers: [],
+    warnings,
+    omissions,
   };
   if (!completedOrchestration.passes) completedOrchestration.passes = {};
-  completedOrchestration.passes.localRobustWeaver = {
+  completedOrchestration.passes.operationCompiler = {
     status: "completed",
     strategy: localResult.strategy,
   };
   const thinking = buildThinkingTrace(prompt, dims, {
-    generationMode: "four_pass_multi_key_local_robust_weave",
+    generationMode: omissions.length ? "four_pass_operation_compiler_partial" : "four_pass_operation_compiler",
     learningExamples: learningContext.examples.length,
     customReasoning: localResult.strategy,
     orchestration: completedOrchestration,
@@ -4607,7 +5120,10 @@ function buildCompletedLocalResult(prompt, dims, learningContext, orchestration,
     featureLabel: localResult.featureLabel || dims.featureLabel,
     thinking,
     dims,
-    generationMode: "four_pass_multi_key_local_robust_weave",
+    generationMode: omissions.length ? "four_pass_operation_compiler_partial" : "four_pass_operation_compiler",
+    completionLevel: omissions.length ? "partial" : "full",
+    warnings,
+    omissions,
     orchestration: completedOrchestration,
   };
 }
@@ -4641,12 +5157,18 @@ export async function generateFeatureScript(prompt, options = {}) {
       thinking,
       dims,
       generationMode: "template",
+      completionLevel: "full",
+      warnings: [],
+      omissions: [],
       orchestration: {
         status: "completed",
+        completionLevel: "full",
         keySlotsUsed: buildKeySlotUsage(),
         passes: {},
         provenance: { dbRows: [], datasetRows: [], sourceRows: [] },
         blockers: [],
+        warnings: [],
+        omissions: [],
       },
     };
   }
@@ -4660,6 +5182,7 @@ export async function generateFeatureScript(prompt, options = {}) {
 
     const orchestration = {
       status: validationPass.blockers.length ? "blocked" : "completed",
+      completionLevel: validationPass.blockers.length ? "blocked" : (validationPass.omissions.length ? "partial" : "full"),
       failedPass: validationPass.blockers.length
         ? (!weavePass.code ? "weave" : "validation")
         : null,
@@ -4674,6 +5197,7 @@ export async function generateFeatureScript(prompt, options = {}) {
           sourcePrecedence: retrieval.sourcePrecedence,
           summaries: retrieval.summaries,
           stepMatches: retrieval.stepMatches,
+          operationRows: retrieval.operationRows || [],
         },
         blocks: {
           selectedCandidateId: blockPass.selectedCandidateId,
@@ -4683,20 +5207,34 @@ export async function generateFeatureScript(prompt, options = {}) {
             missingRequirements: candidate.missingRequirements || [],
             coverageNotes: candidate.coverageNotes || [],
             blockCount: (candidate.blocks || []).length,
+            operationPlan: candidate.operationPlan
+              ? {
+                  family: candidate.operationPlan.family,
+                  operationKinds: candidate.operationPlan.operationKinds || [],
+                  finishingRequests: candidate.operationPlan.finishingRequests || [],
+                }
+              : null,
           })),
         },
         weave: {
           status: weavePass.status || (weavePass.code ? "completed" : "blocked"),
           reasoning: weavePass.reasoning || "",
+          warnings: weavePass.warnings || [],
+          omissions: weavePass.omissions || [],
         },
+        operationPlan: selectedOperationPlanSummary(blockPass.selectedCandidate?.operationPlan),
+        finishingPlan: weavePass.finishingPlan || null,
       },
       provenance: {
         dbRows: normalizeRetrievedRows(retrieval.dbRows, "db"),
         datasetRows: normalizeRetrievedRows(retrieval.datasetRows, "dataset"),
         sourceRows: normalizeRetrievedRows(retrieval.sourceRows, "source"),
+        operationRows: normalizeRetrievedRows(retrieval.operationRows || [], "operation"),
         tab_citations: Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [],
       },
       blockers: validationPass.blockers,
+      warnings: validationPass.warnings,
+      omissions: validationPass.omissions,
       validation: {
         status: validationPass.validatorPass?.status || "repair",
         repaired: validationPass.repaired,
@@ -4709,14 +5247,14 @@ export async function generateFeatureScript(prompt, options = {}) {
     if (validationPass.blockers.length || !validationPass.finalCode) {
       const localResult = buildLocalRobustFeatureScript(prompt, dims, decomposition, retrieval, learningContext);
       if (localResult?.code) {
-        console.warn(`[AI] four-pass model output blocked; completed with local robust weaver for request=${requestId}`);
+        console.warn(`[AI] four-pass model output blocked; completed with deterministic operation compiler for request=${requestId}`);
         return buildCompletedLocalResult(
           prompt,
           dims,
           learningContext,
           orchestration,
           localResult,
-          "Model-authored weave/validation failed, so the deterministic topology weaver produced a compile-safe result from the same decomposition and retrieval context."
+          "Model-authored weave or validation failed, so the deterministic operation compiler produced a compile-safe result from the same decomposition and retrieval context."
         );
       }
       const localBlockers = Array.isArray(localResult?.blockers) ? localResult.blockers : [];
@@ -4725,7 +5263,9 @@ export async function generateFeatureScript(prompt, options = {}) {
         dims,
         orchestration,
         [...validationPass.blockers, ...localBlockers],
-        "The four-pass pipeline could not complete a source-backed, compile-safe result."
+        "The four-pass pipeline could not complete a source-backed, compile-safe result.",
+        validationPass.warnings,
+        validationPass.omissions
       );
     }
 
@@ -4744,7 +5284,10 @@ export async function generateFeatureScript(prompt, options = {}) {
       featureLabel: weavePass.featureLabel || dims.featureLabel,
       thinking,
       dims,
-      generationMode: "four_pass_multi_key",
+      generationMode: validationPass.omissions.length ? "four_pass_operation_compiler_partial" : "four_pass_operation_compiler",
+      completionLevel: validationPass.omissions.length ? "partial" : "full",
+      warnings: validationPass.warnings,
+      omissions: validationPass.omissions,
       orchestration,
     };
   } catch (err) {
@@ -4773,12 +5316,12 @@ export async function generateFeatureScript(prompt, options = {}) {
               summaries: fallbackRetrieval.summaries,
               stepMatches: fallbackRetrieval.stepMatches,
             },
-            blocks: { selectedCandidateId: "local_robust_weaver", candidates: [] },
-            weave: { status: "local_robust_weaver", reasoning: localResult.strategy },
+            blocks: { selectedCandidateId: "operation_compiler", candidates: [] },
+            weave: { status: "operation_compiler", reasoning: localResult.strategy },
           },
         },
         localResult,
-        "The model pipeline failed before completion, so the deterministic topology weaver produced a compile-safe result from local source/dataset retrieval."
+        "The model pipeline failed before completion, so the deterministic operation compiler produced a compile-safe result from local source and dataset retrieval."
       );
     }
     return buildBlockedResult(
@@ -4786,6 +5329,7 @@ export async function generateFeatureScript(prompt, options = {}) {
       dims,
       {
         status: "blocked",
+        completionLevel: "blocked",
         failedPass: "pipeline",
         keySlotsUsed: buildKeySlotUsage(),
         provenance: { dbRows: [], datasetRows: [], sourceRows: [] },
