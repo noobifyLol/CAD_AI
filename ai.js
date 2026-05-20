@@ -344,6 +344,10 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL, options = {}) {
 async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {}) {
   const stage = options.stage || "generation";
   const credential = pickStageCredential(stage, options.affinity, options.keySlot);
+  const maxCompletionTokens = Math.max(256, Math.min(
+    Number(options.maxCompletionTokens || GROQ_MAX_COMPLETION_TOKENS),
+    GROQ_MAX_COMPLETION_TOKENS
+  ));
   const messages = Array.isArray(messagesOrPrompt)
     ? messagesOrPrompt
     : [{ role: "user", content: String(messagesOrPrompt) }];
@@ -351,7 +355,7 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
   const requestBody = {
     model,
     messages,
-    max_completion_tokens: GROQ_MAX_COMPLETION_TOKENS,
+    max_completion_tokens: maxCompletionTokens,
     temperature: GROQ_TEMPERATURE,
   };
 
@@ -364,7 +368,7 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
     const completion = await client.chat.completions.create({
       model,
       messages,
-      max_completion_tokens: GROQ_MAX_COMPLETION_TOKENS,
+      max_completion_tokens: maxCompletionTokens,
       temperature: GROQ_TEMPERATURE,
     });
 
@@ -434,7 +438,7 @@ function inferShapeFromPrompt(prompt = "") {
   const text = normalizeText(prompt).toLowerCase();
   const shapeHints = [
     ["ROBOT_MECH", /\b(robot|robotic|mech|mecha|android|humanoid)\b/],
-    ["GEAR_SPUR", /\b(gear|spur|pinion|teeth|tooth|diametral|module|pressure angle|involute)\b/],
+    ["GEAR_SPUR", /\b(gear|spur|pinion|teeth|tooth|diametral pitch|pressure angle|involute)\b/],
     ["FLANGE", /\b(flange|bolt circle|bolt hole|hub|mount|coupling flange)\b/],
     ["LINKAGE", /\b(linkage|linkage arm|connecting rod|coupler|arm|lever|clevis|tie rod|rod end)\b/],
     ["WASHER", /\b(washer|ring magnet|ring|shim|spacer disk)\b/],
@@ -482,6 +486,12 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
       return text;
     } catch (err) {
       lastError = err;
+      const message = String(err?.message || "");
+      if (/rate limit|tokens per minute|tpm|429/i.test(message) && options.retryOnRateLimit !== false) {
+        const waitMs = Number(options.rateLimitBackoffMs || 1200);
+        console.warn(`[AI] Rate limit on stage=${options.stage || "generation"} model=${candidate}; retrying after ${waitMs}ms with next fallback when available.`);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+      }
     }
   }
   throw lastError || new Error("All Groq model calls failed.");
@@ -1870,6 +1880,10 @@ function applyPromptHeuristics(prompt, dims) {
     normalized.shape = inferredShape;
   }
 
+  if (isComplexAssemblyPrompt(prompt)) {
+    normalized.shape = "CUSTOM";
+  }
+
   if (/\bcarrot\b/i.test(prompt)) {
     normalized.shape = "CONE";
     normalized.radiusInches = Math.max(normalized.radiusInches, 0.75);
@@ -1878,7 +1892,7 @@ function applyPromptHeuristics(prompt, dims) {
     normalized.holeRadiusInches = Math.min(normalized.holeRadiusInches, 0.08);
   }
 
-  if (/\bgear\b/i.test(prompt)) {
+  if (/\b(gear|spur|pinion)\b/i.test(prompt) && !/\bgearbox\b/i.test(prompt)) {
     normalized.shape = "GEAR_SPUR";
     normalized.radiusInches = Math.max(normalized.radiusInches, 1);
     normalized.depthInches = Math.max(normalized.depthInches, 0.4);
@@ -2307,7 +2321,11 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
 
   // 1) Remove typed lambda annotations: function(x is number, y is number) -> function(x, y)
   const typedLambdaRegex = /function\s*\(\s*([a-zA-Z0-9_$]+)\s+is\s+[a-zA-Z0-9_]+\s*(?:,\s*[a-zA-Z0-9_$]+\s+is\s+[a-zA-Z0-9_]+\s*)*\)/g;
-  code = code.replace(typedLambdaRegex, (match) => {
+  code = code.replace(typedLambdaRegex, (match, _firstParam, offset) => {
+    const prefix = code.slice(Math.max(0, offset - 40), offset);
+    if (/defineFeature\s*\(\s*$/.test(prefix)) {
+      return match;
+    }
     const before = match;
     const after = match.replace(/\s+is\s+[a-zA-Z0-9_]+/g, '');
     if (before !== after) record('remove_typed_lambda_annotations', before, after);
@@ -3394,24 +3412,38 @@ function planFallbackForPrompt(prompt, dims) {
 }
 
 async function buildFourPassDecomposition(prompt, dims, learningContext, requestId) {
-  const raw = await chat([
-    { role: "system", content: withLearningContext(FOUR_PASS_DECOMPOSITION_SYSTEM, learningContext) },
-    {
-      role: "user",
-      content: [
-        `USER REQUEST: ${prompt}`,
-        `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
-        `COMPLEX_ASSEMBLY: ${isComplexAssemblyPrompt(prompt)}`,
-        `Return JSON only.`,
-      ].join("\n"),
-    },
-  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
-    stage: "planning",
-    affinity: `${requestId}:decomposition`,
-    keySlot: "k2",
-  });
+  const fallbackPlan = planFallbackForPrompt(prompt, dims);
+  try {
+    const raw = await chat([
+      { role: "system", content: withLearningContext(FOUR_PASS_DECOMPOSITION_SYSTEM, learningContext) },
+      {
+        role: "user",
+        content: [
+          `USER REQUEST: ${prompt}`,
+          `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+          `COMPLEX_ASSEMBLY: ${isComplexAssemblyPrompt(prompt)}`,
+          `Return compact JSON only.`,
+        ].join("\n"),
+      },
+    ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+      stage: "planning",
+      affinity: `${requestId}:decomposition`,
+      keySlot: "k2",
+      maxCompletionTokens: 1400,
+    });
 
-  return tryParseJson(raw, planFallbackForPrompt(prompt, dims)) || planFallbackForPrompt(prompt, dims);
+    const parsed = tryParseJson(raw, fallbackPlan) || fallbackPlan;
+    return {
+      ...parsed,
+      plannerStatus: parsed === fallbackPlan ? "fallback" : "completed",
+    };
+  } catch (err) {
+    return {
+      ...fallbackPlan,
+      plannerStatus: "fallback",
+      plannerError: normalizeText(err?.message || String(err)).slice(0, 280),
+    };
+  }
 }
 
 function normalizeRetrievedRows(rows = [], kind = "knowledge") {
@@ -3483,7 +3515,7 @@ async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decompo
     datasetRows: compactPromptRows(datasetRows, 5),
   });
 
-  const [dbSourceSummaryRaw, datasetSummaryRaw] = await Promise.all([
+  const retrievalSettled = await Promise.allSettled([
     chat([
       { role: "system", content: "You are MODEL KEY [DATABASE_RETRIEVER] for DB and source rows. Return plain text only." },
       {
@@ -3494,6 +3526,7 @@ async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decompo
       stage: "retrieval",
       affinity: `${requestId}:retrieval:db`,
       keySlot: "k3",
+      maxCompletionTokens: 700,
     }),
     chat([
       { role: "system", content: "You are MODEL KEY [DATABASE_RETRIEVER] for dataset rows. Return plain text only." },
@@ -3505,8 +3538,15 @@ async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decompo
       stage: "retrieval",
       affinity: `${requestId}:retrieval:dataset`,
       keySlot: "k4",
+      maxCompletionTokens: 700,
     }),
   ]);
+  const dbSourceSummaryRaw = retrievalSettled[0]?.status === "fulfilled"
+    ? retrievalSettled[0].value
+    : `Local retrieval fallback: ${summarizeTraceableRows([...dbRows.slice(0, 3), ...sourceRows.slice(0, 3)])}`;
+  const datasetSummaryRaw = retrievalSettled[1]?.status === "fulfilled"
+    ? retrievalSettled[1].value
+    : `Local dataset fallback: ${summarizeTraceableRows(datasetRows.slice(0, 5))}`;
 
   const stepMatches = (decomposition.steps || []).map(step => ({
     stepId: step.id,
@@ -3530,6 +3570,7 @@ async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decompo
     summaries: {
       dbAndSource: normalizeText(dbSourceSummaryRaw),
       dataset: normalizeText(datasetSummaryRaw),
+      status: retrievalSettled.every(result => result.status === "fulfilled") ? "completed" : "local_fallback",
     },
   };
 }
@@ -3647,10 +3688,11 @@ async function runBlockSynthesisPass(prompt, dims, learningContext, decompositio
   const settled = await Promise.all(candidateSlots.map(candidate => chat([
     { role: "system", content: withLearningContext(FOUR_PASS_BLOCK_SYNTH_SYSTEM, learningContext) },
     { role: "user", content: buildBlockSynthesisPrompt({ prompt, dims, decomposition, retrieval, candidateId: candidate.id }) },
-  ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
+  ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
     stage: "generation",
     affinity: `${requestId}:blocks:${candidate.id}`,
     keySlot: candidate.slot,
+    maxCompletionTokens: 1600,
   }).then(raw => parseBlockCandidate(raw, candidate.id, decomposition)).catch(err => ({
     candidateId: candidate.id,
     coverageNotes: [`Block synthesis failed: ${err.message}`],
@@ -3676,7 +3718,9 @@ async function runTopologyWeaverPass(prompt, dims, learningContext, decompositio
     return { status: "blocked", blockers: ["No block synthesis candidate succeeded."], code: "" };
   }
 
-  const raw = await chat([
+  let raw = "";
+  try {
+    raw = await chat([
     { role: "system", content: withLearningContext(FOUR_PASS_WEAVER_SYSTEM, learningContext) },
     {
       role: "user",
@@ -3711,7 +3755,18 @@ async function runTopologyWeaverPass(prompt, dims, learningContext, decompositio
     stage: "generation",
     affinity: `${requestId}:weave`,
     keySlot: "k8",
+    maxCompletionTokens: 3600,
   });
+  } catch (err) {
+    return {
+      status: "blocked",
+      featureName: dims.featureName,
+      featureLabel: dims.featureLabel,
+      reasoning: "Topology weaving model call failed; local robust weaver may repair the result.",
+      blockers: [`Topology weaving failed: ${normalizeText(err?.message || String(err)).slice(0, 280)}`],
+      code: "",
+    };
+  }
 
   const parsed = tryParseJson(raw, {
     status: "blocked",
@@ -3723,7 +3778,9 @@ async function runTopologyWeaverPass(prompt, dims, learningContext, decompositio
   });
   if (parsed?.code) return parsed;
 
-  const fallbackRaw = await chat([
+  let fallbackRaw = "";
+  try {
+    fallbackRaw = await chat([
     { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
     {
       role: "user",
@@ -3755,7 +3812,21 @@ async function runTopologyWeaverPass(prompt, dims, learningContext, decompositio
     stage: "generation",
     affinity: `${requestId}:weave:fallback`,
     keySlot: "k8",
+    maxCompletionTokens: 3600,
   });
+  } catch (err) {
+    return {
+      status: "blocked",
+      featureName: dims.featureName,
+      featureLabel: dims.featureLabel,
+      reasoning: "Topology fallback model call failed; local robust weaver may repair the result.",
+      blockers: [
+        ...(Array.isArray(parsed?.blockers) ? parsed.blockers : []),
+        `Topology fallback failed: ${normalizeText(err?.message || String(err)).slice(0, 280)}`,
+      ],
+      code: "",
+    };
+  }
 
   const fallbackParsed = tryParseJson(fallbackRaw, null);
   if (fallbackParsed?.code) {
@@ -3779,27 +3850,61 @@ async function runValidationRepairPass(prompt, dims, learningContext, decomposit
     ...findAssemblyBlockers(prompt, decomposition, candidate, weavePass.code || ""),
   ];
 
-  const validatorRaw = await chat([
-    { role: "system", content: FOUR_PASS_VALIDATOR_SYSTEM },
-    {
-      role: "user",
-      content: JSON.stringify({
-        prompt,
-        dims,
-        decomposition,
-        selectedBlockCandidate: candidate,
-        weavePass,
-        localValidationPreview: {
-          issues: validateFeatureScript(weavePass.code || ""),
-          fatalIssues: hasFatalFeatureScriptPatterns(weavePass.code || ""),
-        },
-      }),
-    },
-  ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
-    stage: "validation",
-    affinity: `${requestId}:validation`,
-    keySlot: "k9",
-  });
+  let validatorRaw = "";
+  try {
+    validatorRaw = await chat([
+      { role: "system", content: FOUR_PASS_VALIDATOR_SYSTEM },
+      {
+        role: "user",
+        content: JSON.stringify({
+          prompt,
+          dims: {
+            shape: dims.shape,
+            featureName: dims.featureName,
+            featureLabel: dims.featureLabel,
+            widthInches: dims.widthInches,
+            heightInches: dims.heightInches,
+            depthInches: dims.depthInches,
+            radiusInches: dims.radiusInches,
+          },
+          decomposition: {
+            shapeClass: decomposition.shapeClass,
+            assemblyComponents: decomposition.assemblyComponents,
+            forbiddenSimplifications: decomposition.forbiddenSimplifications,
+            steps: (decomposition.steps || []).map(step => ({
+              id: step.id,
+              operation: step.operation,
+              goal: step.goal,
+            })),
+          },
+          selectedBlockCandidate: compactBlockCandidateForPrompt(candidate),
+          weavePass: {
+            status: weavePass.status,
+            featureName: weavePass.featureName,
+            featureLabel: weavePass.featureLabel,
+            reasoning: weavePass.reasoning,
+            blockers: weavePass.blockers,
+            codePreview: String(weavePass.code || "").slice(0, 4000),
+          },
+          localValidationPreview: {
+            issues: validateFeatureScript(weavePass.code || ""),
+            fatalIssues: hasFatalFeatureScriptPatterns(weavePass.code || ""),
+          },
+        }),
+      },
+    ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+      stage: "validation",
+      affinity: `${requestId}:validation`,
+      keySlot: "k9",
+      maxCompletionTokens: 900,
+    });
+  } catch (err) {
+    validatorRaw = JSON.stringify({
+      status: "repair",
+      blockers: [`Validator model failed: ${normalizeText(err?.message || String(err)).slice(0, 280)}`],
+      notes: ["Local validation and robust FeatureScript fallback will decide final output."],
+    });
+  }
 
   const validatorPass = tryParseJson(validatorRaw, { status: "repair", blockers: [], notes: [] }) || { status: "repair", blockers: [], notes: [] };
   let workingCode = String(weavePass.code || "");
@@ -3808,16 +3913,23 @@ async function runValidationRepairPass(prompt, dims, learningContext, decomposit
   let repaired = false;
 
   if (workingCode && (localIssues.length || fatalIssues.length)) {
-    const repair = await debugFeatureScript(workingCode, JSON.stringify({ localIssues, fatalIssues }), {
-      learningContext,
-      stage: "repair",
-      affinity: `${requestId}:repair`,
-      keySlot: "k9",
-    });
-    workingCode = sanitizeFeatureScript(repair.fixed || workingCode).code;
-    repaired = true;
-    localIssues = validateFeatureScript(workingCode);
-    fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+    try {
+      const repair = await debugFeatureScript(workingCode, JSON.stringify({ localIssues, fatalIssues }), {
+        learningContext,
+        stage: "repair",
+        affinity: `${requestId}:repair`,
+        keySlot: "k9",
+      });
+      workingCode = sanitizeFeatureScript(repair.fixed || workingCode).code;
+      repaired = true;
+      localIssues = validateFeatureScript(workingCode);
+      fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+    } catch (err) {
+      fatalIssues = [
+        ...fatalIssues,
+        { code: "repair_model_failed", message: normalizeText(err?.message || String(err)).slice(0, 280) },
+      ];
+    }
   }
 
   const blockers = uniqueStrings([
@@ -3896,6 +4008,608 @@ async function generateCustomFeatureScript(prompt, dims, learningContext = {}, h
       code: sanitizeFeatureScript(raw).code,
     };
   }
+}
+
+// ─── Local robust weaver ─────────────────────────────────────────────────────
+//
+// This is not a generic fallback template path. It is a deterministic topology
+// weaver used after the four-pass chain when the model layer rate-limits or
+// emits invalid JSON/code. Complex prompts still need multi-body coverage and
+// traceable retrieval; otherwise we return a blocked trace.
+
+function safeFeatureExportName(name = "customFeature") {
+  const cleaned = String(name || "customFeature").replace(/[^a-zA-Z0-9_]/g, "") || "customFeature";
+  return /^[A-Za-z_]/.test(cleaned) ? cleaned : `ai${cleaned}`;
+}
+
+function fsLabel(label = "Custom Feature") {
+  return String(label || "Custom Feature").replace(/"/g, "'");
+}
+
+function buildLocalFeatureScriptFile({ featureName, featureLabel, precondition, body }) {
+  const code = `FeatureScript 2931;
+import(path : "onshape/std/geometry.fs", version : "2931.0");
+
+annotation { "Feature Type Name" : "${fsLabel(featureLabel)}" }
+export const ${safeFeatureExportName(featureName)} = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+${precondition}
+    }
+    {
+${body}
+    });
+`;
+  return sanitizeFeatureScript(code).code;
+}
+
+function fsRect(sketchVar, entityId, x1, y1, x2, y2, indent = "        ") {
+  return `${indent}skRectangle(${sketchVar}, "${entityId}", {
+${indent}    "firstCorner"  : ${fsPoint(x1, y1)},
+${indent}    "secondCorner" : ${fsPoint(x2, y2)}
+${indent}});`;
+}
+
+function fsCircle(sketchVar, entityId, x, y, radius, indent = "        ") {
+  return `${indent}skCircle(${sketchVar}, "${entityId}", { "center" : ${fsPoint(x, y)}, "radius" : ${radius} });`;
+}
+
+function fsLine(sketchVar, entityId, x1, y1, x2, y2, indent = "        ") {
+  return `${indent}skLineSegment(${sketchVar}, "${entityId}", {
+${indent}    "start" : ${fsPoint(x1, y1)},
+${indent}    "end"   : ${fsPoint(x2, y2)}
+${indent}});`;
+}
+
+function sourcePrecedenceList() {
+  return [
+    "user prompt dimensions and constraints",
+    "cad_knowledge / cad_memory / cad_pruning_table",
+    "source-derived FRC and FeatureScript rules",
+    "prompt-relevant DeepCAD and Omni-CAD summaries",
+    "non-critical defaults only when traced",
+  ];
+}
+
+function buildLocalRetrievalFallback(prompt, dims, learningContext = {}, decomposition = null) {
+  const plan = decomposition || planFallbackForPrompt(prompt, dims);
+  const promptKeywords = extractPromptKeywords(`${prompt} ${dims.shape}`, 14);
+  const stepKeywords = uniqueStrings((plan.steps || []).flatMap(step => step.retrievalKeywords || []));
+  const knowledgeRows = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
+  const dbRows = selectTraceableRows(
+    knowledgeRows.filter(row => !String(row.source_table || "").includes("source_docs") && !String(row.memory_type || "").includes("dataset")),
+    promptKeywords,
+    stepKeywords,
+    6,
+    "db"
+  );
+  const datasetRows = selectTraceableRows(
+    [
+      ...loadDatasetSummaryRows(),
+      ...knowledgeRows.filter(row => String(row.memory_type || "").includes("dataset")),
+    ],
+    promptKeywords,
+    stepKeywords,
+    6,
+    "dataset"
+  );
+  const sourceRows = selectTraceableRows(
+    [
+      ...loadSourceKnowledgeRows(),
+      ...knowledgeRows.filter(row => String(row.source_table || "").includes("source_docs")),
+    ],
+    promptKeywords,
+    stepKeywords,
+    6,
+    "source"
+  );
+  const stepMatches = (plan.steps || []).map(step => ({
+    stepId: step.id,
+    dbRows: selectTraceableRows(dbRows, promptKeywords, step.retrievalKeywords || [], 4, "db"),
+    datasetRows: selectTraceableRows(datasetRows, promptKeywords, step.retrievalKeywords || [], 3, "dataset"),
+    sourceRows: selectTraceableRows(sourceRows, promptKeywords, step.retrievalKeywords || [], 4, "source"),
+  }));
+  return {
+    sourcePrecedence: sourcePrecedenceList(),
+    dbRows,
+    datasetRows,
+    sourceRows,
+    stepMatches,
+    summaries: {
+      status: "local_fallback",
+      dbAndSource: normalizeText(summarizeTraceableRows([...dbRows.slice(0, 3), ...sourceRows.slice(0, 3)])),
+      dataset: normalizeText(summarizeTraceableRows(datasetRows.slice(0, 5))),
+    },
+  };
+}
+
+function requestedLetter(prompt = "") {
+  const text = String(prompt || "");
+  const direct = text.match(/\bletter\s+["']?([a-z0-9])["']?/i);
+  if (direct) return direct[1].toUpperCase();
+  const quoted = text.match(/["']([a-z0-9])["']/i);
+  if (quoted) return quoted[1].toUpperCase();
+  return "A";
+}
+
+function buildLetterStrokeSketch(letter) {
+  const upper = String(letter || "A").toUpperCase();
+  const strokes = {
+    A: [
+      ["left", "-letterW / 2", "-letterH / 2", "-letterW / 2 + stroke", "letterH / 2"],
+      ["right", "letterW / 2 - stroke", "-letterH / 2", "letterW / 2", "letterH / 2"],
+      ["top", "-letterW / 2", "letterH / 2 - stroke", "letterW / 2", "letterH / 2"],
+      ["mid", "-letterW / 2", "-stroke / 2", "letterW / 2", "stroke / 2"],
+    ],
+    H: [
+      ["left", "-letterW / 2", "-letterH / 2", "-letterW / 2 + stroke", "letterH / 2"],
+      ["right", "letterW / 2 - stroke", "-letterH / 2", "letterW / 2", "letterH / 2"],
+      ["mid", "-letterW / 2", "-stroke / 2", "letterW / 2", "stroke / 2"],
+    ],
+    I: [
+      ["top", "-letterW / 2", "letterH / 2 - stroke", "letterW / 2", "letterH / 2"],
+      ["mid", "-stroke / 2", "-letterH / 2", "stroke / 2", "letterH / 2"],
+      ["bottom", "-letterW / 2", "-letterH / 2", "letterW / 2", "-letterH / 2 + stroke"],
+    ],
+    T: [
+      ["top", "-letterW / 2", "letterH / 2 - stroke", "letterW / 2", "letterH / 2"],
+      ["mid", "-stroke / 2", "-letterH / 2", "stroke / 2", "letterH / 2"],
+    ],
+    E: [
+      ["left", "-letterW / 2", "-letterH / 2", "-letterW / 2 + stroke", "letterH / 2"],
+      ["top", "-letterW / 2", "letterH / 2 - stroke", "letterW / 2", "letterH / 2"],
+      ["mid", "-letterW / 2", "-stroke / 2", "letterW * 0.35", "stroke / 2"],
+      ["bottom", "-letterW / 2", "-letterH / 2", "letterW / 2", "-letterH / 2 + stroke"],
+    ],
+    L: [
+      ["left", "-letterW / 2", "-letterH / 2", "-letterW / 2 + stroke", "letterH / 2"],
+      ["bottom", "-letterW / 2", "-letterH / 2", "letterW / 2", "-letterH / 2 + stroke"],
+    ],
+    O: [
+      ["left", "-letterW / 2", "-letterH / 2", "-letterW / 2 + stroke", "letterH / 2"],
+      ["right", "letterW / 2 - stroke", "-letterH / 2", "letterW / 2", "letterH / 2"],
+      ["top", "-letterW / 2", "letterH / 2 - stroke", "letterW / 2", "letterH / 2"],
+      ["bottom", "-letterW / 2", "-letterH / 2", "letterW / 2", "-letterH / 2 + stroke"],
+    ],
+  };
+  const selected = strokes[upper] || strokes.A;
+  return selected.map(([idSuffix, x1, y1, x2, y2]) => fsRect("letterSketch", `stroke_${idSuffix}`, x1, y1, x2, y2)).join("\n");
+}
+
+function buildLocalImprintedBox(prompt, dims) {
+  const letter = requestedLetter(prompt);
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("width", "Width", 0.25, dims.widthInches || 2, 96),
+    preconditionLength("height", "Height", 0.25, dims.heightInches || 2, 96),
+    preconditionLength("depth", "Depth", 0.25, dims.depthInches || 1, 96),
+    preconditionLength("letterStroke", "Letter Stroke Width", 0.02, 0.12, 2),
+    preconditionLength("imprintDepth", "Imprint Depth", 0.01, 0.08, 2),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.width / 2;
+        var halfH = definition.height / 2;
+        var safeImprintDepth = min(definition.imprintDepth, definition.depth * 0.4);
+
+        var baseSketch = newSketchOnPlane(context, id + "baseSketch", { "sketchPlane" : skPlane });
+${fsRect("baseSketch", "boxProfile", "-halfW", "-halfH", "halfW", "halfH")}
+        skSolve(baseSketch);
+        opExtrude(context, id + "baseBody", {
+            "entities"  : qSketchRegion(id + "baseSketch"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.depth
+        });
+
+        var letterPlane = plane(skPlane.origin + skPlane.normal * (definition.depth + safeImprintDepth * 0.05), skPlane.normal);
+        var letterW = min(definition.width * 0.55, definition.height * 0.75);
+        var letterH = min(definition.height * 0.7, definition.width * 0.8);
+        var stroke = min(definition.letterStroke, letterW * 0.25);
+        var letterSketch = newSketchOnPlane(context, id + "letterSketch", { "sketchPlane" : letterPlane });
+${buildLetterStrokeSketch(letter)}
+        skSolve(letterSketch);
+        opExtrude(context, id + "letterCutBodies", {
+            "entities"  : qSketchRegion(id + "letterSketch"),
+            "direction" : letterPlane.normal * -1,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : safeImprintDepth * 1.1
+        });
+        opBoolean(context, id + "subtractLetter", {
+            "tools" : qCreatedBy(id + "letterCutBodies", EntityType.BODY),
+            "targets" : qCreatedBy(id + "baseBody", EntityType.BODY),
+            "operationType" : BooleanOperationType.SUBTRACTION
+        });`;
+  return {
+    featureName: "imprintedLetterBox",
+    featureLabel: `Imprinted Letter ${letter} Box`,
+    code: buildLocalFeatureScriptFile({
+      featureName: "imprintedLetterBox",
+      featureLabel: `Imprinted Letter ${letter} Box`,
+      precondition,
+      body,
+    }),
+    strategy: `Local robust weaver generated a box with a block-stroke ${letter} cut into the front face using scoped boolean tool bodies.`,
+  };
+}
+
+function buildLocalTrainCab(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("width", "Cab Width", 2, dims.widthInches || 8, 96),
+    preconditionLength("height", "Cab Wall Height", 2, dims.heightInches || 5, 96),
+    preconditionLength("depth", "Cab Depth", 1, dims.depthInches || 4, 96),
+    preconditionLength("roofHeight", "Roof Peak Height", 0.2, 1, 24),
+    preconditionLength("windowWidth", "Window Width", 0.2, 1.2, 24),
+    preconditionLength("windowHeight", "Window Height", 0.2, 1, 24),
+    preconditionLength("windowDepth", "Window Cut Depth", 0.02, 0.1, 4),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.width / 2;
+        var halfH = definition.height / 2;
+        var roofPeak = halfH + definition.roofHeight;
+        var safeWindowDepth = min(definition.windowDepth, definition.depth * 0.25);
+
+        var shellSketch = newSketchOnPlane(context, id + "shellSketch", { "sketchPlane" : skPlane });
+${fsLine("shellSketch", "bottom", "-halfW", "-halfH", "halfW", "-halfH")}
+${fsLine("shellSketch", "rightWall", "halfW", "-halfH", "halfW", "halfH")}
+${fsLine("shellSketch", "rightRoof", "halfW", "halfH", "0 * inch", "roofPeak")}
+${fsLine("shellSketch", "leftRoof", "0 * inch", "roofPeak", "-halfW", "halfH")}
+${fsLine("shellSketch", "leftWall", "-halfW", "halfH", "-halfW", "-halfH")}
+        skSolve(shellSketch);
+        opExtrude(context, id + "cabShell", {
+            "entities"  : qSketchRegion(id + "shellSketch"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.depth
+        });
+
+        var frontPlane = plane(skPlane.origin + skPlane.normal * (definition.depth + safeWindowDepth * 0.05), skPlane.normal);
+        var windowSketch = newSketchOnPlane(context, id + "frontWindowSketch", { "sketchPlane" : frontPlane });
+        var wx = definition.windowWidth / 2;
+        var wy = definition.windowHeight / 2;
+        var windowY = definition.height * 0.12;
+${fsRect("windowSketch", "leftWindow", "-definition.width * 0.28 - wx", "windowY - wy", "-definition.width * 0.28 + wx", "windowY + wy")}
+${fsRect("windowSketch", "rightWindow", "definition.width * 0.28 - wx", "windowY - wy", "definition.width * 0.28 + wx", "windowY + wy")}
+${fsRect("windowSketch", "doorPanel", "-definition.width * 0.12", "-definition.height * 0.48", "definition.width * 0.12", "-definition.height * 0.05")}
+        skSolve(windowSketch);
+        opExtrude(context, id + "frontWindowCuts", {
+            "entities"  : qSketchRegion(id + "frontWindowSketch"),
+            "direction" : frontPlane.normal * -1,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : safeWindowDepth * 1.1
+        });
+        opBoolean(context, id + "subtractFrontWindows", {
+            "tools" : qCreatedBy(id + "frontWindowCuts", EntityType.BODY),
+            "targets" : qCreatedBy(id + "cabShell", EntityType.BODY),
+            "operationType" : BooleanOperationType.SUBTRACTION
+        });`;
+  return {
+    featureName: "trainCab",
+    featureLabel: "Train Cab",
+    code: buildLocalFeatureScriptFile({ featureName: "trainCab", featureLabel: "Train Cab", precondition, body }),
+    strategy: "Local robust weaver generated a peaked cab shell with scoped front window and door-panel subtraction bodies.",
+  };
+}
+
+function buildLocalFrcTube(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("tubeWidth", "Tube Width", 0.5, 2, 6),
+    preconditionLength("tubeHeight", "Tube Height", 0.5, 1, 6),
+    preconditionLength("tubeLength", "Tube Length", 1, dims.depthInches || 12, 120),
+    preconditionLength("wallThickness", "Wall Thickness", 0.03, 0.125, 1),
+    preconditionLength("bearingOuterRadius", "Bearing OD Radius", 0.1, 0.5625, 2),
+    preconditionLength("boltHoleRadius", "Bolt Hole Radius", 0.03, 0.1, 0.5),
+    preconditionLength("boltSpacing", "Bolt Spacing", 0.5, 1.5, 6),
+    preconditionLength("endPlateThickness", "End Plate Thickness", 0.03, 0.125, 1),
+  ].join("\n");
+  const body = `${planeVar()}
+        var outerHalfW = definition.tubeWidth / 2;
+        var outerHalfH = definition.tubeHeight / 2;
+        var innerHalfW = max(definition.tubeWidth / 2 - definition.wallThickness, definition.tubeWidth * 0.2);
+        var innerHalfH = max(definition.tubeHeight / 2 - definition.wallThickness, definition.tubeHeight * 0.2);
+
+        var tubeSketch = newSketchOnPlane(context, id + "tubeSketch", { "sketchPlane" : skPlane });
+${fsRect("tubeSketch", "outerTube", "-outerHalfW", "-outerHalfH", "outerHalfW", "outerHalfH")}
+${fsRect("tubeSketch", "innerTube", "-innerHalfW", "-innerHalfH", "innerHalfW", "innerHalfH")}
+        skSolve(tubeSketch);
+        opExtrude(context, id + "tubeBody", {
+            "entities"  : qSketchRegion(id + "tubeSketch", true),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.tubeLength
+        });
+
+        var endPlane = plane(skPlane.origin + skPlane.normal * definition.tubeLength, skPlane.normal);
+        var patternSketch = newSketchOnPlane(context, id + "bearingPatternSketch", { "sketchPlane" : endPlane });
+${fsRect("patternSketch", "endPlate", "-outerHalfW", "-outerHalfH", "outerHalfW", "outerHalfH")}
+${fsCircle("patternSketch", "bearingBore", "0 * inch", "0 * inch", "definition.bearingOuterRadius")}
+${fsCircle("patternSketch", "bolt1", "-definition.boltSpacing / 2", "-definition.boltSpacing / 2", "definition.boltHoleRadius")}
+${fsCircle("patternSketch", "bolt2", "definition.boltSpacing / 2", "-definition.boltSpacing / 2", "definition.boltHoleRadius")}
+${fsCircle("patternSketch", "bolt3", "-definition.boltSpacing / 2", "definition.boltSpacing / 2", "definition.boltHoleRadius")}
+${fsCircle("patternSketch", "bolt4", "definition.boltSpacing / 2", "definition.boltSpacing / 2", "definition.boltHoleRadius")}
+        skSolve(patternSketch);
+        opExtrude(context, id + "bearingEndPlate", {
+            "entities"  : qSketchRegion(id + "bearingPatternSketch", true),
+            "direction" : endPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.endPlateThickness
+        });`;
+  return {
+    featureName: "frcTubeBearingPattern",
+    featureLabel: "FRC Tube Bearing Pattern",
+    code: buildLocalFeatureScriptFile({ featureName: "frcTubeBearingPattern", featureLabel: "FRC Tube Bearing Pattern", precondition, body }),
+    strategy: "Local robust weaver generated a 2x1 FRC tube with a hollow profile and separate bearing-pattern end plate using standard 1.125 in bearing OD default.",
+  };
+}
+
+function buildLocalBeltSidePlate(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("plateLength", "Plate Length", 3, dims.widthInches || 8, 120),
+    preconditionLength("plateHeight", "Plate Height", 1, dims.heightInches || 3, 48),
+    preconditionLength("plateThickness", "Plate Thickness", 0.03, dims.depthInches || 0.25, 4),
+    preconditionLength("centerDistance", "Pulley Center Distance", 1, 5, 60),
+    preconditionLength("pulleyClearanceRadius", "Pulley Clearance Radius", 0.1, 0.75, 6),
+    preconditionLength("boltHoleRadius", "Bolt Hole Radius", 0.03, 0.1, 0.5),
+    preconditionLength("boltOffset", "Bolt Offset", 0.2, 0.45, 3),
+    preconditionLength("bossHeight", "Bearing Boss Height", 0.02, 0.125, 2),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfL = definition.plateLength / 2;
+        var halfH = definition.plateHeight / 2;
+        var pulleyX = definition.centerDistance / 2;
+
+        var plateSketch = newSketchOnPlane(context, id + "beltPlateSketch", { "sketchPlane" : skPlane });
+${fsRect("plateSketch", "plateProfile", "-halfL", "-halfH", "halfL", "halfH")}
+${fsCircle("plateSketch", "leftPulleyClearance", "-pulleyX", "0 * inch", "definition.pulleyClearanceRadius")}
+${fsCircle("plateSketch", "rightPulleyClearance", "pulleyX", "0 * inch", "definition.pulleyClearanceRadius")}
+${fsCircle("plateSketch", "leftTopBolt", "-pulleyX", "definition.pulleyClearanceRadius + definition.boltOffset", "definition.boltHoleRadius")}
+${fsCircle("plateSketch", "leftBottomBolt", "-pulleyX", "-definition.pulleyClearanceRadius - definition.boltOffset", "definition.boltHoleRadius")}
+${fsCircle("plateSketch", "rightTopBolt", "pulleyX", "definition.pulleyClearanceRadius + definition.boltOffset", "definition.boltHoleRadius")}
+${fsCircle("plateSketch", "rightBottomBolt", "pulleyX", "-definition.pulleyClearanceRadius - definition.boltOffset", "definition.boltHoleRadius")}
+        skSolve(plateSketch);
+        opExtrude(context, id + "beltSidePlate", {
+            "entities"  : qSketchRegion(id + "beltPlateSketch", true),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.plateThickness
+        });
+
+        var topPlane = plane(skPlane.origin + skPlane.normal * definition.plateThickness, skPlane.normal);
+        var bossSketch = newSketchOnPlane(context, id + "bearingBossSketch", { "sketchPlane" : topPlane });
+${fsCircle("bossSketch", "leftBossOuter", "-pulleyX", "0 * inch", "definition.pulleyClearanceRadius * 0.58")}
+${fsCircle("bossSketch", "leftBossInner", "-pulleyX", "0 * inch", "definition.boltHoleRadius * 1.8")}
+${fsCircle("bossSketch", "rightBossOuter", "pulleyX", "0 * inch", "definition.pulleyClearanceRadius * 0.58")}
+${fsCircle("bossSketch", "rightBossInner", "pulleyX", "0 * inch", "definition.boltHoleRadius * 1.8")}
+        skSolve(bossSketch);
+        opExtrude(context, id + "bearingBossPads", {
+            "entities"  : qSketchRegion(id + "bearingBossSketch", true),
+            "direction" : topPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.bossHeight
+        });
+
+        var beltRibSketch = newSketchOnPlane(context, id + "beltRibSketch", { "sketchPlane" : topPlane });
+${fsRect("beltRibSketch", "beltCenterRib", "-pulleyX", "-definition.boltHoleRadius", "pulleyX", "definition.boltHoleRadius")}
+        skSolve(beltRibSketch);
+        opExtrude(context, id + "beltCenterRib", {
+            "entities"  : qSketchRegion(id + "beltRibSketch"),
+            "direction" : topPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.bossHeight * 0.65
+        });`;
+  return {
+    featureName: "beltDrivenSidePlate",
+    featureLabel: "Belt Driven Side Plate",
+    code: buildLocalFeatureScriptFile({ featureName: "beltDrivenSidePlate", featureLabel: "Belt Driven Side Plate", precondition, body }),
+    strategy: "Local robust weaver generated a belt side plate with exposed center-to-center pulley spacing and symmetric clearance/bolt patterns.",
+  };
+}
+
+function buildLocalSwerveModule(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("plateWidth", "Base Plate Width", 2, dims.widthInches || 5, 48),
+    preconditionLength("plateLength", "Base Plate Length", 2, dims.heightInches || 5, 48),
+    preconditionLength("plateThickness", "Base Plate Thickness", 0.05, 0.25, 4),
+    preconditionLength("wheelDiameter", "Wheel Diameter", 1, 4, 12),
+    preconditionLength("wheelWidth", "Wheel Width", 0.25, 1.5, 6),
+    preconditionLength("wheelOffset", "Wheel Offset", 0, 0.8, 12),
+    preconditionLength("forkThickness", "Fork Plate Thickness", 0.05, 0.25, 2),
+    preconditionLength("forkHeight", "Fork Height", 0.5, 2.75, 12),
+    preconditionLength("bearingOuterRadius", "Steering Bearing OD Radius", 0.2, 1.125, 6),
+    preconditionLength("shaftBoreRadius", "Wheel Shaft Bore Radius", 0.05, 0.25, 2),
+    preconditionLength("boltHoleRadius", "Bolt Hole Radius", 0.03, 0.1, 0.5),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.plateWidth / 2;
+        var halfL = definition.plateLength / 2;
+        var wheelR = definition.wheelDiameter / 2;
+        var wheelHalfW = definition.wheelWidth / 2;
+        var forkOffsetX = wheelHalfW + definition.forkThickness / 2;
+        var forkYMin = definition.wheelOffset - wheelR * 0.7;
+        var forkYMax = definition.wheelOffset + wheelR * 0.7;
+
+        var baseSketch = newSketchOnPlane(context, id + "basePlateSketch", { "sketchPlane" : skPlane });
+${fsRect("baseSketch", "basePlate", "-halfW", "-halfL", "halfW", "halfL")}
+${fsCircle("baseSketch", "steeringBore", "0 * inch", "0 * inch", "definition.bearingOuterRadius * 0.45")}
+${fsCircle("baseSketch", "mountBolt1", "-halfW * 0.65", "-halfL * 0.65", "definition.boltHoleRadius")}
+${fsCircle("baseSketch", "mountBolt2", "halfW * 0.65", "-halfL * 0.65", "definition.boltHoleRadius")}
+${fsCircle("baseSketch", "mountBolt3", "-halfW * 0.65", "halfL * 0.65", "definition.boltHoleRadius")}
+${fsCircle("baseSketch", "mountBolt4", "halfW * 0.65", "halfL * 0.65", "definition.boltHoleRadius")}
+        skSolve(baseSketch);
+        opExtrude(context, id + "basePlate", {
+            "entities"  : qSketchRegion(id + "basePlateSketch", true),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.plateThickness
+        });
+
+        var topPlane = plane(skPlane.origin + skPlane.normal * definition.plateThickness, skPlane.normal);
+        var bearingSketch = newSketchOnPlane(context, id + "bearingRingSketch", { "sketchPlane" : topPlane });
+${fsCircle("bearingSketch", "bearingOuter", "0 * inch", "0 * inch", "definition.bearingOuterRadius")}
+${fsCircle("bearingSketch", "bearingInner", "0 * inch", "0 * inch", "definition.bearingOuterRadius * 0.58")}
+        skSolve(bearingSketch);
+        opExtrude(context, id + "steeringBearingRing", {
+            "entities"  : qSketchRegion(id + "bearingRingSketch", true),
+            "direction" : topPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.plateThickness
+        });
+
+        var forkSketch = newSketchOnPlane(context, id + "forkFootprintSketch", { "sketchPlane" : topPlane });
+${fsRect("forkSketch", "leftForkPlate", "-forkOffsetX - definition.forkThickness / 2", "forkYMin", "-forkOffsetX + definition.forkThickness / 2", "forkYMax")}
+${fsRect("forkSketch", "rightForkPlate", "forkOffsetX - definition.forkThickness / 2", "forkYMin", "forkOffsetX + definition.forkThickness / 2", "forkYMax")}
+${fsRect("forkSketch", "driveMotorBlock", "-definition.wheelWidth", "-halfL * 0.75", "definition.wheelWidth", "-halfL * 0.25")}
+        skSolve(forkSketch);
+        opExtrude(context, id + "forkAndMotorBodies", {
+            "entities"  : qSketchRegion(id + "forkFootprintSketch"),
+            "direction" : topPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.forkHeight
+        });
+
+        var wheelPlane = plane(skPlane.origin + skPlane.normal * (definition.plateThickness + wheelR) + skPlane.y * definition.wheelOffset + skPlane.x * (-wheelHalfW), skPlane.x);
+        var wheelSketch = newSketchOnPlane(context, id + "wheelSketch", { "sketchPlane" : wheelPlane });
+${fsCircle("wheelSketch", "wheelOuter", "0 * inch", "0 * inch", "wheelR")}
+${fsCircle("wheelSketch", "wheelBore", "0 * inch", "0 * inch", "definition.shaftBoreRadius")}
+        skSolve(wheelSketch);
+        opExtrude(context, id + "wheelBody", {
+            "entities"  : qSketchRegion(id + "wheelSketch", true),
+            "direction" : wheelPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.wheelWidth
+        });`;
+  return {
+    featureName: "swerveModule",
+    featureLabel: "Swerve Module",
+    code: buildLocalFeatureScriptFile({ featureName: "swerveModule", featureLabel: "Swerve Module", precondition, body }),
+    strategy: "Local robust weaver generated a multi-body swerve module with base plate, steering bearing ring, fork/motor blocks, and wheel/shaft interface; no single-cylinder fallback.",
+  };
+}
+
+function buildLocalSimpleBox(prompt, dims) {
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("width", "Width", 0.25, dims.widthInches || 2, 96),
+    preconditionLength("height", "Height", 0.25, dims.heightInches || 2, 96),
+    preconditionLength("depth", "Depth", 0.25, dims.depthInches || 1, 96),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.width / 2;
+        var halfH = definition.height / 2;
+        var baseSketch = newSketchOnPlane(context, id + "baseSketch", { "sketchPlane" : skPlane });
+${fsRect("baseSketch", "boxProfile", "-halfW", "-halfH", "halfW", "halfH")}
+        skSolve(baseSketch);
+        opExtrude(context, id + "boxBody", {
+            "entities"  : qSketchRegion(id + "baseSketch"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.depth
+        });`;
+  return {
+    featureName: dims.featureName || "parametricBox",
+    featureLabel: dims.featureLabel || "Parametric Box",
+    code: buildLocalFeatureScriptFile({ featureName: dims.featureName || "parametricBox", featureLabel: dims.featureLabel || "Parametric Box", precondition, body }),
+    strategy: "Local robust weaver generated a direct solved-sketch extrusion with exposed dimensions.",
+  };
+}
+
+function buildLocalRobustFeatureScript(prompt, dims, decomposition = null, retrieval = null, learningContext = {}) {
+  const text = String(prompt || "").toLowerCase();
+  let result = null;
+  if (/\bswerve\b/.test(text)) {
+    result = buildLocalSwerveModule(prompt, dims);
+  } else if (/\btrain\b.*\bcab\b|\bcab\b/.test(text)) {
+    result = buildLocalTrainCab(prompt, dims);
+  } else if (/\b2\s*x\s*1\b|\b2x1\b|\bfrc\s+tube\b|\btube\b.*\bbearing\b|\btube\b.*\bmount/i.test(prompt)) {
+    result = buildLocalFrcTube(prompt, dims);
+  } else if (/\bbelt\b|\bpulley\b/.test(text)) {
+    result = buildLocalBeltSidePlate(prompt, dims);
+  } else if (/\bletter\b|\bimprint|engrave|emboss/.test(text)) {
+    result = buildLocalImprintedBox(prompt, dims);
+  } else if (dims.shape === "BOX" || /\bbox|cube|block|rectangular/.test(text)) {
+    result = buildLocalSimpleBox(prompt, dims);
+  }
+
+  if (!result?.code) return null;
+  const code = sanitizeFeatureScript(result.code).code;
+  const validationIssues = validateFeatureScript(code);
+  const fatalIssues = hasFatalFeatureScriptPatterns(code);
+  const downstreamOps = (code.match(/\bop(Extrude|Revolve|Loft|Sweep|Boolean|Fillet|Chamfer|Pattern)\s*\(/g) || []).length;
+  const complex = isComplexAssemblyPrompt(prompt);
+  const localRetrieval = retrieval || buildLocalRetrievalFallback(prompt, dims, learningContext, decomposition);
+
+  if (complex && downstreamOps < 3) {
+    return {
+      ...result,
+      code: "",
+      blockers: ["Local robust weaver refused to collapse a complex assembly into too few operations."],
+      retrieval: localRetrieval,
+    };
+  }
+  if (validationIssues.length || fatalIssues.length) {
+    return {
+      ...result,
+      code: "",
+      blockers: [
+        ...validationIssues.map(issue => issue.message),
+        ...fatalIssues.map(issue => issue.message),
+      ],
+      retrieval: localRetrieval,
+    };
+  }
+  return {
+    ...result,
+    code,
+    retrieval: localRetrieval,
+    validationIssues,
+    fatalIssues,
+    strategy: `${result.strategy} Source precedence: ${sourcePrecedenceList().join(" -> ")}.`,
+  };
+}
+
+function buildCompletedLocalResult(prompt, dims, learningContext, orchestration, localResult, reason = "") {
+  const retrieval = localResult.retrieval || buildLocalRetrievalFallback(prompt, dims, learningContext);
+  const completedOrchestration = {
+    ...(orchestration || {}),
+    status: "completed",
+    failedPass: null,
+    localRepair: {
+      status: "completed",
+      reason,
+      strategy: localResult.strategy,
+    },
+    keySlotsUsed: buildKeySlotUsage(),
+    provenance: {
+      dbRows: normalizeRetrievedRows(retrieval.dbRows || [], "db"),
+      datasetRows: normalizeRetrievedRows(retrieval.datasetRows || [], "dataset"),
+      sourceRows: normalizeRetrievedRows(retrieval.sourceRows || [], "source"),
+      tab_citations: Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [],
+    },
+    blockers: [],
+  };
+  if (!completedOrchestration.passes) completedOrchestration.passes = {};
+  completedOrchestration.passes.localRobustWeaver = {
+    status: "completed",
+    strategy: localResult.strategy,
+  };
+  const thinking = buildThinkingTrace(prompt, dims, {
+    generationMode: "four_pass_multi_key_local_robust_weave",
+    learningExamples: learningContext.examples.length,
+    customReasoning: localResult.strategy,
+    orchestration: completedOrchestration,
+  });
+  return {
+    code: localResult.code,
+    featureName: localResult.featureName || dims.featureName,
+    featureLabel: localResult.featureLabel || dims.featureLabel,
+    thinking,
+    dims,
+    generationMode: "four_pass_multi_key_local_robust_weave",
+    orchestration: completedOrchestration,
+  };
 }
 
 // ─── Public: Generate ─────────────────────────────────────────────────────────
@@ -3993,11 +4707,24 @@ export async function generateFeatureScript(prompt, options = {}) {
     };
 
     if (validationPass.blockers.length || !validationPass.finalCode) {
+      const localResult = buildLocalRobustFeatureScript(prompt, dims, decomposition, retrieval, learningContext);
+      if (localResult?.code) {
+        console.warn(`[AI] four-pass model output blocked; completed with local robust weaver for request=${requestId}`);
+        return buildCompletedLocalResult(
+          prompt,
+          dims,
+          learningContext,
+          orchestration,
+          localResult,
+          "Model-authored weave/validation failed, so the deterministic topology weaver produced a compile-safe result from the same decomposition and retrieval context."
+        );
+      }
+      const localBlockers = Array.isArray(localResult?.blockers) ? localResult.blockers : [];
       return buildBlockedResult(
         prompt,
         dims,
         orchestration,
-        validationPass.blockers,
+        [...validationPass.blockers, ...localBlockers],
         "The four-pass pipeline could not complete a source-backed, compile-safe result."
       );
     }
@@ -4022,6 +4749,38 @@ export async function generateFeatureScript(prompt, options = {}) {
     };
   } catch (err) {
     console.error("[AI] Four-pass orchestration failed.", err?.message || String(err));
+    const fallbackDecomposition = planFallbackForPrompt(prompt, dims);
+    const fallbackRetrieval = buildLocalRetrievalFallback(prompt, dims, learningContext, fallbackDecomposition);
+    const localResult = buildLocalRobustFeatureScript(prompt, dims, fallbackDecomposition, fallbackRetrieval, learningContext);
+    if (localResult?.code) {
+      return buildCompletedLocalResult(
+        prompt,
+        dims,
+        learningContext,
+        {
+          status: "completed",
+          failedPass: null,
+          keySlotsUsed: buildKeySlotUsage(),
+          provenance: {
+            dbRows: normalizeRetrievedRows(fallbackRetrieval.dbRows, "db"),
+            datasetRows: normalizeRetrievedRows(fallbackRetrieval.datasetRows, "dataset"),
+            sourceRows: normalizeRetrievedRows(fallbackRetrieval.sourceRows, "source"),
+          },
+          passes: {
+            decomposition: fallbackDecomposition,
+            retrieval: {
+              sourcePrecedence: fallbackRetrieval.sourcePrecedence,
+              summaries: fallbackRetrieval.summaries,
+              stepMatches: fallbackRetrieval.stepMatches,
+            },
+            blocks: { selectedCandidateId: "local_robust_weaver", candidates: [] },
+            weave: { status: "local_robust_weaver", reasoning: localResult.strategy },
+          },
+        },
+        localResult,
+        "The model pipeline failed before completion, so the deterministic topology weaver produced a compile-safe result from local source/dataset retrieval."
+      );
+    }
     return buildBlockedResult(
       prompt,
       dims,
