@@ -14,8 +14,10 @@ const prompts = [
   "Create a transition from 2 inch square to 1 inch circle over 3 inches using opLoft. Expose height and profile offsets.",
   "Create a 90-degree elbow pipe with 0.5 inch outer radius and 2 inch bend radius using opSweep.",
   "Create an open-top electronics enclosure 4x3x1.5 inches with 0.1 inch walls using opShell after extrude. Expose wallThickness and openFace boolean.",
-  "Create a carrot-like body with a mounting flange: revolve organic profile for body, add flange ring with 4 bolt holes in circular pattern.",
-  "Attempt to loft a circle to a rectangle; if profiles are too dissimilar, apply pruning rule to insert intermediate profile or fallback to multi-profile loft.",
+  "Create me a swerve module.",
+  "Create a train cab.",
+  "Create a 2x1 FRC tube with bearing and mounting pattern.",
+  "Create a belt-driven side plate using standard pulley spacing rules.",
 ];
 
 function stamp() {
@@ -69,6 +71,7 @@ async function main() {
     const prompt = prompts[index];
     const generation = await postJson(ENDPOINT, { prompt, history: [], maxRepairAttempts: 1 });
     const code = generation.json.code || generation.json.fixed || "";
+    const blocked = generation.json.generationMode === "blocked_trace_only";
     if (code) writeFileSync(join(RAW_DIR, `smoke_${id}_${index + 1}.fs`), code);
     let issues = validateFeatureScript(code);
     let debug = null;
@@ -88,8 +91,11 @@ async function main() {
       endpoint: ENDPOINT,
       status: generation.status,
       ok: generation.ok,
+      blocked,
       validationIssues: issues,
-      compileProxyOk: issues.length === 0,
+      compileProxyOk: blocked
+        ? Array.isArray(generation.json.orchestration?.blockers) && generation.json.orchestration.blockers.length > 0
+        : issues.length === 0,
       generation: generation.json,
       debug,
     });

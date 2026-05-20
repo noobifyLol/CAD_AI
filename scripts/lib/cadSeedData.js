@@ -98,6 +98,10 @@ function normalizeSeedEntry(raw, options = {}) {
     qualityScore: clampScore(raw.quality_score ?? raw.qualityScore ?? qualityScore),
     sourceTable: normalizeText(raw.source_table || raw.sourceTable || sourceTable),
     memoryOnly: parseBoolean(raw.memory_only ?? raw.memoryOnly, memoryOnly),
+    sourceUrl: normalizeText(raw.source_url || raw.sourceUrl || raw["Source URL"] || ""),
+    sourceType: normalizeText(raw.source_type || raw.sourceType || raw["Source Type"] || ""),
+    componentTags: parseDelimited(raw.component_tags || raw.componentTags || raw["Component Tags"] || []),
+    operationTags: parseDelimited(raw.operation_tags || raw.operationTags || raw["Operation Tags"] || []),
   };
 }
 

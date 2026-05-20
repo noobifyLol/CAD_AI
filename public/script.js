@@ -58,13 +58,37 @@ function setText(id, value) {
   if (el) el.textContent = value;
 }
 
-function showRunModal({ title, ok, message, createdAt, database, generationId, prompt, learning, outputKind, errorMessages }) {
+function formatOrchestration(orchestration) {
+  if (!orchestration) return '';
+  const passes = orchestration.passes || {};
+  const lines = [
+    `Status: ${orchestration.status || 'unknown'}`,
+    `Failed pass: ${orchestration.failedPass || 'none'}`,
+  ];
+
+  if (passes.decomposition?.steps?.length) {
+    lines.push(`Decomposition steps: ${passes.decomposition.steps.length}`);
+  }
+  if (passes.blocks?.selectedCandidateId) {
+    lines.push(`Selected block candidate: ${passes.blocks.selectedCandidateId}`);
+  }
+  if (passes.weave?.status) {
+    lines.push(`Weave status: ${passes.weave.status}`);
+  }
+  if (Array.isArray(orchestration.blockers) && orchestration.blockers.length) {
+    lines.push(`Blockers: ${orchestration.blockers.join(' | ')}`);
+  }
+  return lines.join('\n');
+}
+
+function showRunModal({ title, ok, message, createdAt, database, generationId, prompt, learning, orchestration, outputKind, errorMessages }) {
   const backdrop = document.getElementById('run-modal-backdrop');
   const summary = document.getElementById('run-modal-summary');
   const feedbackPanel = document.getElementById('run-feedback-panel');
   const learningResult = document.getElementById('run-learning-result');
   const notes = document.getElementById('run-feedback-notes');
-  if (!backdrop || !summary || !feedbackPanel || !learningResult || !notes) return;
+  const passBox = document.getElementById('run-modal-passes');
+  if (!backdrop || !summary || !feedbackPanel || !learningResult || !notes || !passBox) return;
 
   runModalContext = {
     generationId: generationId || null,
@@ -80,12 +104,19 @@ function showRunModal({ title, ok, message, createdAt, database, generationId, p
   setText('run-modal-memory', String(learning?.memories ?? 0));
   setText('run-modal-docs', String(learning?.docs ?? 0));
   setText('run-modal-examples', String(learning?.examples ?? 0));
+  setText('run-modal-pipeline-status', orchestration?.status || 'unknown');
+  setText('run-modal-failed-pass', orchestration?.failedPass || 'None');
+  setText('run-modal-datasets', String(orchestration?.provenance?.datasetRows?.length ?? 0));
+  setText('run-modal-sources', String(orchestration?.provenance?.sourceRows?.length ?? 0));
 
   summary.textContent = message;
   summary.className = `modal-summary ${ok ? 'ok' : 'error'}`;
   notes.value = '';
   learningResult.textContent = '';
   learningResult.classList.remove('show');
+  const orchestrationText = formatOrchestration(orchestration);
+  passBox.textContent = orchestrationText;
+  passBox.style.display = orchestrationText ? 'block' : 'none';
   feedbackPanel.classList.toggle('show', Boolean(generationId || prompt));
   backdrop.classList.add('show');
 }
@@ -194,11 +225,12 @@ async function checkLearningDiagnostics() {
 
 function setOutput(id, code, copyBtnId, generationId = null) {
   const el = document.getElementById(id);
-  el.textContent = code;
-  el.classList.remove('empty');
+  el.textContent = code || 'No compile-safe FeatureScript returned for this run.';
+  if (code) el.classList.remove('empty');
+  else el.classList.add('empty');
   if (generationId) outputGenerationIds[id] = generationId;
   else delete outputGenerationIds[id];
-  if (copyBtnId) document.getElementById(copyBtnId).disabled = false;
+  if (copyBtnId) document.getElementById(copyBtnId).disabled = !code;
 }
 
 function setThinking(prefix, text) {
@@ -284,16 +316,22 @@ async function generate() {
     if (!r.ok) throw new Error(data.error || 'Generation failed');
     setOutput('gen-output', data.code, 'copy-btn', data.generationId);
     setThinking('gen', data.thinking || '');
-    setStatus('gen-status', `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`, 'ok');
+    const blocked = data.generationMode === 'blocked_trace_only';
+    setStatus('gen-status', blocked
+      ? `Blocked "${data.featureLabel}" - ${databaseStatusText(data.database)}`
+      : `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`, blocked ? 'error' : 'ok');
     showRunModal({
-      title: 'Generation complete',
-      ok: true,
-      message: `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
+      title: blocked ? 'Generation blocked' : 'Generation complete',
+      ok: !blocked,
+      message: blocked
+        ? `Blocked "${data.featureLabel}". ${data.orchestration?.blockers?.join(' | ') || 'No compile-safe result was produced.'}`
+        : `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
       createdAt: data.createdAt,
       database: data.database,
       generationId: data.generationId,
       prompt,
       learning: data.learning,
+      orchestration: data.orchestration,
       outputKind: 'generation',
     });
   } catch (e) {
@@ -305,6 +343,7 @@ async function generate() {
       message: e.message,
       createdAt: new Date().toISOString(),
       prompt,
+      orchestration: null,
       outputKind: 'generation',
     });
   } finally {
@@ -344,6 +383,7 @@ async function debugCode() {
       database: data.database,
       generationId: debugSourceGenerationId,
       prompt: code.slice(0, 400),
+      orchestration: null,
       outputKind: 'debug',
       errorMessages: errors,
     });
@@ -355,6 +395,7 @@ async function debugCode() {
       message: e.message,
       createdAt: new Date().toISOString(),
       prompt: code.slice(0, 400),
+      orchestration: null,
       outputKind: 'debug',
       errorMessages: errors,
     });

@@ -227,6 +227,11 @@ function mapLocalKnowledge(entry) {
     validation_rules: entry.validationRules || entry.validation_rules || [],
     example_prompt: entry.examplePrompt || entry.example_prompt || null,
     quality_score: Number(entry.qualityScore ?? entry.quality_score ?? 0.65),
+    source_table: entry.sourceTable || entry.source_table || "cad_knowledge",
+    source_url: entry.sourceUrl || entry.source_url || null,
+    source_type: entry.sourceType || entry.source_type || null,
+    component_tags: entry.componentTags || entry.component_tags || [],
+    operation_tags: entry.operationTags || entry.operation_tags || [],
   };
 }
 
@@ -241,6 +246,11 @@ function mapCadKnowledge(row) {
     modeling_notes: row.modeling_notes || [],
     example_prompt: row.example_prompt || null,
     quality_score: 0.7,
+    source_table: row.source_table || "cad_knowledge",
+    source_url: row.source_url || null,
+    source_type: row.source_type || null,
+    component_tags: row.component_tags || [],
+    operation_tags: row.operation_tags || [],
   };
 }
 
@@ -255,6 +265,9 @@ function mapShapeKnowledge(row) {
     parameter_hints: row.default_dims ? [`Default dimensions: ${JSON.stringify(row.default_dims)}`] : [],
     modeling_notes: row.notes ? [row.notes] : [],
     quality_score: 0.7,
+    source_table: "shape_knowledge",
+    component_tags: [],
+    operation_tags: [],
   };
 }
 
@@ -277,6 +290,11 @@ function mapCadMemory(row) {
     success_count: Number(row.success_count || 0),
     failure_count: Number(row.failure_count || 0),
     _score: Number(row.match_score ?? row._score ?? 0),
+    source_table: row.source_table || "cad_memory",
+    source_url: row.source_url || null,
+    source_type: row.source_type || null,
+    component_tags: row.component_tags || [],
+    operation_tags: row.operation_tags || [],
   };
 }
 
@@ -308,6 +326,12 @@ function loadOptionalCsv(pathOrUrl, options = {}) {
   const filePath = toFsPath(pathOrUrl);
   if (!filePath || !existsSync(filePath)) return [];
   return loadSeedEntriesFromCsv(filePath, options);
+}
+
+function loadOptionalJson(pathOrUrl, options = {}) {
+  const filePath = toFsPath(pathOrUrl);
+  if (!filePath || !existsSync(filePath)) return [];
+  return loadSeedEntriesFromJson(filePath, options);
 }
 
 function siblingPath(pathOrUrl, fileName) {
@@ -653,6 +677,12 @@ export function createLearningService({
       memoryType: "fs_example",
       qualityScore: 0.88,
       sourceTable: "cad_memory",
+      memoryOnly: true,
+    }),
+    ...loadOptionalJson(siblingPath(cadKnowledgeCsvPath, "sourceKnowledge.new.json"), {
+      memoryType: "source_reference",
+      qualityScore: 0.9,
+      sourceTable: "source_docs",
       memoryOnly: true,
     }),
     ...loadFeatureScriptExamples(siblingPath(cadKnowledgeCsvPath, "fs_examples")),

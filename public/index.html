@@ -953,6 +953,14 @@
     <div id="run-modal-summary" class="modal-summary"></div>
 
     <div class="modal-grid">
+      <div class="modal-stat">
+        <span>Pipeline Status</span>
+        <strong id="run-modal-pipeline-status">Unknown</strong>
+      </div>
+      <div class="modal-stat">
+        <span>Failed Pass</span>
+        <strong id="run-modal-failed-pass">None</strong>
+      </div>
       <div class="modal-stat wide">
         <span>Database</span>
         <strong id="run-modal-db">Not reported</strong>
@@ -973,7 +981,17 @@
         <span>Examples Used</span>
         <strong id="run-modal-examples">0</strong>
       </div>
+      <div class="modal-stat">
+        <span>Dataset Rows</span>
+        <strong id="run-modal-datasets">0</strong>
+      </div>
+      <div class="modal-stat">
+        <span>Source Rows</span>
+        <strong id="run-modal-sources">0</strong>
+      </div>
     </div>
+
+    <div id="run-modal-passes" class="diagnostics-box" style="display:none; margin-top:14px;"></div>
 
     <div id="run-feedback-panel" class="feedback-panel">
       <div class="card-label">Was this result good?</div>

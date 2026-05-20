@@ -1,0 +1,400 @@
+[
+  {
+    "title": "DeepCAD Prismatic Extrude Corpus",
+    "summary": "Sampled 80 DeepCAD construction files with 153 sketches and 137 extrudes; dominant curves Line3D:1173, Arc3D:297, Circle3D:260.",
+    "tags": [
+      "dataset",
+      "deepcad",
+      "extrude",
+      "sketch",
+      "prismatic"
+    ],
+    "keywords": [
+      "deepcad",
+      "extrude",
+      "sketch",
+      "plate",
+      "bracket",
+      "mount",
+      "frame"
+    ],
+    "parameter_hints": [
+      "sketchCount",
+      "extrudeCount",
+      "dominantCurves",
+      "sampleCount"
+    ],
+    "modeling_notes": [
+      "Use sampled JSON metadata as retrieval guidance instead of raw archives.",
+      "Prefer sketch -> skSolve -> opExtrude patterns for prismatic parts.",
+      "Treat line-dominant profiles as candidates for plates, brackets, and mounts."
+    ],
+    "feature_pattern": "DeepCAD sample metadata -> sketch profile classification -> solved sketch -> opExtrude sequence.",
+    "failure_modes": [
+      "raw archive prompting",
+      "unknown source units",
+      "non-closed loops"
+    ],
+    "validation_rules": [
+      "closed profile before qSketchRegion",
+      "skSolve before opExtrude",
+      "editable dimensions only"
+    ],
+    "example_prompt": "Create a prismatic mounting plate with holes and cutouts",
+    "shape_type": "BOX",
+    "memory_type": "dataset_example",
+    "quality_score": "0.84",
+    "source_table": "cad_memory",
+    "memory_only": "true",
+    "source_url": "",
+    "source_type": "local_dataset",
+    "component_tags": [
+      "plate",
+      "bracket",
+      "frame",
+      "mount"
+    ],
+    "operation_tags": [
+      "extrude",
+      "cut",
+      "pattern"
+    ],
+    "sample_ids": [
+      "0000/00000007.json",
+      "0000/00000061.json",
+      "0000/00000062.json",
+      "0000/00000069.json",
+      "0000/00000070.json",
+      "0000/00000073.json",
+      "0000/00000076.json",
+      "0000/00000093.json"
+    ]
+  },
+  {
+    "title": "DeepCAD Circular Bore And Spacer Corpus",
+    "summary": "DeepCAD samples include 25 circle-dominant profiles suited for bushings, spacers, bores, and cylindrical interfaces.",
+    "tags": [
+      "dataset",
+      "deepcad",
+      "circular",
+      "bore",
+      "spacer"
+    ],
+    "keywords": [
+      "deepcad",
+      "circle3d",
+      "bore",
+      "spacer",
+      "bushing",
+      "shaft"
+    ],
+    "parameter_hints": [
+      "holeRadius",
+      "outerRadius",
+      "faceWidth"
+    ],
+    "modeling_notes": [
+      "Map circle-dominant loops to concentric sketch circles and extrudes.",
+      "Useful for shaft bores, bearing spacers, and tube-like parts.",
+      "Keep bores editable in precondition instead of hardcoding diameters."
+    ],
+    "feature_pattern": "circular loop classification -> concentric sketch circles -> skSolve -> opExtrude.",
+    "failure_modes": [
+      "inner radius exceeds outer radius",
+      "bore silently omitted"
+    ],
+    "validation_rules": [
+      "outer radius greater than bore radius",
+      "skSolve before opExtrude"
+    ],
+    "example_prompt": "Create a tube spacer with a center bore",
+    "shape_type": "CYLINDER",
+    "memory_type": "dataset_example",
+    "quality_score": "0.84",
+    "source_table": "cad_memory",
+    "memory_only": "true",
+    "source_url": "",
+    "source_type": "local_dataset",
+    "component_tags": [
+      "spacer",
+      "bushing",
+      "shaft",
+      "bore"
+    ],
+    "operation_tags": [
+      "extrude",
+      "cut"
+    ],
+    "sample_ids": [
+      "0000/00000102.json",
+      "0000/00000119.json",
+      "0000/00000123.json",
+      "0000/00000126.json",
+      "0000/00000131.json",
+      "0000/00000132.json",
+      "0000/00000133.json",
+      "0000/00000134.json"
+    ]
+  },
+  {
+    "title": "Omni-CAD Hollow Prism Captions",
+    "summary": "Omni-CAD caption samples describe hollow rectangular prisms, open spaces, and visible interiors across 6 prompt-relevant examples.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "hollow",
+      "prism",
+      "enclosure"
+    ],
+    "keywords": [
+      "omni-cad",
+      "hollow",
+      "open space",
+      "enclosure",
+      "void",
+      "cab"
+    ],
+    "parameter_hints": [
+      "width",
+      "height",
+      "depth",
+      "wallThickness"
+    ],
+    "modeling_notes": [
+      "Use captions as semantic guidance for hollow bodies and cab-like envelopes.",
+      "Translate hollow/open-space language into extrude then shell or explicit cut strategy.",
+      "Do not infer decorative fillets from captions alone."
+    ],
+    "feature_pattern": "caption intent -> outer envelope -> shell or stable cavity cut -> optional openings.",
+    "failure_modes": [
+      "caption-only dimension hallucination",
+      "shell before body creation"
+    ],
+    "validation_rules": [
+      "shell after body",
+      "wall thickness must preserve cavity"
+    ],
+    "example_prompt": "Create a train cab shell with openings and interior volume",
+    "shape_type": "BOX",
+    "memory_type": "dataset_example",
+    "quality_score": "0.84",
+    "source_table": "cad_memory",
+    "memory_only": "true",
+    "source_url": "",
+    "source_type": "local_dataset",
+    "component_tags": [
+      "cab",
+      "enclosure",
+      "panel"
+    ],
+    "operation_tags": [
+      "extrude",
+      "shell",
+      "cut"
+    ],
+    "sample_ids": [
+      "0000/00004984_00001",
+      "0000/00001235_00001",
+      "0000/00005915_00002",
+      "0000/00008949_00001",
+      "0000/00006673_00006",
+      "0000/00009996_00001"
+    ]
+  },
+  {
+    "title": "Omni-CAD Plate Hole Pattern Captions",
+    "summary": "Omni-CAD caption samples include rectangular bases with central and corner circular cutouts, useful for mounting plates and bearing interfaces.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "plate",
+      "hole pattern",
+      "mount"
+    ],
+    "keywords": [
+      "omni-cad",
+      "cutout",
+      "corner holes",
+      "mounting plate",
+      "bearing block"
+    ],
+    "parameter_hints": [
+      "plateWidth",
+      "plateHeight",
+      "holeCount",
+      "holeSpacing"
+    ],
+    "modeling_notes": [
+      "Use as retrieval guidance for plate-and-hole layouts.",
+      "Prefer one sketch with all closed loops when holes are coplanar.",
+      "Keep mounting patterns source-backed when prompt implies COTS interfaces."
+    ],
+    "feature_pattern": "rectangular base + central bore + corner holes -> skSolve -> opExtrude.",
+    "failure_modes": [
+      "holes outside plate",
+      "blind fillet on all edges"
+    ],
+    "validation_rules": [
+      "holes remain inside profile",
+      "stable edge filters for finishing"
+    ],
+    "example_prompt": "Create a bearing mounting plate with a center bore and corner holes",
+    "shape_type": "PLATE_HOLES",
+    "memory_type": "dataset_example",
+    "quality_score": "0.84",
+    "source_table": "cad_memory",
+    "memory_only": "true",
+    "source_url": "",
+    "source_type": "local_dataset",
+    "component_tags": [
+      "plate",
+      "mount",
+      "bearing block"
+    ],
+    "operation_tags": [
+      "extrude",
+      "cut",
+      "pattern"
+    ],
+    "sample_ids": [
+      "0000/00003774_00003",
+      "0000/00006495_00001",
+      "0000/00007567_00013",
+      "0000/00008571_00009",
+      "0000/00008453_00003",
+      "0000/00007567_00009"
+    ]
+  },
+  {
+    "title": "Omni-CAD Cylindrical Interface Captions",
+    "summary": "Omni-CAD caption samples repeatedly describe cylinders, hollow centers, shafts, and flange-like bases, which are useful for bores and rotary interfaces.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "cylinder",
+      "shaft",
+      "flange"
+    ],
+    "keywords": [
+      "omni-cad",
+      "cylinder",
+      "shaft",
+      "flange",
+      "hollow center",
+      "module"
+    ],
+    "parameter_hints": [
+      "radius",
+      "boreRadius",
+      "faceWidth",
+      "flangeRadius"
+    ],
+    "modeling_notes": [
+      "Use captions to bias toward rotary interfaces, bores, and flange-like supports.",
+      "Good retrieval hints for swerve-style shafts, bores, and wheel interfaces.",
+      "Do not convert caption-only mention of a shaft into a complete assembly without source support."
+    ],
+    "feature_pattern": "cylindrical or flange semantic hint -> explicit bore/body parameters -> stable revolve or extrude.",
+    "failure_modes": [
+      "single-cylinder fallback for complex assembly",
+      "missing bore parameter exposure"
+    ],
+    "validation_rules": [
+      "complex prompt must not collapse to one cylinder",
+      "all rotary interface dims exposed"
+    ],
+    "example_prompt": "Create a shaft support or wheel-side cylindrical interface",
+    "shape_type": "CYLINDER",
+    "memory_type": "dataset_example",
+    "quality_score": "0.84",
+    "source_table": "cad_memory",
+    "memory_only": "true",
+    "source_url": "",
+    "source_type": "local_dataset",
+    "component_tags": [
+      "shaft",
+      "bore",
+      "flange",
+      "wheel interface"
+    ],
+    "operation_tags": [
+      "revolve",
+      "extrude",
+      "cut"
+    ],
+    "sample_ids": [
+      "0000/00001235_00001",
+      "0000/00005915_00002",
+      "0000/00008949_00001",
+      "0000/00004959_00001",
+      "0000/00001718_00001",
+      "0000/00008919_00001"
+    ]
+  },
+  {
+    "title": "Omni-CAD Frame And Beam Captions",
+    "summary": "Omni-CAD caption samples describe connected beams, handles, interlocking rectangular components, and frame-like geometry suited to structural assemblies.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "frame",
+      "beam",
+      "assembly"
+    ],
+    "keywords": [
+      "omni-cad",
+      "frame",
+      "beam",
+      "interlocking",
+      "drivetrain",
+      "swerve"
+    ],
+    "parameter_hints": [
+      "componentCount",
+      "plateThickness",
+      "spacing",
+      "offsets"
+    ],
+    "modeling_notes": [
+      "Use captions as structural hints for multi-body frame-like assemblies.",
+      "Good retrieval support for drivetrain side plates, forks, and linked beams.",
+      "Complex prompts still require decomposition and source-backed interfaces before code emission."
+    ],
+    "feature_pattern": "caption structure -> multiple rectangular members -> separate bodies -> interface cuts.",
+    "failure_modes": [
+      "single-body simplification",
+      "missing interface subsystem"
+    ],
+    "validation_rules": [
+      "complex assembly must stay multi-body",
+      "planned subsystems must be covered"
+    ],
+    "example_prompt": "Create a belt-driven side plate or structural module frame",
+    "shape_type": "CUSTOM",
+    "memory_type": "dataset_example",
+    "quality_score": "0.84",
+    "source_table": "cad_memory",
+    "memory_only": "true",
+    "source_url": "",
+    "source_type": "local_dataset",
+    "component_tags": [
+      "frame",
+      "fork",
+      "plate",
+      "module"
+    ],
+    "operation_tags": [
+      "extrude",
+      "boolean",
+      "cut"
+    ],
+    "sample_ids": [
+      "0000/00009949_00011",
+      "0000/00004917_00002",
+      "0000/00006486_00010",
+      "0000/00005915_00002",
+      "0000/00008571_00009",
+      "0000/00009996_00001"
+    ]
+  }
+]

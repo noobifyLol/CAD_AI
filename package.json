@@ -10,6 +10,7 @@
     "seed:knowledge": "node scripts/seedCadKnowledge.js",
     "import:cad-knowledge": "node scripts/importCadKnowledgeCsv.js",
     "import:cad-pruning": "node scripts/importCadKnowledgeCsv.js ./data/cadPruningTable.csv",
+    "import:dataset-summaries": "node scripts/ingest_cad_mllm_dataset.js",
     "prune:cad-memory": "node scripts/pruneCadMemory.js",
     "db:learning-report": "node scripts/dbLearningReport.js",
     "build:research-import": "node scripts/build_research_import_artifacts.js",

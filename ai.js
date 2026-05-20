@@ -34,14 +34,28 @@ const MAX_RETRIEVED_SNIPPET_CHARS = Math.max(400, Math.min(4000, Number(process.
 const MAX_OMNI_SUMMARY_CHARS = Math.max(400, Math.min(2400, Number(process.env.CAD_MAX_OMNI_SUMMARY_CHARS || 1100)));
 const PROJECT_ROOT = fileURLToPath(new URL(".", import.meta.url));
 const FS_EXAMPLES_DIR = join(PROJECT_ROOT, "data", "fs_examples");
+const SOURCE_KNOWLEDGE_PATH = join(PROJECT_ROOT, "data", "sourceKnowledge.new.json");
+const DATASET_SUMMARY_PATH = join(PROJECT_ROOT, "data", "cadDatasetSummaries.json");
 const LOCAL_OMNI_SUMMARY_PATHS = [
   join(PROJECT_ROOT, "docs", "research_summaries", "cad_mllm_and_omni_cad.md"),
   join(PROJECT_ROOT, "docs", "research_summaries", "local_omni_cad_dataset.md"),
   join(PROJECT_ROOT, "docs", "research_summaries", "deepcad.md"),
   join(PROJECT_ROOT, "docs", "research_summaries", "cambridge_text_to_design.md"),
 ];
+const NUMBERED_SHARED_GROQ_KEYS = [
+  "GROQ_API_KEY",
+  "GROQ_API_KEY2",
+  "GROQ_API_KEY3",
+  "GROQ_API_KEY4",
+  "GROQ_API_KEY5",
+  "GROQ_API_KEY6",
+  "GROQ_API_KEY7",
+  "GROQ_API_KEY8",
+  "GROQ_API_KEY9",
+];
+const FIXED_KEY_SLOT_SEQUENCE = ["k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9"];
 const STAGE_API_KEY_ENV = {
-  shared: ["GROQ_API_KEYS", "GROQ_API_KEY"],
+  shared: ["GROQ_API_KEYS", ...NUMBERED_SHARED_GROQ_KEYS],
   dimensions: ["GROQ_DIM_API_KEYS", "GROQ_DIM_API_KEY"],
   planning: ["GROQ_PLAN_API_KEYS", "GROQ_PLAN_API_KEY"],
   retrieval: ["GROQ_RETRIEVAL_API_KEYS", "GROQ_RETRIEVAL_API_KEY"],
@@ -54,6 +68,8 @@ const groqClientCache = new Map();
 const stageCursor = new Map();
 let cachedFsExampleLibrary = null;
 let cachedOmniSummaryText = null;
+let cachedSourceKnowledgeRows = null;
+let cachedDatasetSummaryRows = null;
 
 function splitEnvList(rawValue) {
   return String(rawValue || "")
@@ -98,8 +114,12 @@ function stableHash(input) {
 function pickStageCredential(stage = "generation", affinity = "") {
   const pool = getStageKeyPool(stage);
   let slotIndex = 0;
+  const requestedSlot = arguments.length > 2 ? arguments[2] : null;
 
-  if (affinity) {
+  if (requestedSlot && /^k\d+$/i.test(String(requestedSlot))) {
+    const explicitIndex = Math.max(0, Number(String(requestedSlot).slice(1)) - 1);
+    slotIndex = explicitIndex % pool.length;
+  } else if (affinity) {
     slotIndex = stableHash(`${stage}:${affinity}`) % pool.length;
   } else {
     const current = stageCursor.get(stage) || 0;
@@ -110,7 +130,9 @@ function pickStageCredential(stage = "generation", affinity = "") {
   return {
     apiKey: pool[slotIndex],
     slotIndex,
-    slotLabel: `${stage}-slot-${slotIndex + 1}`,
+    slotLabel: requestedSlot && /^k\d+$/i.test(String(requestedSlot))
+      ? String(requestedSlot).toLowerCase()
+      : `${stage}-slot-${slotIndex + 1}`,
     poolSize: pool.length,
   };
 }
@@ -155,6 +177,41 @@ function loadLocalOmniSummaryText() {
     .map(filePath => readFileSync(filePath, "utf8"))
     .join("\n");
   return cachedOmniSummaryText;
+}
+
+function loadJsonRows(filePath, cacheKey) {
+  if (cacheKey === "source" && cachedSourceKnowledgeRows) return cachedSourceKnowledgeRows;
+  if (cacheKey === "dataset" && cachedDatasetSummaryRows) return cachedDatasetSummaryRows;
+  if (!existsSync(filePath)) {
+    if (cacheKey === "source") cachedSourceKnowledgeRows = [];
+    if (cacheKey === "dataset") cachedDatasetSummaryRows = [];
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.rows)
+        ? parsed.rows
+        : [];
+    if (cacheKey === "source") cachedSourceKnowledgeRows = rows;
+    if (cacheKey === "dataset") cachedDatasetSummaryRows = rows;
+    return rows;
+  } catch (err) {
+    console.warn(`[AI] Could not read ${cacheKey} rows from ${filePath}: ${err.message}`);
+    if (cacheKey === "source") cachedSourceKnowledgeRows = [];
+    if (cacheKey === "dataset") cachedDatasetSummaryRows = [];
+    return [];
+  }
+}
+
+function loadSourceKnowledgeRows() {
+  return loadJsonRows(SOURCE_KNOWLEDGE_PATH, "source");
+}
+
+function loadDatasetSummaryRows() {
+  return loadJsonRows(DATASET_SUMMARY_PATH, "dataset");
 }
 
 export function getModelConfig() {
@@ -248,7 +305,7 @@ function normalizeMessageContent(content) {
 }
 
 async function callGroqVisionLLM(messages, model = VISION_MODEL, options = {}) {
-  const credential = pickStageCredential("vision", options.affinity);
+  const credential = pickStageCredential("vision", options.affinity, options.keySlot);
   const client = getGroqClient(credential.apiKey, VISION_TIMEOUT_MS);
 
   try {
@@ -286,7 +343,7 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL, options = {}) {
 // ------------------------------
 async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {}) {
   const stage = options.stage || "generation";
-  const credential = pickStageCredential(stage, options.affinity);
+  const credential = pickStageCredential(stage, options.affinity, options.keySlot);
   const messages = Array.isArray(messagesOrPrompt)
     ? messagesOrPrompt
     : [{ role: "user", content: String(messagesOrPrompt) }];
@@ -1528,7 +1585,7 @@ function buildContextMeta(dims, learningContext = {}) {
     project: "CAD_AI",
     units: "inch",
     targetPlatform: "Onshape",
-    generatorVersion: "multi_key_candidate_pipeline_v1",
+    generatorVersion: "nine_key_four_pass_pipeline_v1",
     shape: dims.shape,
     confidence: dims.confidence,
     generationStrategy: GENERATION_STRATEGY,
@@ -1536,6 +1593,137 @@ function buildContextMeta(dims, learningContext = {}) {
     allowTemplateFallback: ALLOW_TEMPLATE_FALLBACK,
     adaptiveExamples: Array.isArray(learningContext.examples) ? learningContext.examples.length : 0,
     adaptiveKnowledge: Array.isArray(learningContext.knowledge) ? learningContext.knowledge.length : 0,
+  };
+}
+
+function buildKeySlotUsage() {
+  return FIXED_KEY_SLOT_SEQUENCE.map((slotLabel, index) => ({
+    slotLabel,
+    stage: [
+      "dimensions",
+      "planning",
+      "retrieval_db_source",
+      "retrieval_dataset",
+      "block_synth_candidate_a",
+      "block_synth_candidate_b",
+      "block_synth_candidate_c",
+      "topology_weaver",
+      "validation_repair",
+    ][index],
+  }));
+}
+
+function isComplexAssemblyPrompt(prompt = "") {
+  return /\b(swerve|module|gearbox|cab|drivetrain|bearing block|fork|motor mount|mounting plate|pulley|belt|chain|wheel fork|cots|assembly|subassembly)\b/i.test(prompt);
+}
+
+function traceableRow(row = {}, kind = "knowledge") {
+  return {
+    kind,
+    title: row.title || row.id || "untitled",
+    summary: normalizeText(row.summary || row.text || "").slice(0, 240),
+    keywords: Array.isArray(row.keywords) ? row.keywords.slice(0, 10) : [],
+    source_table: row.source_table || row.sourceTable || kind,
+    source_url: row.source_url || row.sourceUrl || null,
+    source_type: row.source_type || row.sourceType || null,
+    component_tags: row.component_tags || row.componentTags || [],
+    operation_tags: row.operation_tags || row.operationTags || [],
+    sample_ids: row.sample_ids || row.sampleIds || [],
+    score: Number(row._score ?? row.score ?? 0),
+  };
+}
+
+function scoreTraceableRow(row, keywords = [], stepKeywords = []) {
+  const haystack = normalizeText([
+    row.title,
+    row.summary,
+    ...(row.keywords || []),
+    ...(row.component_tags || row.componentTags || []),
+    ...(row.operation_tags || row.operationTags || []),
+    ...(row.tags || []),
+  ].join(" ")).toLowerCase();
+  const combinedKeywords = uniqueStrings([...(keywords || []), ...(stepKeywords || [])]).map(keyword => keyword.toLowerCase());
+  return combinedKeywords.reduce((score, keyword) => score + (haystack.includes(keyword) ? 1 : 0), 0);
+}
+
+function selectTraceableRows(rows = [], keywords = [], stepKeywords = [], limit = 6, kind = "knowledge") {
+  return rows
+    .map(row => ({ ...traceableRow(row, kind), score: scoreTraceableRow(row, keywords, stepKeywords) }))
+    .filter(row => row.score > 0)
+    .sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
+    .slice(0, limit);
+}
+
+function summarizeTraceableRows(rows = []) {
+  if (!rows.length) return "none";
+  return rows
+    .map(row => `${row.title} [${row.source_table}]${row.source_url ? ` <${row.source_url}>` : ""}`)
+    .join("; ");
+}
+
+function compactPromptRows(rows = [], limit = 5) {
+  return rows.slice(0, limit).map(row => ({
+    title: row.title,
+    source_table: row.source_table,
+    source_type: row.source_type || null,
+    summary: normalizeText(row.summary || "").slice(0, 140),
+    keywords: Array.isArray(row.keywords) ? row.keywords.slice(0, 5) : [],
+    component_tags: Array.isArray(row.component_tags) ? row.component_tags.slice(0, 4) : [],
+    operation_tags: Array.isArray(row.operation_tags) ? row.operation_tags.slice(0, 4) : [],
+    sample_ids: Array.isArray(row.sample_ids) ? row.sample_ids.slice(0, 3) : [],
+  }));
+}
+
+function compactStepMatches(stepMatches = []) {
+  return stepMatches.map(step => ({
+    stepId: step.stepId,
+    dbRows: (step.dbRows || []).slice(0, 3).map(row => row.title),
+    datasetRows: (step.datasetRows || []).slice(0, 2).map(row => row.title),
+    sourceRows: (step.sourceRows || []).slice(0, 3).map(row => row.title),
+  }));
+}
+
+function compactBlockCandidateForPrompt(candidate) {
+  return {
+    candidateId: candidate?.candidateId || null,
+    coverage: candidate?.coverage || null,
+    missingRequirements: candidate?.missingRequirements || [],
+    blocks: Array.isArray(candidate?.blocks)
+      ? candidate.blocks.map(block => ({
+          stepId: block.stepId,
+          name: block.name,
+          operation: block.operation,
+          dependsOn: block.dependsOn || [],
+          bodyPolicy: block.bodyPolicy,
+          parametersUsed: block.parametersUsed || [],
+          createdQueries: block.createdQueries || [],
+          consumedQueries: block.consumedQueries || [],
+          validationChecks: block.validationChecks || [],
+          fsBlock: String(block.fsBlock || "").slice(0, 1400),
+        }))
+      : [],
+  };
+}
+
+function buildBlockedResult(prompt, dims, orchestration, blockers = [], reason = "") {
+  const cleanBlockers = uniqueStrings((blockers || []).map(entry => normalizeText(entry)).filter(Boolean));
+  const statusOrchestration = {
+    ...(orchestration || {}),
+    status: "blocked",
+    blockers: cleanBlockers,
+  };
+  return {
+    code: "",
+    featureName: dims.featureName || "blockedFeature",
+    featureLabel: dims.featureLabel || "Blocked Feature",
+    thinking: buildThinkingTrace(prompt, dims, {
+      generationMode: "blocked_trace_only",
+      customReasoning: reason || cleanBlockers.join(" | "),
+      orchestration: statusOrchestration,
+    }),
+    dims,
+    generationMode: "blocked_trace_only",
+    orchestration: statusOrchestration,
   };
 }
 
@@ -2302,6 +2490,7 @@ async function extractDims(prompt, learningContext = {}, history = [], options =
     const raw = await chat(messages, extractorModel, [DIM_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
       stage: "dimensions",
       affinity: options.affinity || options.requestId || makeRequestId(prompt),
+      keySlot: "k1",
     });
     const parsed = JSON.parse(stripJson(raw));
     const d = normalizeDims({
@@ -2343,7 +2532,9 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   const lines = [`Prompt analyzed: "${prompt}"`];
   lines.push(`Shape: ${d.shape}  |  Confidence: ${d.confidence}`);
   const generationLabel =
-    meta.generationMode === "template_fallback"
+    meta.generationMode === "blocked_trace_only"
+      ? "Blocked trace only — no code returned"
+      : meta.generationMode === "template_fallback"
       ? "AI-authored feature — emergency template fallback triggered after repair failure"
       : meta.generationMode === "template"
         ? "Template output (CI/test override — template_only env)"
@@ -2399,6 +2590,15 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   if (meta.customReasoning) {
     lines.push(`Custom model notes: ${normalizeText(meta.customReasoning)}`);
   }
+  if (meta.orchestration?.status) {
+    lines.push(`Pipeline status: ${meta.orchestration.status}`);
+    if (meta.orchestration.failedPass) {
+      lines.push(`Failed pass: ${meta.orchestration.failedPass}`);
+    }
+    if (Array.isArray(meta.orchestration.blockers) && meta.orchestration.blockers.length) {
+      lines.push(`Blockers: ${meta.orchestration.blockers.join(" | ")}`);
+    }
+  }
   return lines.join("\n");
 }
 // -----------------------------------MAIN PROMPT FOR THE AI--------------------------------------------------------------
@@ -2431,6 +2631,101 @@ Return only compile-safe FeatureScript 2931 with this invariant set:
 - opSweep uses profiles and a connected path query
 - no unused helper variables
 - if validation fails, repair from pruning rules; after repair failure, use the nearest validated template.`;
+
+export const FOUR_PASS_DECOMPOSITION_SYSTEM = `You are MODEL KEY [DECOMPOSITION_PLANNER].
+Return JSON only.
+Break the user's mechanical prompt into a chronological CAD build plan with these fields:
+{
+  "shapeClass": "prismatic|axisymmetric|assembly|hybrid|custom",
+  "assemblyComponents": ["component names"],
+  "baseSkeleton": ["planes, axes, offsets, datums"],
+  "primaryProfiles": ["major sketches or silhouettes"],
+  "materialAddition": ["extrudes, revolves, sweeps, lofts"],
+  "materialRemoval": ["cuts, bores, pockets, hollows"],
+  "finishing": ["fillets, chamfers, patterns, tolerances"],
+  "forbiddenSimplifications": ["things not allowed"],
+  "steps": [
+    {
+      "id": "step_id",
+      "name": "step name",
+      "operation": "extrude|revolve|loft|sweep|shell|boolean|pattern|fillet|chamfer|cut",
+      "goal": "what the step creates",
+      "dependsOn": ["prior step ids"],
+      "retrievalKeywords": ["keywords"],
+      "validationFocus": ["safety checks"],
+      "bodyPolicy": "separate|union|subtract"
+    }
+  ]
+}
+Rules:
+- Complex prompts like swerve modules, cabs, drivetrains, bearing blocks, forked modules, and motor mounts must stay multi-component.
+- Do not simplify a complex assembly to one wheel, one block, one cylinder, or one fallback body.
+- If dimensions are missing, keep them as retrievable/defaultable parameters rather than inventing hard numbers silently.`;
+
+export const FOUR_PASS_BLOCK_SYNTH_SYSTEM = `You are MODEL KEY [BLOCK_SYNTHESIZER].
+Return JSON only.
+Generate isolated FeatureScript operation blocks, not a full file.
+Schema:
+{
+  "candidateId": "c1",
+  "coverageNotes": ["short notes"],
+  "missingRequirements": ["missing items"],
+  "blocks": [
+    {
+      "stepId": "step_id",
+      "name": "human step name",
+      "operation": "extrude|revolve|loft|sweep|shell|boolean|pattern|fillet|chamfer|cut",
+      "dependsOn": ["step ids"],
+      "bodyPolicy": "separate|union|subtract",
+      "parametersUsed": ["definition.param"],
+      "createdQueries": ["query alias names"],
+      "consumedQueries": ["query alias names"],
+      "validationChecks": ["checks"],
+      "fsBlock": "FeatureScript statements for this step only"
+    }
+  ]
+}
+Rules:
+- Every block must stay inside its own step namespace using id + stepName patterns.
+- Sketches must be solved before downstream operations.
+- Revolve axes must be explicit Line values.
+- Do not output a complete FeatureScript file in this pass.
+- For complex prompts, missing a major subsystem is worse than returning fewer cosmetic details.`;
+
+export const FOUR_PASS_WEAVER_SYSTEM = `You are MODEL KEY [TOPOLOGY_WEAVER].
+Return JSON only.
+Input contains a decomposition plan, retrieved sources, and isolated blocks.
+Either assemble a complete FeatureScript 2931 file or return a blocked decision.
+Schema:
+{
+  "status": "completed|blocked",
+  "featureName": "camelCaseFeature",
+  "featureLabel": "Readable Name",
+  "reasoning": "short explanation",
+  "blockers": ["if blocked"],
+  "code": "full FeatureScript file or empty string"
+}
+Rules:
+- Build the precondition block here and expose every controlling parameter explicitly.
+- Resolve cross-step queries safely.
+- Keep separate bodies separate unless the plan explicitly calls for boolean union.
+- Never use blind whole-body edge selections for fillet or chamfer.
+- If the retrieved evidence is insufficient for a complex assembly, return blocked instead of fallback geometry.`;
+
+export const FOUR_PASS_VALIDATOR_SYSTEM = `You are MODEL KEY [VALIDATION_REPAIR].
+Return JSON only.
+Review the final weaved FeatureScript and the orchestration trace.
+Schema:
+{
+  "status": "pass|blocked|repair",
+  "blockers": ["issues that should block the result"],
+  "notes": ["short validation notes"]
+}
+Block the result if:
+- a complex assembly collapsed into a generic primitive or missing subsystem
+- source-backed constraints were not carried through
+- fillet/chamfer targeting is unstable
+- key requested components are absent`;
 
 const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring assistant. Follow these rules exactly:
 - Output only valid FeatureScript 2931 code and nothing else unless asked for explanation.
@@ -3016,6 +3311,532 @@ function selectBestCandidate(candidates = []) {
   return [...passing].sort((left, right) => scoreCandidate(right) - scoreCandidate(left))[0] || null;
 }
 
+function planFallbackForPrompt(prompt, dims) {
+  const complex = isComplexAssemblyPrompt(prompt);
+  const baseSteps = complex
+    ? [
+        {
+          id: "skeleton",
+          name: "Base skeleton and datums",
+          operation: "extrude",
+          goal: "Establish reference planes, offsets, and main mounting envelope",
+          dependsOn: [],
+          retrievalKeywords: extractPromptKeywords(`${prompt} reference planes datums mount`, 8),
+          validationFocus: ["editable parameters", "separate bodies", "no simplification"],
+          bodyPolicy: "separate",
+        },
+        {
+          id: "primaryBodies",
+          name: "Primary structural bodies",
+          operation: "extrude",
+          goal: "Create the main plates, forks, blocks, or frame members",
+          dependsOn: ["skeleton"],
+          retrievalKeywords: extractPromptKeywords(`${prompt} frame plate fork block bearing mount`, 10),
+          validationFocus: ["closed profile", "skSolve", "separate bodies"],
+          bodyPolicy: "separate",
+        },
+        {
+          id: "interfaces",
+          name: "Mechanical interfaces",
+          operation: "cut",
+          goal: "Add bores, hole patterns, bearing seats, and motor or shaft interfaces",
+          dependsOn: ["primaryBodies"],
+          retrievalKeywords: extractPromptKeywords(`${prompt} shaft bearing bore mounting pattern belt pulley`, 10),
+          validationFocus: ["stable cuts", "query safety", "source-backed dimensions"],
+          bodyPolicy: "separate",
+        },
+      ]
+    : [
+        {
+          id: "mainBody",
+          name: "Primary body",
+          operation: dims.shape === "CONE" ? "revolve" : "extrude",
+          goal: "Create the main part volume",
+          dependsOn: [],
+          retrievalKeywords: extractPromptKeywords(`${prompt} ${dims.shape}`, 8),
+          validationFocus: ["skSolve", "editable parameters"],
+          bodyPolicy: "separate",
+        },
+      ];
+
+  const finishingStep = {
+    id: "finishing",
+    name: "Finishing operations",
+    operation: "fillet",
+    goal: "Apply only stable finishing operations after solid creation",
+    dependsOn: [baseSteps[baseSteps.length - 1].id],
+    retrievalKeywords: extractPromptKeywords(`${prompt} fillet chamfer finish`, 6),
+    validationFocus: ["stable edge query", "radius smaller than local span"],
+    bodyPolicy: "separate",
+  };
+
+  return {
+    shapeClass: complex ? "assembly" : dims.shape.toLowerCase(),
+    assemblyComponents: complex
+      ? uniqueStrings(
+          extractPromptKeywords(`${prompt} bearing block fork mount plate wheel shaft pulley belt module cab drivetrain`, 12)
+        )
+      : [dims.shape.toLowerCase()],
+    baseSkeleton: complex
+      ? ["primary reference plane", "central axis", "mounting offsets"]
+      : ["primary sketch plane"],
+    primaryProfiles: complex
+      ? ["main plate outline", "interface bores", "fork or frame profiles"]
+      : ["main silhouette"],
+    materialAddition: baseSteps.map(step => step.name),
+    materialRemoval: complex ? ["bearing seats", "bores", "mounting holes"] : ["optional bores or pockets"],
+    finishing: ["fillets", "chamfers", "patterns"],
+    forbiddenSimplifications: complex
+      ? ["single wheel fallback", "single cylinder fallback", "single box fallback", "template fallback"]
+      : ["hidden hardcoded dimensions"],
+    steps: [...baseSteps, finishingStep],
+  };
+}
+
+async function buildFourPassDecomposition(prompt, dims, learningContext, requestId) {
+  const raw = await chat([
+    { role: "system", content: withLearningContext(FOUR_PASS_DECOMPOSITION_SYSTEM, learningContext) },
+    {
+      role: "user",
+      content: [
+        `USER REQUEST: ${prompt}`,
+        `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+        `COMPLEX_ASSEMBLY: ${isComplexAssemblyPrompt(prompt)}`,
+        `Return JSON only.`,
+      ].join("\n"),
+    },
+  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "planning",
+    affinity: `${requestId}:decomposition`,
+    keySlot: "k2",
+  });
+
+  return tryParseJson(raw, planFallbackForPrompt(prompt, dims)) || planFallbackForPrompt(prompt, dims);
+}
+
+function normalizeRetrievedRows(rows = [], kind = "knowledge") {
+  return rows.map(row => traceableRow(row, kind));
+}
+
+async function buildDatabaseRetrievalPass(prompt, dims, learningContext, decomposition, requestId) {
+  const promptKeywords = extractPromptKeywords(`${prompt} ${dims.shape}`, 14);
+  const stepKeywords = uniqueStrings((decomposition.steps || []).flatMap(step => step.retrievalKeywords || []));
+  const knowledgeRows = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
+  const dbRows = selectTraceableRows(
+    knowledgeRows.filter(row => !String(row.source_table || "").includes("source_docs") && !String(row.memory_type || "").includes("dataset")),
+    promptKeywords,
+    stepKeywords,
+    6,
+    "db"
+  );
+  const datasetRows = selectTraceableRows(
+    [
+      ...loadDatasetSummaryRows(),
+      ...knowledgeRows.filter(row => String(row.memory_type || "").includes("dataset")),
+    ],
+    promptKeywords,
+    stepKeywords,
+    6,
+    "dataset"
+  );
+  const sourceRows = selectTraceableRows(
+    [
+      ...loadSourceKnowledgeRows(),
+      ...knowledgeRows.filter(row => String(row.source_table || "").includes("source_docs")),
+      ...(Array.isArray(learningContext.featureScriptDocs)
+        ? learningContext.featureScriptDocs.map(doc => ({
+            title: doc.title,
+            summary: doc.text,
+            keywords: extractPromptKeywords(`${doc.title || ""} ${doc.text || ""}`, 10),
+            source_table: "featurescript_docs",
+            source_url: doc.source || null,
+            source_type: "local_doc",
+          }))
+        : []),
+    ],
+    promptKeywords,
+    stepKeywords,
+    6,
+    "source"
+  );
+
+  const retrievalContext = JSON.stringify({
+    prompt,
+    dims: {
+      shape: dims.shape,
+      confidence: dims.confidence,
+      widthInches: dims.widthInches,
+      heightInches: dims.heightInches,
+      depthInches: dims.depthInches,
+      radiusInches: dims.radiusInches,
+      holeRadiusInches: dims.holeRadiusInches,
+    },
+    steps: (decomposition.steps || []).map(step => ({
+      id: step.id,
+      operation: step.operation,
+      goal: step.goal,
+      retrievalKeywords: step.retrievalKeywords || [],
+      validationFocus: step.validationFocus || [],
+    })),
+    dbRows: compactPromptRows(dbRows, 5),
+    sourceRows: compactPromptRows(sourceRows, 5),
+    datasetRows: compactPromptRows(datasetRows, 5),
+  });
+
+  const [dbSourceSummaryRaw, datasetSummaryRaw] = await Promise.all([
+    chat([
+      { role: "system", content: "You are MODEL KEY [DATABASE_RETRIEVER] for DB and source rows. Return plain text only." },
+      {
+        role: "user",
+        content: `Summarize the highest-value cad_knowledge, cad_memory, cad_pruning_table, and FeatureScript/FRC source rows for this prompt in 5 sentences max.\n${retrievalContext}`,
+      },
+    ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+      stage: "retrieval",
+      affinity: `${requestId}:retrieval:db`,
+      keySlot: "k3",
+    }),
+    chat([
+      { role: "system", content: "You are MODEL KEY [DATABASE_RETRIEVER] for dataset rows. Return plain text only." },
+      {
+        role: "user",
+        content: `Summarize only the prompt-relevant DeepCAD and Omni-CAD dataset rows in 5 sentences max. Focus on operation patterns, component terms, and safe defaults.\n${retrievalContext}`,
+      },
+    ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+      stage: "retrieval",
+      affinity: `${requestId}:retrieval:dataset`,
+      keySlot: "k4",
+    }),
+  ]);
+
+  const stepMatches = (decomposition.steps || []).map(step => ({
+    stepId: step.id,
+    dbRows: selectTraceableRows(dbRows, promptKeywords, step.retrievalKeywords || [], 4, "db"),
+    datasetRows: selectTraceableRows(datasetRows, promptKeywords, step.retrievalKeywords || [], 3, "dataset"),
+    sourceRows: selectTraceableRows(sourceRows, promptKeywords, step.retrievalKeywords || [], 4, "source"),
+  }));
+
+  return {
+    sourcePrecedence: [
+      "user prompt dimensions and constraints",
+      "cad_knowledge / cad_memory / cad_pruning_table",
+      "source-derived FRC and FeatureScript rules",
+      "prompt-relevant DeepCAD and Omni-CAD summaries",
+      "non-critical defaults only when traced",
+    ],
+    dbRows,
+    datasetRows,
+    sourceRows,
+    stepMatches,
+    summaries: {
+      dbAndSource: normalizeText(dbSourceSummaryRaw),
+      dataset: normalizeText(datasetSummaryRaw),
+    },
+  };
+}
+
+function buildBlockSynthesisPrompt({ prompt, dims, decomposition, retrieval, candidateId }) {
+  return [
+    `USER REQUEST: ${prompt}`,
+    `CANDIDATE: ${candidateId}`,
+    `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+    `DECOMPOSITION: ${JSON.stringify({
+      shapeClass: decomposition.shapeClass,
+      assemblyComponents: decomposition.assemblyComponents,
+      forbiddenSimplifications: decomposition.forbiddenSimplifications,
+      steps: (decomposition.steps || []).map(step => ({
+        id: step.id,
+        name: step.name,
+        operation: step.operation,
+        goal: step.goal,
+        dependsOn: step.dependsOn || [],
+        validationFocus: step.validationFocus || [],
+      })),
+    })}`,
+    `SOURCE_PRECEDENCE: ${retrieval.sourcePrecedence.join(" -> ")}`,
+    `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 4))}`,
+    `SOURCE_ROWS: ${JSON.stringify(compactPromptRows(retrieval.sourceRows, 4))}`,
+    `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 4))}`,
+    `STEP_MATCHES: ${JSON.stringify(compactStepMatches(retrieval.stepMatches))}`,
+    `Do not output a full FeatureScript file. Return JSON only.`,
+  ].join("\n\n");
+}
+
+function parseBlockCandidate(raw, candidateId, decomposition) {
+  const fallback = {
+    candidateId,
+    coverageNotes: ["Block synthesis returned invalid JSON."],
+    missingRequirements: ["Could not parse isolated block output."],
+    blocks: [],
+  };
+  const parsed = tryParseJson(raw, fallback) || fallback;
+  const steps = Array.isArray(decomposition.steps) ? decomposition.steps : [];
+  const covered = new Set((Array.isArray(parsed.blocks) ? parsed.blocks : []).map(block => block.stepId));
+  return {
+    ...parsed,
+    candidateId,
+    blocks: Array.isArray(parsed.blocks) ? parsed.blocks : [],
+    coverage: {
+      coveredSteps: [...covered],
+      totalSteps: steps.length,
+      ratio: steps.length ? covered.size / steps.length : 0,
+    },
+  };
+}
+
+function scoreBlockCandidate(candidate) {
+  return (candidate.coverage?.ratio || 0) * 100
+    - ((candidate.missingRequirements || []).length * 10)
+    + ((candidate.blocks || []).length * 2);
+}
+
+function selectBestBlockCandidate(candidates = []) {
+  return [...candidates].sort((left, right) => scoreBlockCandidate(right) - scoreBlockCandidate(left))[0] || null;
+}
+
+function fallbackBlockCandidateFromDecomposition(decomposition) {
+  const steps = Array.isArray(decomposition.steps) ? decomposition.steps : [];
+  return {
+    candidateId: "fallback_from_decomposition",
+    coverageNotes: ["Synthesized deterministic fallback blocks from decomposition because model block output was missing or invalid."],
+    missingRequirements: [],
+    blocks: steps.map(step => ({
+      stepId: step.id,
+      name: step.name,
+      operation: step.operation,
+      dependsOn: step.dependsOn || [],
+      bodyPolicy: step.bodyPolicy || "separate",
+      parametersUsed: [],
+      createdQueries: [],
+      consumedQueries: [],
+      validationChecks: step.validationFocus || [],
+      fsBlock: `// Fallback block scaffold for ${step.name}\n// Operation: ${step.operation}\n// Goal: ${step.goal}`,
+    })),
+    coverage: {
+      coveredSteps: steps.map(step => step.id),
+      totalSteps: steps.length,
+      ratio: steps.length ? 1 : 0,
+    },
+  };
+}
+
+function findAssemblyBlockers(prompt, decomposition, blockCandidate, code = "") {
+  const blockers = [];
+  if (isComplexAssemblyPrompt(prompt)) {
+    const stepCount = Array.isArray(decomposition.steps) ? decomposition.steps.length : 0;
+    const coveredCount = blockCandidate?.coverage?.coveredSteps?.length || 0;
+    if (stepCount >= 3 && coveredCount < Math.max(2, stepCount - 1)) {
+      blockers.push("Complex assembly coverage is incomplete across the planned steps.");
+    }
+    if ((decomposition.assemblyComponents || []).length > 2 && (blockCandidate?.blocks || []).length < 2) {
+      blockers.push("Complex assembly collapsed into too few isolated geometry blocks.");
+    }
+    const downstreamOps = (String(code || "").match(/\bop(Extrude|Revolve|Loft|Sweep|Boolean|Fillet|Chamfer|Pattern)\s*\(/g) || []).length;
+    if (code && downstreamOps < 2) {
+      blockers.push("Complex assembly collapsed into too few downstream FeatureScript operations.");
+    }
+  }
+  return blockers;
+}
+
+async function runBlockSynthesisPass(prompt, dims, learningContext, decomposition, retrieval, requestId) {
+  const candidateSlots = [
+    { id: "c1", slot: "k5" },
+    { id: "c2", slot: "k6" },
+    { id: "c3", slot: "k7" },
+  ];
+  const settled = await Promise.all(candidateSlots.map(candidate => chat([
+    { role: "system", content: withLearningContext(FOUR_PASS_BLOCK_SYNTH_SYSTEM, learningContext) },
+    { role: "user", content: buildBlockSynthesisPrompt({ prompt, dims, decomposition, retrieval, candidateId: candidate.id }) },
+  ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "generation",
+    affinity: `${requestId}:blocks:${candidate.id}`,
+    keySlot: candidate.slot,
+  }).then(raw => parseBlockCandidate(raw, candidate.id, decomposition)).catch(err => ({
+    candidateId: candidate.id,
+    coverageNotes: [`Block synthesis failed: ${err.message}`],
+    missingRequirements: [err.message],
+    blocks: [],
+    coverage: { coveredSteps: [], totalSteps: (decomposition.steps || []).length, ratio: 0 },
+  }))));
+
+  let selected = selectBestBlockCandidate(settled);
+  if (!selected || !(selected.blocks || []).length) {
+    selected = fallbackBlockCandidateFromDecomposition(decomposition);
+  }
+  return {
+    candidates: settled,
+    selectedCandidateId: selected?.candidateId || null,
+    selectedCandidate: selected || null,
+  };
+}
+
+async function runTopologyWeaverPass(prompt, dims, learningContext, decomposition, retrieval, blockPass, requestId) {
+  const selectedCandidate = blockPass.selectedCandidate;
+  if (!selectedCandidate) {
+    return { status: "blocked", blockers: ["No block synthesis candidate succeeded."], code: "" };
+  }
+
+  const raw = await chat([
+    { role: "system", content: withLearningContext(FOUR_PASS_WEAVER_SYSTEM, learningContext) },
+    {
+      role: "user",
+      content: [
+        `USER REQUEST: ${prompt}`,
+        `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+        `DECOMPOSITION: ${JSON.stringify({
+          shapeClass: decomposition.shapeClass,
+          assemblyComponents: decomposition.assemblyComponents,
+          forbiddenSimplifications: decomposition.forbiddenSimplifications,
+          steps: (decomposition.steps || []).map(step => ({
+            id: step.id,
+            name: step.name,
+            operation: step.operation,
+            dependsOn: step.dependsOn || [],
+            bodyPolicy: step.bodyPolicy || "separate",
+          })),
+        })}`,
+        `RETRIEVAL_SUMMARY: ${JSON.stringify({
+          sourcePrecedence: retrieval.sourcePrecedence,
+          dbRows: compactPromptRows(retrieval.dbRows, 4),
+          sourceRows: compactPromptRows(retrieval.sourceRows, 4),
+          datasetRows: compactPromptRows(retrieval.datasetRows, 4),
+          stepMatches: compactStepMatches(retrieval.stepMatches),
+          summaries: retrieval.summaries,
+        })}`,
+        `SELECTED_BLOCK_CANDIDATE: ${JSON.stringify(compactBlockCandidateForPrompt(selectedCandidate))}`,
+        `Return JSON only.`,
+      ].join("\n\n"),
+    },
+  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "generation",
+    affinity: `${requestId}:weave`,
+    keySlot: "k8",
+  });
+
+  const parsed = tryParseJson(raw, {
+    status: "blocked",
+    featureName: dims.featureName,
+    featureLabel: dims.featureLabel,
+    reasoning: "Topology weaving did not return valid JSON.",
+    blockers: ["Topology weaving failed."],
+    code: "",
+  });
+  if (parsed?.code) return parsed;
+
+  const fallbackRaw = await chat([
+    { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+    {
+      role: "user",
+      content: [
+        `ASSEMBLE A COMPLETE FEATURESCRIPT FILE FROM THIS FOUR-PASS CONTEXT.`,
+        `USER REQUEST: ${prompt}`,
+        `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+        `DECOMPOSITION: ${JSON.stringify({
+          shapeClass: decomposition.shapeClass,
+          assemblyComponents: decomposition.assemblyComponents,
+          forbiddenSimplifications: decomposition.forbiddenSimplifications,
+          steps: (decomposition.steps || []).map(step => ({
+            id: step.id,
+            name: step.name,
+            operation: step.operation,
+            goal: step.goal,
+          })),
+        })}`,
+        `RETRIEVAL_SUMMARY: ${JSON.stringify({
+          sourcePrecedence: retrieval.sourcePrecedence,
+          summaries: retrieval.summaries,
+          stepMatches: compactStepMatches(retrieval.stepMatches),
+        })}`,
+        `BLOCK_SCAFFOLD: ${JSON.stringify(compactBlockCandidateForPrompt(selectedCandidate))}`,
+        `Return valid JSON only: { "featureName": "...", "featureLabel": "...", "reasoning": "...", "code": "..." }`,
+      ].join("\n\n"),
+    },
+  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "generation",
+    affinity: `${requestId}:weave:fallback`,
+    keySlot: "k8",
+  });
+
+  const fallbackParsed = tryParseJson(fallbackRaw, null);
+  if (fallbackParsed?.code) {
+    return {
+      status: "completed",
+      featureName: fallbackParsed.featureName || dims.featureName,
+      featureLabel: fallbackParsed.featureLabel || dims.featureLabel,
+      reasoning: fallbackParsed.reasoning || "Weaver fallback assembled the final FeatureScript.",
+      blockers: [],
+      code: sanitizeFeatureScript(fallbackParsed.code).code,
+    };
+  }
+
+  return parsed;
+}
+
+async function runValidationRepairPass(prompt, dims, learningContext, decomposition, blockPass, weavePass, requestId) {
+  const candidate = blockPass.selectedCandidate;
+  const preBlockers = [
+    ...(Array.isArray(weavePass.blockers) ? weavePass.blockers : []),
+    ...findAssemblyBlockers(prompt, decomposition, candidate, weavePass.code || ""),
+  ];
+
+  const validatorRaw = await chat([
+    { role: "system", content: FOUR_PASS_VALIDATOR_SYSTEM },
+    {
+      role: "user",
+      content: JSON.stringify({
+        prompt,
+        dims,
+        decomposition,
+        selectedBlockCandidate: candidate,
+        weavePass,
+        localValidationPreview: {
+          issues: validateFeatureScript(weavePass.code || ""),
+          fatalIssues: hasFatalFeatureScriptPatterns(weavePass.code || ""),
+        },
+      }),
+    },
+  ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "validation",
+    affinity: `${requestId}:validation`,
+    keySlot: "k9",
+  });
+
+  const validatorPass = tryParseJson(validatorRaw, { status: "repair", blockers: [], notes: [] }) || { status: "repair", blockers: [], notes: [] };
+  let workingCode = String(weavePass.code || "");
+  let localIssues = validateFeatureScript(workingCode);
+  let fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+  let repaired = false;
+
+  if (workingCode && (localIssues.length || fatalIssues.length)) {
+    const repair = await debugFeatureScript(workingCode, JSON.stringify({ localIssues, fatalIssues }), {
+      learningContext,
+      stage: "repair",
+      affinity: `${requestId}:repair`,
+      keySlot: "k9",
+    });
+    workingCode = sanitizeFeatureScript(repair.fixed || workingCode).code;
+    repaired = true;
+    localIssues = validateFeatureScript(workingCode);
+    fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+  }
+
+  const blockers = uniqueStrings([
+    ...preBlockers,
+    ...(validatorPass.blockers || []),
+    ...fatalIssues.map(issue => issue.message),
+    ...localIssues.map(issue => issue.message),
+  ]);
+
+  return {
+    validatorPass,
+    repaired,
+    finalCode: blockers.length ? "" : workingCode,
+    blockers,
+    localIssues,
+    fatalIssues,
+  };
+}
+
 async function generateCustomFeatureScript(prompt, dims, learningContext = {}, history = []) {
   const context = normalizeLearningContext(learningContext);
   const hasTemplateRef = Array.isArray(context.featureScriptDocs) &&
@@ -3088,172 +3909,133 @@ export async function generateFeatureScript(prompt, options = {}) {
   const dims = applyPromptHeuristics(prompt, await extractDims(prompt, learningContext, history, { requestId }));
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
-  // ── Geometric reasoning ──────────────────────────────────────────────────
   const mathAnalysis = performGeometricReasoning(dims);
   learningContext.notes.push(`Geometric Reasoning: ${mathAnalysis}`);
 
-  // ── Inject validated template as a structural reference example ──────────
-  // The AI reads this to understand expected FeatureScript structure, correct
-  // precondition forms, sketch strategy, and operation order for the shape.
-  // It then writes its OWN code — adapted fully to the user's specific prompt.
-  const templateExample = buildTemplateExampleForDims(dims);
-  if (templateExample) {
-    const shapeLabel = dims.shape.replace(/_/g, " ").toLowerCase();
-    learningContext.featureScriptDocs = [
-      {
-        title: `${dims.shape} reference template`,
-        source: "validated_template",
-        text: templateExample,
-      },
-      ...(Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : []),
-    ];
-    learningContext.notes.push(
-      `Shape reference: A validated ${shapeLabel} template has been provided in DATABASE CONTEXT as a structural example. ` +
-      `Study its preconditions, sketch patterns, and operations, then generate fresh code for this specific request.`
-    );
-    console.log(`[AI] Injected ${dims.shape} template example (${templateExample.length} chars) as reference`);
-  }
-
   const generationMode = decideGenerationMode(prompt, dims);
-  let code;
-  let customReasoning = "";
-  let featureName = dims.featureName;
-  let featureLabel = dims.featureLabel;
-  let orchestration = null;
 
   if (generationMode === "template") {
-    // Only reached when GENERATION_STRATEGY=template_only (CI/testing override)
-    code = buildFeatureScript(dims);
-  } else {
-    try {
-      console.log("[AI] Running multi-key candidate orchestration...");
-      const plan = await buildCadPlan(prompt, dims, learningContext, requestId);
-      const retrievedSnippets = selectRetrievedSnippets(prompt, dims, learningContext);
-      const omniCadSummary = buildOmniCadSummary(prompt, dims, learningContext);
-      const retrievalBriefs = await buildRetrievalBriefs(
-        prompt,
-        dims,
-        learningContext,
-        retrievedSnippets,
-        omniCadSummary,
-        plan,
-        requestId,
-      );
-      const candidateCount = Math.max(1, Number(options.candidateCount || CAD_CANDIDATE_COUNT));
-      const candidateIds = Array.from({ length: candidateCount }, (_entry, index) => `c${index + 1}`);
-
-      const draftedCandidates = await Promise.allSettled(candidateIds.map(candidateId => generateStructuredCandidate({
-        candidateId,
-        prompt,
-        dims,
-        learningContext,
-        history,
-        plan,
-        retrievedSnippets,
-        omniCadSummary,
-        retrievalBriefs,
-        requestId,
-      })));
-
-      const candidateDrafts = draftedCandidates.map((result, index) => {
-        if (result.status === "fulfilled") return result.value;
-        return {
-          candidate_id: candidateIds[index],
-          featureName,
-          featureLabel,
-          notes: [`Draft generation failed: ${result.reason?.message || String(result.reason)}`],
-          code: "",
-          sanitizations: [],
-          status: "failed",
-          checks: {
-            precondition: false,
-            forbidden_patterns: ["draft_generation_failed"],
-            skSolve_present: false,
-            compile_sanity: false,
-          },
-          repairAttempts: [],
-          issues: [result.reason?.message || String(result.reason)],
-        };
-      });
-
-      const repairedCandidates = await Promise.all(candidateDrafts.map(candidate => {
-        if (candidate.status === "failed") return candidate;
-        return repairCandidate(candidate, learningContext, requestId);
-      }));
-      const selectedCandidate = selectBestCandidate(repairedCandidates);
-
-      orchestration = {
-        user_request: prompt,
-        context_meta: buildContextMeta(dims, learningContext),
-        omni_cad_summary: omniCadSummary,
-        candidates: repairedCandidates.map(candidate => ({
-          candidate_id: candidate.candidate_id,
-          status: candidate.status,
-          code: candidate.code,
-          sanitizations: candidate.sanitizations,
-          checks: candidate.checks,
-          estimated_tokens: estimateTokenCount(candidate.code || ""),
-          estimated_cost: estimateCostLabel(estimateTokenCount(candidate.code || "")),
-          notes: candidate.notes || [],
-          repairAttempts: candidate.repairAttempts || [],
-          issues: candidate.issues || [],
-          repair_plan: candidate.repair_plan || undefined,
-        })),
-        selected_candidate_id: selectedCandidate?.candidate_id || null,
-        summary: selectedCandidate
-          ? `Generated ${repairedCandidates.length} independent candidates and selected ${selectedCandidate.candidate_id} after local sanitization, validation, and repair.`
-          : `Generated ${repairedCandidates.length} independent candidates, but none passed all local checks.`,
-        provenance: {
-          snippets_used: retrievedSnippets.map(snippet => snippet.id),
-          tab_citations: Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [],
-        },
-        plan,
-        retrieval_briefs: retrievalBriefs,
-      };
-
-      if (selectedCandidate) {
-        code = selectedCandidate.code;
-        featureName = selectedCandidate.featureName || featureName;
-        featureLabel = selectedCandidate.featureLabel || featureLabel;
-        customReasoning = `${customReasoning ? `${customReasoning} ` : ""}Selected ${selectedCandidate.candidate_id} from ${repairedCandidates.length} candidates after local validation.`;
-      } else {
-        throw new Error("No candidate passed local FeatureScript validation.");
-      }
-    } catch (err) {
-      if (ALLOW_TEMPLATE_FALLBACK) {
-        console.warn(`[AI] Generation failed — emergency template fallback: ${err.message}`);
-        const fallbackDims = pickTemplateFallbackDims(prompt, {
-          ...dims,
-          featureName: featureName || "customFeature",
-          featureLabel: featureLabel || "Custom Feature",
-        });
-        code = buildFeatureScript(fallbackDims);
-        customReasoning = `Emergency template fallback after generation failure: ${err.message}`;
-        return {
-          code,
-          featureName: fallbackDims.featureName || featureName || "customFeature",
-          featureLabel: fallbackDims.featureLabel || featureLabel || "Custom Feature",
-          thinking: buildThinkingTrace(prompt, fallbackDims, { generationMode: "template_fallback", learningExamples: learningContext.examples.length, customReasoning }),
-          dims: fallbackDims,
-          generationMode: "template_fallback",
-          orchestration,
-        };
-      } else {
-        console.error("[AI] Generation failed and template fallback disabled.", err?.message || String(err));
-        throw err;
-      }
-    }
+    const code = buildFeatureScript(dims);
+    const thinking = buildThinkingTrace(prompt, dims, {
+      generationMode: "template",
+      learningExamples: learningContext.examples.length,
+    });
+    return {
+      code,
+      featureName: dims.featureName,
+      featureLabel: dims.featureLabel,
+      thinking,
+      dims,
+      generationMode: "template",
+      orchestration: {
+        status: "completed",
+        keySlotsUsed: buildKeySlotUsage(),
+        passes: {},
+        provenance: { dbRows: [], datasetRows: [], sourceRows: [] },
+        blockers: [],
+      },
+    };
   }
 
-  const thinking = buildThinkingTrace(prompt, dims, {
-    generationMode,
-    learningExamples: learningContext.examples.length,
-    customReasoning,
-    templateInjected: Boolean(templateExample),
-  });
+  try {
+    const decomposition = await buildFourPassDecomposition(prompt, dims, learningContext, requestId);
+    const retrieval = await buildDatabaseRetrievalPass(prompt, dims, learningContext, decomposition, requestId);
+    const blockPass = await runBlockSynthesisPass(prompt, dims, learningContext, decomposition, retrieval, requestId);
+    const weavePass = await runTopologyWeaverPass(prompt, dims, learningContext, decomposition, retrieval, blockPass, requestId);
+    const validationPass = await runValidationRepairPass(prompt, dims, learningContext, decomposition, blockPass, weavePass, requestId);
 
-  console.log(`[AI] done — ${code.length} chars`);
-  return { code, featureName, featureLabel, thinking, dims, generationMode: generationMode === "template" ? "template" : "multi_candidate_ai", orchestration };
+    const orchestration = {
+      status: validationPass.blockers.length ? "blocked" : "completed",
+      failedPass: validationPass.blockers.length
+        ? (!weavePass.code ? "weave" : "validation")
+        : null,
+      keySlotsUsed: buildKeySlotUsage(),
+      context_meta: {
+        ...buildContextMeta(dims, learningContext),
+        complexAssembly: isComplexAssemblyPrompt(prompt),
+      },
+      passes: {
+        decomposition,
+        retrieval: {
+          sourcePrecedence: retrieval.sourcePrecedence,
+          summaries: retrieval.summaries,
+          stepMatches: retrieval.stepMatches,
+        },
+        blocks: {
+          selectedCandidateId: blockPass.selectedCandidateId,
+          candidates: blockPass.candidates.map(candidate => ({
+            candidateId: candidate.candidateId,
+            coverage: candidate.coverage,
+            missingRequirements: candidate.missingRequirements || [],
+            coverageNotes: candidate.coverageNotes || [],
+            blockCount: (candidate.blocks || []).length,
+          })),
+        },
+        weave: {
+          status: weavePass.status || (weavePass.code ? "completed" : "blocked"),
+          reasoning: weavePass.reasoning || "",
+        },
+      },
+      provenance: {
+        dbRows: normalizeRetrievedRows(retrieval.dbRows, "db"),
+        datasetRows: normalizeRetrievedRows(retrieval.datasetRows, "dataset"),
+        sourceRows: normalizeRetrievedRows(retrieval.sourceRows, "source"),
+        tab_citations: Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [],
+      },
+      blockers: validationPass.blockers,
+      validation: {
+        status: validationPass.validatorPass?.status || "repair",
+        repaired: validationPass.repaired,
+        notes: validationPass.validatorPass?.notes || [],
+        localIssueCount: validationPass.localIssues.length,
+        fatalIssueCount: validationPass.fatalIssues.length,
+      },
+    };
+
+    if (validationPass.blockers.length || !validationPass.finalCode) {
+      return buildBlockedResult(
+        prompt,
+        dims,
+        orchestration,
+        validationPass.blockers,
+        "The four-pass pipeline could not complete a source-backed, compile-safe result."
+      );
+    }
+
+    const thinking = buildThinkingTrace(prompt, dims, {
+      generationMode: "four_pass_multi_key",
+      learningExamples: learningContext.examples.length,
+      customReasoning: `Completed decomposition, retrieval, block synthesis, topology weave, and validation across fixed key slots ${buildKeySlotUsage().map(slot => slot.slotLabel).join(", ")}.`,
+      orchestration,
+    });
+    const finalCode = validationPass.finalCode;
+
+    console.log(`[AI] done — ${finalCode.length} chars`);
+    return {
+      code: finalCode,
+      featureName: weavePass.featureName || dims.featureName,
+      featureLabel: weavePass.featureLabel || dims.featureLabel,
+      thinking,
+      dims,
+      generationMode: "four_pass_multi_key",
+      orchestration,
+    };
+  } catch (err) {
+    console.error("[AI] Four-pass orchestration failed.", err?.message || String(err));
+    return buildBlockedResult(
+      prompt,
+      dims,
+      {
+        status: "blocked",
+        failedPass: "pipeline",
+        keySlotsUsed: buildKeySlotUsage(),
+        provenance: { dbRows: [], datasetRows: [], sourceRows: [] },
+        passes: {},
+      },
+      [err?.message || "Unknown orchestration failure."],
+      "The four-pass pipeline failed before a safe FeatureScript result could be completed."
+    );
+  }
 }
 
 // ─── Public: Debug ────────────────────────────────────────────────────────────
