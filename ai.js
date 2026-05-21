@@ -5128,6 +5128,68 @@ function buildCompletedLocalResult(prompt, dims, learningContext, orchestration,
   };
 }
 
+// Helper: Generate FeatureScript using AI deep thinking (no templates)
+async function generateWithAiThinking(prompt, dims, learningContext, requestId) {
+  try {
+    console.warn(`[AI] Generating FeatureScript with deep thinking (recovery path) for request=${requestId}`);
+    const recoveryPrompt = `USER REQUEST: ${prompt}
+
+DIMENSIONS:
+${JSON.stringify({
+  featureName: dims.featureName,
+  shape: dims.shape,
+  widthInches: dims.widthInches,
+  heightInches: dims.heightInches,
+  depthInches: dims.depthInches,
+  radiusInches: dims.radiusInches,
+  holeRadiusInches: dims.holeRadiusInches,
+  filletRadiusInches: dims.filletRadiusInches,
+}, null, 2)}
+
+INSTRUCTIONS:
+- Generate complete, compile-safe FeatureScript 2931 code for the requested shape
+- Use deep thinking to analyze the request and determine the best approach
+- Expose user-editable parameters in the precondition
+- Follow all FeatureScript naming conventions and syntax rules
+- Return only JSON with featureName, featureLabel, reasoning, and code fields
+- Never block — always produce valid, working code even if simplified`;
+
+    const raw = await chat(
+      [
+        { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+        { role: "user", content: recoveryPrompt }
+      ],
+      COMPLEX_MODEL,
+      [TEXT_MODEL, FALLBACK_MODEL],
+      {
+        stage: "generation",
+        affinity: `${requestId}:ai_thinking_recovery`,
+        keySlot: "k7",
+        maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 6000),
+      }
+    );
+
+    const parsed = tryParseJson(raw, null);
+    if (!parsed || !parsed.code) {
+      console.warn(`[AI] AI thinking recovery produced invalid JSON; falling back to operation compiler`);
+      return null;
+    }
+
+    const { code, featureName, featureLabel, reasoning } = parsed;
+    const sanitized = sanitizeFeatureScript(code);
+    return {
+      code: sanitized.code,
+      featureName: featureName || dims.featureName,
+      featureLabel: featureLabel || dims.featureLabel,
+      reasoning: reasoning || "Generated with AI deep thinking during recovery.",
+      warnings: sanitized.warnings || [],
+    };
+  } catch (err) {
+    console.warn(`[AI] AI thinking recovery failed: ${err?.message || String(err).slice(0, 100)}`);
+    return null;
+  }
+}
+
 // ─── Public: Generate ─────────────────────────────────────────────────────────
 
 export async function generateFeatureScript(prompt, options = {}) {
@@ -5257,16 +5319,40 @@ export async function generateFeatureScript(prompt, options = {}) {
           "Model-authored weave or validation failed, so the deterministic operation compiler produced a compile-safe result from the same decomposition and retrieval context."
         );
       }
-      const localBlockers = Array.isArray(localResult?.blockers) ? localResult.blockers : [];
-      return buildBlockedResult(
-        prompt,
+      console.warn(`[AI] Validation failed; attempting AI deep thinking recovery...`);
+      const aiResult = await generateWithAiThinking(prompt, dims, learningContext, requestId);
+      if (aiResult?.code) {
+        console.warn(`[AI] AI thinking recovery succeeded for request=${requestId}`);
+        const recoveryOrchestration = { ...orchestration, status: "completed", completionLevel: "partial", recoveryMode: "ai_thinking_validation_failed" };
+        const recoveryThinking = buildThinkingTrace(prompt, dims, { generationMode: "ai_thinking_recovery", customReasoning: aiResult.reasoning || "Validation issues encountered. AI deep thinking generated recovery code.", orchestration: recoveryOrchestration });
+        return {
+          code: aiResult.code,
+          featureName: aiResult.featureName,
+          featureLabel: aiResult.featureLabel,
+          thinking: recoveryThinking,
+          dims,
+          generationMode: "ai_thinking_recovery",
+          completionLevel: "partial",
+          warnings: [...validationPass.warnings, ...(aiResult.warnings || []), "Recovery: AI deep thinking generated code"],
+          omissions: [...validationPass.omissions, ...validationPass.blockers.slice(0, 3)],
+          orchestration: recoveryOrchestration,
+        };
+      }
+      console.warn(`[AI] AI thinking recovery also failed; generation returns partial with empty code for request=${requestId}`);
+      const failedOrchestration = { ...orchestration, status: "completed", completionLevel: "partial", recoveryMode: "validation_failed_ai_recovery_failed" };
+      const failedThinking = buildThinkingTrace(prompt, dims, { generationMode: "recovery_failed", customReasoning: "Both validation and AI recovery failed. Returning partial completion.", orchestration: failedOrchestration });
+      return {
+        code: "",
+        featureName: dims.featureName,
+        featureLabel: dims.featureLabel,
+        thinking: failedThinking,
         dims,
-        orchestration,
-        [...validationPass.blockers, ...localBlockers],
-        "The four-pass pipeline could not complete a source-backed, compile-safe result.",
-        validationPass.warnings,
-        validationPass.omissions
-      );
+        generationMode: "recovery_failed",
+        completionLevel: "partial",
+        warnings: [...validationPass.warnings, "Validation and AI recovery both failed"],
+        omissions: [...validationPass.omissions, ...validationPass.blockers, "FeatureScript generation was not possible"],
+        orchestration: failedOrchestration,
+      };
     }
 
     const thinking = buildThinkingTrace(prompt, dims, {
@@ -5324,20 +5410,40 @@ export async function generateFeatureScript(prompt, options = {}) {
         "The model pipeline failed before completion, so the deterministic operation compiler produced a compile-safe result from local source and dataset retrieval."
       );
     }
-    return buildBlockedResult(
-      prompt,
+    console.warn(`[AI] Orchestration failure: attempting AI deep thinking recovery...`);
+    const orchestrationAiResult = await generateWithAiThinking(prompt, dims, learningContext, requestId);
+    if (orchestrationAiResult?.code) {
+      console.warn(`[AI] AI thinking recovery succeeded after orchestration failure for request=${requestId}`);
+      const recoveryOrchestration = { status: "completed", completionLevel: "partial", failedPass: "pipeline", keySlotsUsed: buildKeySlotUsage(), recoveryMode: "ai_thinking_orchestration_failed", provenance: { dbRows: [], datasetRows: [], sourceRows: [] }, passes: {} };
+      const recoveryThinking = buildThinkingTrace(prompt, dims, { generationMode: "ai_thinking_recovery", customReasoning: orchestrationAiResult.reasoning || `Pipeline orchestration error. AI deep thinking generated recovery code.`, orchestration: recoveryOrchestration });
+      return {
+        code: orchestrationAiResult.code,
+        featureName: orchestrationAiResult.featureName,
+        featureLabel: orchestrationAiResult.featureLabel,
+        thinking: recoveryThinking,
+        dims,
+        generationMode: "ai_thinking_recovery",
+        completionLevel: "partial",
+        warnings: [`Pipeline orchestration failed: ${String(err?.message || "unknown").slice(0, 100)}`, ...(orchestrationAiResult.warnings || []), "Recovery: AI deep thinking generated code"],
+        omissions: ["Full four-pass generation was not completed due to orchestration error"],
+        orchestration: recoveryOrchestration,
+      };
+    }
+    console.warn(`[AI] AI thinking recovery also failed; orchestration error returns partial with empty code for request=${requestId}`);
+    const failedOrchestrOrchestration = { status: "completed", completionLevel: "partial", failedPass: "pipeline", keySlotsUsed: buildKeySlotUsage(), recoveryMode: "orchestration_failed_ai_recovery_failed", provenance: { dbRows: [], datasetRows: [], sourceRows: [] }, passes: {} };
+    const failedOrchestrThinking = buildThinkingTrace(prompt, dims, { generationMode: "recovery_failed", customReasoning: `Pipeline orchestration error: ${String(err?.message || "unknown").slice(0, 80)}. AI recovery also failed. Returning partial completion.`, orchestration: failedOrchestrOrchestration });
+    return {
+      code: "",
+      featureName: dims.featureName,
+      featureLabel: dims.featureLabel,
+      thinking: failedOrchestrThinking,
       dims,
-      {
-        status: "blocked",
-        completionLevel: "blocked",
-        failedPass: "pipeline",
-        keySlotsUsed: buildKeySlotUsage(),
-        provenance: { dbRows: [], datasetRows: [], sourceRows: [] },
-        passes: {},
-      },
-      [err?.message || "Unknown orchestration failure."],
-      "The four-pass pipeline failed before a safe FeatureScript result could be completed."
-    );
+      generationMode: "recovery_failed",
+      completionLevel: "partial",
+      warnings: [`Pipeline orchestration failed: ${String(err?.message || "unknown").slice(0, 100)}`, "AI deep thinking recovery also failed"],
+      omissions: ["Full four-pass generation was not completed", "FeatureScript generation was not possible"],
+      orchestration: failedOrchestrOrchestration,
+    };
   }
 }
 
