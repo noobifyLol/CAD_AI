@@ -1133,3 +1133,10 @@ There is other modeling LLM that I can reference my data base off of. Now all th
 Groq model rotation is about to come out. We use mutipel request for one prompt to generate the best of the best FS.
 **5/19/26**
 Mutiple keys added like the program now uses mutiple keys
+
+
+
+Overall structure or final result:
+1. Make the AI rely on it's own thinking instead of using tempaltes and references
+2. Instead of making a completely new AI, we can already use the Groq model's thinking and understanding for the AI model to make the cadding and user prompt understanding much lighter instead or coding key words or any shape descriptions since the AI already does that
+3. Once the AI understands the user's prompt, the AI uses FS documenetation and it's own thinking models to make the featureScript that generates what the user's specificies

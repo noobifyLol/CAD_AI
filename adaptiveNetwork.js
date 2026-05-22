@@ -121,9 +121,6 @@ function failureScore(candidate) {
   return total > 0 ? failure / total : 0;
 }
 
-function hasPattern(candidate) {
-  return Boolean(candidate.feature_pattern || candidate.featurescript || candidate.text);
-}
 
 function heuristicScore(candidate) {
   return clamp(Math.tanh(Number(candidate._score || candidate.match_score || 0) / 8));

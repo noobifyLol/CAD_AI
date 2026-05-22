@@ -549,7 +549,7 @@ function fsPoint(xExpr, yExpr, zExpr = null) {
 This part is all the pre made template that is soon to be removed or jnust added to the database
 
 
-
+_____________________________________________________________________________________________________________________
 
 */
 
@@ -1167,7 +1167,7 @@ ${template.body}
     });
 `;
 }
-
+// dleete this later this 
 const STOP_WORDS = new Set([
   "the", "and", "for", "with", "that", "this", "into", "from", "make", "build",
   "create", "using", "inch", "inches", "mm", "part", "feature", "featurescript",
@@ -1190,6 +1190,8 @@ function normalizeLearningContext(learningContext = {}) {
   };
 }
 
+
+// delete this later, the model can already do this
 function extractPromptKeywords(prompt, limit = 6) {
   const words = normalizeText(prompt)
     .toLowerCase()
@@ -1218,7 +1220,7 @@ function summarizeDimsForPrompt(dims) {
     holeDepthInches: dims.holeDepthInches,
   });
 }
-
+// delete this later, the model can do this later
 function summarizeFeatureScript(code, maxLines = 12) {
   return normalizeText(
     String(code || "")
@@ -1354,7 +1356,7 @@ function buildLearningContextText(learningContext = {}) {
 
   return lines.join("\n").trim();
 }
-
+/* This can be delted later */
 function clampNumber(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -1455,83 +1457,8 @@ function safeStageKeyCount(stage) {
   }
 }
 
-function getShapeSnippetKeywords(shape = "CUSTOM") {
-  const keywordMap = {
-    BOX: ["box", "enclosure", "shell", "block"],
-    CYLINDER: ["cylinder", "revolve", "bottle", "pipe"],
-    CONE: ["revolve", "carrot", "bottle"],
-    FLANGE: ["flange", "pattern", "bolt"],
-    GEAR_SPUR: ["gear", "spur"],
-    LINKAGE: ["sweep", "pipe", "elbow"],
-    PIPE: ["sweep", "pipe", "elbow"],
-    PLATE: ["fillet", "chamfer", "enclosure"],
-    PLATE_HOLES: ["flange", "pattern", "fillet"],
-    CUSTOM: ["loft", "sweep", "revolve"],
-  };
-  return keywordMap[shape] || keywordMap.CUSTOM;
-}
 
-function scoreFsSnippet(prompt, dims, snippet) {
-  const promptKeywords = extractPromptKeywords(prompt, 10);
-  const targetKeywords = [...promptKeywords, ...getShapeSnippetKeywords(dims.shape)];
-  const text = `${snippet.id} ${snippet.fileName} ${snippet.content.slice(0, 600)}`.toLowerCase();
-  return targetKeywords.reduce((score, keyword) => {
-    return text.includes(keyword.toLowerCase()) ? score + 1 : score;
-  }, 0);
-}
 
-function selectRetrievedSnippets(prompt, dims, learningContext = {}) {
-  const library = loadFsExampleLibrary();
-  const contextDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
-  const localSnippets = library
-    .map(snippet => ({ ...snippet, score: scoreFsSnippet(prompt, dims, snippet) }))
-    .sort((left, right) => right.score - left.score || left.fileName.localeCompare(right.fileName))
-    .slice(0, Math.max(1, MAX_RETRIEVED_SNIPPETS - Math.min(2, contextDocs.length)))
-    .map(snippet => ({
-      id: snippet.id,
-      code: compactFeaturePattern(snippet.content, MAX_RETRIEVED_SNIPPET_CHARS),
-      source: "fs_examples",
-    }));
-
-  const docSnippets = contextDocs
-    .slice(0, 2)
-    .map((doc, index) => ({
-      id: `context_doc_${index + 1}`,
-      code: compactFeaturePattern(doc.text || "", MAX_RETRIEVED_SNIPPET_CHARS),
-      source: doc.source || "learning_context",
-    }));
-
-  return [...docSnippets, ...localSnippets].slice(0, MAX_RETRIEVED_SNIPPETS);
-}
-
-function buildOmniCadSummary(prompt, dims, learningContext = {}) {
-  const promptKeywords = extractPromptKeywords(`${prompt} ${dims.shape}`, 10);
-  const researchSummary = loadLocalOmniSummaryText();
-  const contextNotes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
-  const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
-  const relevantKnowledge = knowledge
-    .filter(entry => {
-      const haystack = `${entry.title || ""} ${entry.summary || ""} ${(entry.keywords || []).join(" ")}`.toLowerCase();
-      return promptKeywords.some(keyword => haystack.includes(keyword));
-    })
-    .slice(0, 3)
-    .map(entry => normalizeText(`${entry.title || "knowledge"} ${entry.summary || ""}`));
-
-  const relevantLines = researchSummary
-    .split(/\r?\n/)
-    .map(line => normalizeText(line.replace(/^[-*]\s*/, "")))
-    .filter(Boolean)
-    .filter(line => promptKeywords.some(keyword => line.toLowerCase().includes(keyword)) || /feature|retriev|dataset|omni|cad|deepcad|loft|sweep|extrude|revolve/i.test(line))
-    .slice(0, 8);
-
-  const summary = normalizeText([
-    ...relevantLines,
-    ...relevantKnowledge,
-    ...contextNotes.slice(0, 2),
-  ].join(" "));
-
-  return truncateText(summary || "Use local Omni-CAD, CAD-MLLM, and DeepCAD summaries as retrieval guidance only; prefer semantic command-sequence patterns and sanitized FeatureScript snippets over raw archives.", MAX_OMNI_SUMMARY_CHARS);
-}
 
 function buildContextMeta(dims, learningContext = {}) {
   return {
@@ -1700,33 +1627,6 @@ function selectedOperationPlanSummary(operationPlan = null) {
   };
 }
 
-function buildBlockedResult(prompt, dims, orchestration, blockers = [], reason = "", warnings = [], omissions = []) {
-  const cleanBlockers = uniqueStrings((blockers || []).map(entry => normalizeText(entry)).filter(Boolean));
-  const statusOrchestration = {
-    ...(orchestration || {}),
-    status: "blocked",
-    completionLevel: "blocked",
-    blockers: cleanBlockers,
-    warnings: uniqueStrings((warnings || []).map(entry => normalizeText(entry)).filter(Boolean)),
-    omissions: uniqueStrings((omissions || []).map(entry => normalizeText(entry)).filter(Boolean)),
-  };
-  return {
-    code: "",
-    featureName: dims.featureName || "blockedFeature",
-    featureLabel: dims.featureLabel || "Blocked Feature",
-    thinking: buildThinkingTrace(prompt, dims, {
-      generationMode: "blocked_trace_only",
-      customReasoning: reason || cleanBlockers.join(" | "),
-      orchestration: statusOrchestration,
-    }),
-    dims,
-    generationMode: "blocked_trace_only",
-    completionLevel: "blocked",
-    warnings: statusOrchestration.warnings,
-    omissions: statusOrchestration.omissions,
-    orchestration: statusOrchestration,
-  };
-}
 
 function buildCandidateStrategy(candidateId, dims) {
   const strategies = {
@@ -1737,13 +1637,6 @@ function buildCandidateStrategy(candidateId, dims) {
   return strategies[candidateId] || `Generate an independent ${dims.shape.toLowerCase()} candidate with diverse modeling choices and full parameter exposure.`;
 }
 
-function buildPlannerUserPrompt(prompt, dims) {
-  return [
-    `USER REQUEST: ${prompt}`,
-    `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
-    `Return the planning JSON only.`,
-  ].join("\n");
-}
 
 function stripCodeFences(text = "") {
   return String(text || "").replace(/```(?:json|javascript|featurescript)?/gi, "").replace(/```/g, "").trim();
@@ -1789,7 +1682,7 @@ function hasSkSolveBeforeDownstreamOps(code = "") {
   const skSolveIndex = String(code || "").search(/\bskSolve\s*\(/);
   return skSolveIndex >= 0 && skSolveIndex < downstreamIndex;
 }
-
+// delete this later
 function humanizeSanitizationRule(rule = "") {
   const labels = {
     remove_typed_lambda_annotations: "removed typed lambda annotations for FeatureScript compatibility",
@@ -1802,32 +1695,7 @@ function humanizeSanitizationRule(rule = "") {
   return labels[rule] || `applied automated rule ${rule}`;
 }
 
-function injectAutomationComments(code, sanitizations = []) {
-  const uniqueNotes = uniqueStrings(
-    sanitizations.map(item => humanizeSanitizationRule(item.rule)).filter(Boolean)
-  );
-  if (!uniqueNotes.length) return code;
 
-  const commentBlock = uniqueNotes
-    .map(note => `// AUTO-SANITIZE: ${note}.`)
-    .join("\n");
-
-  if (/FeatureScript 2931;[\r\n]+import\([^\n]+\);\s*/.test(code)) {
-    return code.replace(/(FeatureScript 2931;[\r\n]+import\([^\n]+\);\s*)/, `$1${commentBlock}\n`);
-  }
-
-  return `${commentBlock}\n${code}`;
-}
-
-function estimateTokenCount(text = "") {
-  return Math.max(1, Math.round(String(text || "").length / 4));
-}
-
-function estimateCostLabel(tokens = 0) {
-  if (tokens < 2500) return "low";
-  if (tokens < 6000) return "medium";
-  return "high";
-}
 
 function normalizeDims(dims) {
   const normalized = {
@@ -1962,6 +1830,11 @@ function performGeometricReasoning(dims) {
   const diag = Math.sqrt(w * w + h * h + d * d);
   hints.push(`bbox_diag=${diag.toFixed(3)}in`);
 
+  // Check for potential Aspect Ratio extremes (Slenderness)
+  if (maxDim > 0 && minDim > 0 && (maxDim / minDim) > 20) {
+    hints.push("GEOM_WARNING: Extreme aspect ratio detected. Consider reinforcing with ribs or increasing wall thickness.");
+  }
+
   // ── 2. Dominant axis + aspect classification ──────────────────────────────
   const maxDim = Math.max(w, h, d);
   const minDim = Math.min(w, h, d);
@@ -2031,9 +1904,6 @@ function performGeometricReasoning(dims) {
   return hints.join(" | ");
 }
 
-function promptLooksComplex(prompt) {
-  return /assembly|hinge|joint|cam|freeform|organic|thread|helical|spring|loft|spline|enclosure|mount|slot|rib|web|pocket|boss|complex|custom|motor|gearbox|bearing block|filleted/i.test(prompt || "");
-}
 
 // All known shapes that have a validated template — used for emergency fallback only.
 // Templates are NEVER the primary output; they are injected as reference examples for the AI.
@@ -3179,80 +3049,7 @@ function buildRetrievedSnippetsText(snippets = []) {
   return snippets.map(snippet => `SNIPPET_ID: ${snippet.id}\n${snippet.code}`).join("\n\n");
 }
 
-async function buildCadPlan(prompt, dims, learningContext, requestId) {
-  const messages = [
-    { role: "system", content: withLearningContext(CAD_MLLM_PLAN_PROMPT_TEMPLATE, learningContext) },
-    { role: "user", content: buildPlannerUserPrompt(prompt, dims) },
-  ];
 
-  const raw = await chat(messages, COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
-    stage: "planning",
-    affinity: `${requestId}:plan`,
-  });
-
-  return tryParseJson(raw, {
-    shapeClass: dims.shape.toLowerCase(),
-    parameters: [],
-    subtasks: [],
-    fallbackTemplate: dims.shape.toLowerCase(),
-  });
-}
-
-async function buildRetrievalBriefs(prompt, dims, learningContext, retrievedSnippets, omniCadSummary, plan, requestId) {
-  const workerPrompts = [
-    {
-      id: "dataset",
-      goal: "Summarize only the local Omni-CAD / CAD-MLLM / DeepCAD dataset lessons relevant to this request in 3 sentences max.",
-    },
-    {
-      id: "rules",
-      goal: "Summarize the most important compile-safety and validator rules for this request in 4 sentences max.",
-    },
-    {
-      id: "snippets",
-      goal: "Summarize the strongest reusable structural patterns from the retrieved FeatureScript snippets in 4 sentences max.",
-    },
-  ].slice(0, CAD_RETRIEVAL_WORKERS);
-
-  const retrievalContext = [
-    `USER REQUEST: ${prompt}`,
-    `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
-    `PLAN: ${JSON.stringify(plan)}`,
-    `OMNI CAD SUMMARY: ${omniCadSummary}`,
-    `RETRIEVED SNIPPETS:\n${buildRetrievedSnippetsText(retrievedSnippets)}`,
-    `LEARNING NOTES: ${(learningContext.notes || []).slice(0, 4).join(" | ")}`,
-  ].join("\n\n");
-
-  const settled = await Promise.allSettled(workerPrompts.map(worker => chat([
-    {
-      role: "system",
-      content: "You are a CAD retrieval analyst. Use only the provided local context. Never mention secrets or URLs. Return plain text only.",
-    },
-    {
-      role: "user",
-      content: `${worker.goal}\n\n${retrievalContext}`,
-    },
-  ], FAST_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
-    stage: "retrieval",
-    affinity: `${requestId}:retrieval:${worker.id}`,
-    timeoutMs: Math.min(GROQ_TIMEOUT_MS, 90000),
-  })));
-
-  return settled.map((result, index) => {
-    const workerId = workerPrompts[index]?.id || `worker_${index + 1}`;
-    if (result.status === "fulfilled") {
-      return { id: workerId, summary: truncateText(normalizeText(result.value), 700) };
-    }
-    return {
-      id: workerId,
-      summary: workerId === "dataset"
-        ? omniCadSummary
-        : workerId === "rules"
-          ? "Keep sketches solved before downstream ops, expose all editable parameters in precondition, and avoid forbidden FeatureScript patterns."
-          : "Prefer retrieved compile-safe snippet structure, especially sketch -> skSolve -> downstream solid operations.",
-    };
-  });
-}
 
 function buildCandidateUserPrompt({
   prompt,
@@ -3365,84 +3162,8 @@ async function generateStructuredCandidate({
   };
 }
 
-function summarizeIssues(validationIssues = [], fatalIssues = []) {
-  return [
-    ...fatalIssues.map(issue => `${issue.code}: ${issue.message}`),
-    ...validationIssues.map(issue => `${issue.line || "?"}: ${issue.message}`),
-  ].slice(0, 12);
-}
 
-async function repairCandidate(candidate, learningContext, requestId) {
-  let workingCode = candidate.code;
-  const repairAttempts = [];
-  let combinedSanitizations = [...candidate.sanitizations];
-  let status = "ok";
-  let issues = [];
 
-  for (let attemptNumber = 1; attemptNumber <= CAD_REPAIR_ATTEMPTS; attemptNumber += 1) {
-    const { validationIssues, fatalIssues, checks } = evaluateCandidateChecks(workingCode);
-    if (!validationIssues.length && !fatalIssues.length && checks.compile_sanity) {
-      return {
-        ...candidate,
-        status,
-        code: injectAutomationComments(workingCode, combinedSanitizations),
-        sanitizations: combinedSanitizations,
-        checks,
-        repairAttempts,
-        issues,
-      };
-    }
-
-    status = attemptNumber < CAD_REPAIR_ATTEMPTS ? "needs_repair" : "failed";
-    issues = summarizeIssues(validationIssues, fatalIssues);
-    const repaired = await debugFeatureScript(workingCode, JSON.stringify({ validationIssues, fatalIssues }), {
-      learningContext,
-      affinity: `${requestId}:${candidate.candidate_id}:repair:${attemptNumber}`,
-      stage: "repair",
-    });
-    const sanitized = sanitizeFeatureScript(repaired.fixed || workingCode);
-    workingCode = sanitized.code;
-    const repairSanitizations = [
-      ...formatSanitizations(sanitized.changes),
-      { rule: "repair_pass", before: repaired.explanation || "repair", after: repaired.explanation || "repair" },
-    ];
-    combinedSanitizations = [...combinedSanitizations, ...repairSanitizations];
-    repairAttempts.push({
-      attempt_number: attemptNumber,
-      changes: repairSanitizations,
-      result_checks: evaluateCandidateChecks(workingCode).checks,
-    });
-  }
-
-  const finalChecks = evaluateCandidateChecks(workingCode).checks;
-  return {
-    ...candidate,
-    status,
-    code: injectAutomationComments(workingCode, combinedSanitizations),
-    sanitizations: combinedSanitizations,
-    checks: finalChecks,
-    repairAttempts,
-    issues,
-    repair_plan: status === "failed"
-      ? "Retry with a smaller source-backed operation plan or return a partial result with explicit omissions before another attempt."
-      : undefined,
-  };
-}
-
-function scoreCandidate(candidate) {
-  const forbiddenPenalty = candidate.checks.forbidden_patterns.length * 100;
-  const repairPenalty = (candidate.repairAttempts || []).length * 10;
-  const sanitizePenalty = candidate.sanitizations.length;
-  const compileBonus = candidate.checks.compile_sanity ? 50 : 0;
-  const statusBonus = candidate.status === "ok" ? 100 : candidate.status === "needs_repair" ? 25 : 0;
-  return statusBonus + compileBonus - forbiddenPenalty - repairPenalty - sanitizePenalty;
-}
-
-function selectBestCandidate(candidates = []) {
-  const passing = candidates.filter(candidate => candidate.status === "ok" && candidate.checks.compile_sanity);
-  if (!passing.length) return null;
-  return [...passing].sort((left, right) => scoreCandidate(right) - scoreCandidate(left))[0] || null;
-}
 
 function planFallbackForPrompt(prompt, dims) {
   const complex = isComplexAssemblyPrompt(prompt);
@@ -4218,66 +3939,6 @@ async function runValidationRepairPass(prompt, dims, learningContext, decomposit
   };
 }
 
-async function generateCustomFeatureScript(prompt, dims, learningContext = {}, history = []) {
-  const context = normalizeLearningContext(learningContext);
-  const hasTemplateRef = Array.isArray(context.featureScriptDocs) &&
-    context.featureScriptDocs.some(doc => doc.source === "validated_template");
-  const systemPrompt = withLearningContext(CUSTOM_FEATURE_SYSTEM, context);
-  const messages = [{ role: "system", content: systemPrompt }];
-
-  // Provide the AI with its previous code so it can perform incremental edits
-  for (const turn of history.slice(-3)) {
-    messages.push({ role: "user", content: turn.prompt });
-    messages.push({ role: "assistant", content: JSON.stringify({ reasoning: turn.reasoning, code: turn.code }) });
-  }
-
-  const isEdit = history.length > 0;
-  const templateNote = hasTemplateRef
-    ? `\nA SHAPE REFERENCE TEMPLATE appears in DATABASE CONTEXT above. Study its structure (preconditions, sketch strategy, operation order), then write completely fresh code that implements this request. Do not copy the template — adapt its patterns to the specific dimensions and requirements below.`
-    : "";
-
-  const userPrompt = isEdit
-    ? [
-        `ITERATION REQUEST: ${prompt.trim()}`,
-        `PREVIOUS DIMS: ${summarizeDimsForPrompt(history[history.length-1].dims || {})}`,
-        `NEW DIMS: ${summarizeDimsForPrompt(dims)}`,
-        templateNote,
-        `TASK: Modify the previous FeatureScript code in the conversation history to apply these changes. Keep the file complete and self-contained.`,
-        `Return valid JSON only: { "featureName": "...", "featureLabel": "...", "reasoning": "...", "code": "..." }`,
-      ].filter(Boolean).join("\n")
-    : [
-        `NEW GENERATION REQUEST: ${prompt.trim()}`,
-        `Extracted dimensions: ${summarizeDimsForPrompt(dims)}`,
-        templateNote,
-        `Generate FeatureScript that implements exactly what the user asked for, with all dimensions editable in the Onshape feature dialog.`,
-        `Return valid JSON only: { "featureName": "...", "featureLabel": "...", "reasoning": "...", "code": "..." }`,
-      ].filter(Boolean).join("\n");
-
-  messages.push({ role: "user", content: userPrompt });
-
-  const authoringModel = promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL;
-  const raw = await chat(messages, authoringModel, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
-    stage: "generation",
-    affinity: `${makeRequestId(prompt)}:single`,
-  });
-
-  try {
-    const parsed = JSON.parse(stripJson(raw));
-    return {
-      featureName: String(parsed.featureName || dims.featureName || "customFeature"),
-      featureLabel: String(parsed.featureLabel || dims.featureLabel || "Custom Feature"),
-      reasoning: String(parsed.reasoning || ""),
-      code: sanitizeFeatureScript(parsed.code || raw).code,
-    };
-  } catch {
-    return {
-      featureName: dims.featureName || "customFeature",
-      featureLabel: dims.featureLabel || "Custom Feature",
-      reasoning: "The generator returned a non-JSON response; raw output was sanitized.",
-      code: sanitizeFeatureScript(raw).code,
-    };
-  }
-}
 
 // ─── Deterministic operation compiler ────────────────────────────────────────
 //
@@ -4397,7 +4058,7 @@ function buildLocalRetrievalFallback(prompt, dims, learningContext = {}, decompo
     },
   };
 }
-
+// Onshape tools with FeatureScript
 function buildLocalFilletedBox(prompt, dims) {
   const precondition = [
     preconditionPlane(),

@@ -19,6 +19,7 @@ import crypto from "node:crypto";
 const ROUNDS = Math.max(1, Number(process.env.BCRYPT_ROUNDS) || 10);
 const ITERATIONS = 10000 * ROUNDS; // scale with ROUNDS setting
 
+
 async function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const dk = await pbkdf2(password, salt);
