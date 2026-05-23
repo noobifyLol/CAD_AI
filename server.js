@@ -10,7 +10,6 @@ import {
   getModelConfig,
 } from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
-import { createAgentRouter } from "./agent.js";
 import { createLearningService } from "./learning.js";
 
 const app = express();
@@ -104,7 +103,6 @@ app.get("/health", (_req, res) => {
 app.post("/auth/signup", authRoutes.signup);
 app.post("/auth/login", authRoutes.login);
 app.get("/auth/me", authRoutes.me);
-app.use("/agent", createAgentRouter({ learning }));
 
 app.get("/history", requireAuth, async (req, res) => {
   if (!supabase) {

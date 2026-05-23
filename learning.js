@@ -978,18 +978,15 @@ export function createLearningService({
     const shapeHint = inferShapeFromPrompt(prompt);
     const adaptiveState = await loadAdaptiveState();
     const rankContext = { prompt, keywords, shapeHint };
-    const [examples, cadMemory, cadKnowledge, shapeKnowledge] = await Promise.all([
-      fetchGenerationExamples(prompt, keywords, shapeHint),
+    const [cadMemory, cadKnowledge, shapeKnowledge] = await Promise.all([
       fetchCadMemory(prompt, keywords, shapeHint),
       fetchCadKnowledge(keywords),
       fetchShapeKnowledge(shapeHint, keywords),
     ]);
 
-    const rankedExamples = rerankCandidates(adaptiveState, examples, rankContext, "example", 6);
     const rankedCadMemory = rerankCandidates(adaptiveState, cadMemory, rankContext, "memory", 16);
     const rankedCadKnowledge = rerankCandidates(adaptiveState, cadKnowledge, rankContext, "knowledge", 16);
     const rankedShapeKnowledge = rerankCandidates(adaptiveState, shapeKnowledge, rankContext, "shape", 6);
-    const localKnowledge = rerankCandidates(adaptiveState, getLocalKnowledge(prompt, shapeHint), rankContext, "local", 8);
     const featureScriptDocs = rerankCandidates(adaptiveState, getFeatureScriptDocs(prompt, keywords, shapeHint, 8), rankContext, "docs", 8);
     const memoryMatches = rankedCadMemory
       .filter(memory => memory.id)
@@ -1008,21 +1005,15 @@ export function createLearningService({
     const notes = [];
     if (shapeHint) notes.push(`Fast shape hint from prompt: ${shapeHint}.`);
     notes.push(`Adaptive neural reranker: ${adaptiveState.hiddenLayers.length} hidden layer(s), ${adaptiveState.trainedSteps || 0} feedback training step(s), source=${adaptiveStateSource}.`);
-    if (rankedCadMemory.length) notes.push(`Using ${rankedCadMemory.length} scored CAD memory record(s). Prefer higher-scored active memories over old raw examples.`);
-    if (localKnowledge.some(entry => String(entry.memory_type || "").includes("pruning"))) {
-      notes.push("Using local pruning rules to keep generation on editable, compile-safe modeling paths.");
-    }
+    if (rankedCadMemory.length) notes.push(`Using ${rankedCadMemory.length} scored CAD memory record(s) as learned guidance.`);
+    if (rankedCadKnowledge.length) notes.push(`Using ${rankedCadKnowledge.length} persisted CAD knowledge record(s) for reusable modeling lessons.`);
     if (featureScriptDocs.length) notes.push(`Using ${featureScriptDocs.length} local FeatureScript documentation snippet(s) from old_and_docs/docs/FS doc.`);
-    if (rankedExamples.length) {
-      const shapes = [...new Set(rankedExamples.map(example => example.shape_type).filter(Boolean))];
-      if (shapes.length) notes.push(`Related prior generation shapes: ${shapes.join(", ")}.`);
-    }
 
     return {
       prompt,
       keywords,
       shapeHint,
-      examples: rankedExamples,
+      examples: [],
       notes,
       memoryMatches,
       featureScriptDocs,
@@ -1030,7 +1021,6 @@ export function createLearningService({
         ...rankedCadMemory,
         ...rankedShapeKnowledge,
         ...rankedCadKnowledge,
-        ...localKnowledge,
       ], 16),
       adaptiveNetwork: {
         source: adaptiveStateSource,

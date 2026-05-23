@@ -1,3 +1,53 @@
+## Current Architecture: 2026-05-23
+
+This is the active design now.
+
+### Final goal
+
+1. The AI should rely on Groq reasoning instead of template-first generation.
+2. The AI should use the model's own prompt understanding so the app does not depend on heavy keyword routing.
+3. After understanding the request, the AI should use FeatureScript documentation plus learned memory to generate the final FeatureScript.
+
+### Active runtime files
+
+- `server.js`
+  - main Express server
+  - receives prompts and returns generated FeatureScript
+
+- `ai.js`
+  - Groq prompt understanding, planning, generation, validation, and repair
+  - now defaults away from template fallback
+
+- `learning.js`
+  - loads FeatureScript documentation snippets
+  - retrieves learned memory from Supabase
+  - logs generations and feedback
+
+- `adaptiveNetwork.js`
+  - reranks memory rows so the best learned guidance is used first
+
+- `Auth.js`
+  - sign up, login, token verification, and auth middleware
+
+- `public/script.js`
+  - frontend logic for prompt submission, auth, and showing results
+
+### Files removed from the active runtime
+
+- `agent.js`
+  - deleted because it kept an extra agent/template path alive
+
+- `multimodalConditioning.js`
+  - deleted with the old `/agent` workflow
+
+### Current request path
+
+`/generate` -> `learning.js` gathers FS docs and learned memory -> `ai.js` uses Groq to reason and generate -> `server.js` returns code and logs feedback
+
+---
+
+Historical notes kept below.
+
 **4/9/26**
 This project started on this date.
 

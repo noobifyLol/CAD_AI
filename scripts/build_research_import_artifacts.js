@@ -797,13 +797,13 @@ Source: https://cad.onshape.com/documents/c1fbbbb30348e3d729c9e329/w/f462715c39b
 - Recommended primitives: FeatureScript 2931 with geometry.fs import, editable preconditions, solved sketches, and standard operations.
 - Failure modes: browser-only or permission-gated CAD documents cannot be used as unattended import sources; store reusable code snippets locally instead.
 - Example shapes: use local FS examples for carrot revolve, loft transition, sweep elbow, shell enclosure, fillet/chamfer, hybrid flange, vase, and airfoil.
-- Implementation notes: /agent/run logs generated code and can be pasted into Onshape for final compile verification.
+- Implementation notes: /generate is the maintained generation route, and returned code can be pasted into Onshape for final compile verification.
 `,
   "deployed_app.md": `# Deployed CAD-AI App
 
 Source: https://cad-ai-0o9s.onrender.com
 
-- Modeling patterns: the deployed API mirrors this repo's /generate, /debug, /learning/diagnostics, and new /agent/run workflow when current code is deployed.
+- Modeling patterns: the deployed API mirrors this repo's /generate, /debug, and /learning/diagnostics workflow when current code is deployed.
 - Recommended primitives: retrieval-augmented FeatureScript generation using local knowledge, pruning rules, memory rows, and FS docs.
 - Failure modes: deployment may lag local code, database schema may be missing adaptive tables, and external LLM calls can rate-limit.
 - Example shapes: smoke prompts cover organic revolve, loft transition, sweep elbow, shell enclosure, hybrid flange, and edge-case loft.

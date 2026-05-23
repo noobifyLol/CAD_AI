@@ -7,7 +7,7 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const LOG_DIR = join(ROOT, "logs");
 const RAW_DIR = join(LOG_DIR, "raw_generations");
 const BASE_URL = process.env.CAD_AI_BASE_URL || "http://localhost:10000";
-const ENDPOINT = process.argv[2] || process.env.CAD_SMOKE_ENDPOINT || "/agent/run";
+const ENDPOINT = process.argv[2] || process.env.CAD_SMOKE_ENDPOINT || "/generate";
 
 const prompts = [
   "Create me a cube with the sides filleted.",
@@ -71,7 +71,7 @@ async function main() {
 
   for (let index = 0; index < prompts.length; index += 1) {
     const prompt = prompts[index];
-    const generation = await postJson(ENDPOINT, { prompt, history: [], maxRepairAttempts: 1 });
+    const generation = await postJson(ENDPOINT, { prompt, history: [] });
     const code = generation.json.code || generation.json.fixed || "";
     const blocked = generation.json.generationMode === "blocked_trace_only";
     if (code) writeFileSync(join(RAW_DIR, `smoke_${id}_${index + 1}.fs`), code);

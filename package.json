@@ -1,7 +1,7 @@
 {
   "name": "cad-ai-generator",
   "version": "1.0.0",
-  "description": "AI FeatureScript generator — no Onshape API required",
+  "description": "Groq-first FeatureScript generator with FeatureScript docs grounding",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "prune:cad-memory": "node scripts/pruneCadMemory.js",
     "db:learning-report": "node scripts/dbLearningReport.js",
     "build:research-import": "node scripts/build_research_import_artifacts.js",
-    "smoke:agent": "node scripts/run_smoke_tests.js /agent/run",
+    "smoke:generate": "node scripts/run_smoke_tests.js /generate",
     "train:adaptive": "node scripts/train_adaptive_network.js data/adaptive_training.jsonl"
   },
   "dependencies": {

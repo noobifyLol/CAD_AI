@@ -10,11 +10,10 @@ const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
 const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || TEXT_MODEL;
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
-// Templates are injected as reference examples for the AI — not used as primary output.
-// Set USE_VALIDATED_TEMPLATES=false only to disable reference injection (not recommended).
-const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "true").toLowerCase() === "true";
-// Emergency fallback: if AI produces unfixable code after repair passes, fall back to template output.
-const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "true").toLowerCase() === "true";
+// The live generation path should prefer Groq reasoning plus FeatureScript docs.
+// Template injection and template fallback stay opt-in for emergency recovery only.
+const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "false").toLowerCase() === "true";
+const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
 
 // ------------------------------
 // Model configuration
@@ -1240,20 +1239,10 @@ function compactFeaturePattern(code, maxChars = 1600) {
 // Thinking 
 function buildLearningContextText(learningContext = {}) {
   const lines = [];
-  const examples = Array.isArray(learningContext.examples) ? learningContext.examples : [];
   const notes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
   const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
   const featureScriptDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
   const promptKeywords = extractPromptKeywords(learningContext.prompt || "");
-  const compileSafePatterns = knowledge
-    .filter(entry => {
-      const memoryType = normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase();
-      const featurePattern = String(entry.feature_pattern || entry.featurePattern || "");
-      return memoryType.includes("fs_example")
-        || /^FeatureScript Example\b/i.test(String(entry.title || ""))
-        || featurePattern.startsWith("FeatureScript 2931;");
-    })
-    .slice(0, 2);
 
   if (promptKeywords.length) {
     lines.push(`User prompt keywords: ${promptKeywords.join(", ")}`);
@@ -1265,30 +1254,15 @@ function buildLearningContextText(learningContext = {}) {
   }
 
   if (featureScriptDocs.length) {
-    // Prefer FeatureScript documentation over templates: docs are the primary reference.
-    const templateDocs = featureScriptDocs.filter(doc => doc.source === "validated_template");
-    const regularDocs = featureScriptDocs.filter(doc => doc.source !== "validated_template");
-
-    if (regularDocs.length) {
-      lines.push("FeatureScript documentation to apply first:");
-      regularDocs.slice(0, 4).forEach((entry, index) => {
-        const title = normalizeText(entry.title || `Doc ${index + 1}`);
-        const source = normalizeText(entry.source || "local FS docs");
-        const text = normalizeText(entry.text || "").slice(0, 520);
-        lines.push(`${index + 1}. ${title} (${source})`);
-        if (text) lines.push(`   ${text}`);
-      });
-      lines.push("USE THESE DOCS AS PRIMARY GUIDANCE BEFORE APPLYING TEMPLATE EXAMPLES.");
-    }
-
-    if (templateDocs.length) {
-      lines.push("FeatureScript template examples (secondary structural guides):");
-      templateDocs.slice(0, 1).forEach(doc => {
-        lines.push(`Reference shape: ${normalizeText(doc.title || "")}`);
-        lines.push(String(doc.text || "").slice(0, 3200));
-      });
-      lines.push("END TEMPLATE EXAMPLE");
-    }
+    lines.push("FeatureScript documentation to apply first:");
+    featureScriptDocs.slice(0, 4).forEach((entry, index) => {
+      const title = normalizeText(entry.title || `Doc ${index + 1}`);
+      const source = normalizeText(entry.source || "local FS docs");
+      const text = normalizeText(entry.text || "").slice(0, 520);
+      lines.push(`${index + 1}. ${title} (${source})`);
+      if (text) lines.push(`   ${text}`);
+    });
+    lines.push("Use these docs as the source of truth for syntax, API usage, and operation ordering.");
   } else {
     // No indexed FS docs on disk — inject core FeatureScript syntax reference inline.
     lines.push("FeatureScript core syntax reference (use these rules as ground truth):");
@@ -1305,29 +1279,6 @@ function buildLearningContextText(learningContext = {}) {
     lines.push(`10. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
     lines.push(`11. Remove helper variables that are computed but never used if they do not affect the final geometry.`);
     lines.push(`12. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
-  }
-
-  if (examples.length) {
-    lines.push("Similar prior generations from the database:");
-    examples.slice(0, 2).forEach((example, index) => {   // was 3, now 2
-      const dimsText = example.dims ? summarizeDimsForPrompt(example.dims) : "{}";
-      const codeText = summarizeFeatureScript(example.featurescript, 6); // was 12 lines, now 6
-      lines.push(
-        `${index + 1}. Prompt="${normalizeText(example.prompt)}" | shape=${example.shape_type || "UNKNOWN"} | confidence=${example.confidence || "UNKNOWN"}`
-      );
-      lines.push(`   dims=${dimsText}`);
-      if (codeText) lines.push(`   pattern=${codeText}`);
-    });
-  }
-
-  if (compileSafePatterns.length) {
-    lines.push("Compile-safe FeatureScript examples to imitate structurally:");
-    compileSafePatterns.forEach((entry, index) => {
-      const title = normalizeText(entry.title || `Pattern ${index + 1}`);
-      const featurePattern = compactFeaturePattern(entry.feature_pattern || entry.featurePattern || "");
-      lines.push(`${index + 1}. ${title}`);
-      if (featurePattern) lines.push(featurePattern);
-    });
   }
 
   if (knowledge.length) {

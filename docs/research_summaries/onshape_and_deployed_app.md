@@ -9,4 +9,4 @@ Sources:
 - Recommended primitives: FS 2931 examples use `geometry.fs`, `newSketchOnPlane`, `skSolve`, `opRevolve`, `opLoft` with `profileSubqueries`, `opSweep`, `opShell`, `opFillet`, `opChamfer`, and `opBoolean`.
 - Failure modes: missing `skSolve`, wrong `qSketchRegion` argument, revolve axis as Query, invalid opLoft keys, shell before body creation, and hidden hardcoded parameters.
 - Example shapes and ranges: organic carrot, square-to-circle loft, 90-degree pipe elbow, open-top enclosure, fillet/chamfer blocks, airfoil, vase, bottle, flange, and hybrid organic/mechanical part.
-- Implementation pulled into repo: `data/fs_examples/*.fs` provides validated templates and `/agent/run` returns traceable code plus static validation output.
+- Implementation pulled into repo: the active runtime now uses local FeatureScript docs plus learned database memory, and `/generate` is the maintained generation endpoint.

@@ -110,7 +110,7 @@ async function main() {
   if (server.ok) {
     for (const prompt of testPrompts) {
       try {
-        generations.push(await postJson("http://localhost:10000/agent/run", { prompt, history: [], maxRepairAttempts: 1 }));
+        generations.push(await postJson("http://localhost:10000/generate", { prompt, history: [] }));
       } catch (err) {
         generations.push({ ok: false, error: err.message, prompt });
       }
@@ -180,7 +180,7 @@ async function main() {
     "",
     "- Paste the FS examples into Onshape and mark any compile errors as feedback.",
     "- Add 20 more organic and lofted examples once real compile results are available.",
-    "- Deploy the new /agent/run route after Supabase schema is confirmed ready.",
+    "- Deploy the `/generate` route after Supabase schema is confirmed ready.",
     "",
   ].join("\n");
 
