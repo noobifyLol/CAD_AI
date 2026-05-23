@@ -119,7 +119,7 @@ function feedbackCountersForWeight(weight) {
     failureDelta: weight < 0 ? 1 : 0,
   };
 }
-// These are the template key words that the AI looks for
+// Retrieval-only shape hinting. This should help memory/doc ranking, not control generation.
 function inferShapeFromPrompt(prompt) {
   const text = normalizeText(prompt).toLowerCase();
   const shapeHints = [
@@ -311,6 +311,18 @@ function dedupeKnowledge(entries, limit = 8) {
   }
 
   return deduped;
+}
+
+function knowledgePriority(entry) {
+  const memoryType = normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase();
+  const sourceTable = normalizeText(entry.source_table || entry.sourceTable || "").toLowerCase();
+  if (memoryType === "confirmed_generation") return 5;
+  if (memoryType === "feedback_lesson") return 4.5;
+  if (memoryType.includes("dataset")) return 4;
+  if (sourceTable === "source_docs") return 3.5;
+  if (memoryType === "source_reference") return 3.25;
+  if (memoryType === "seed" || memoryType === "local_seed") return 2;
+  return 3;
 }
 
 function isMissingDbObject(error) {
@@ -1009,6 +1021,16 @@ export function createLearningService({
     if (rankedCadKnowledge.length) notes.push(`Using ${rankedCadKnowledge.length} persisted CAD knowledge record(s) for reusable modeling lessons.`);
     if (featureScriptDocs.length) notes.push(`Using ${featureScriptDocs.length} local FeatureScript documentation snippet(s) from old_and_docs/docs/FS doc.`);
 
+    const rankedKnowledge = [
+      ...rankedCadMemory,
+      ...rankedShapeKnowledge,
+      ...rankedCadKnowledge,
+    ].sort((a, b) => {
+      const priorityDiff = knowledgePriority(b) - knowledgePriority(a);
+      if (priorityDiff !== 0) return priorityDiff;
+      return Number(b._combinedScore ?? b._score ?? 0) - Number(a._combinedScore ?? a._score ?? 0);
+    });
+
     return {
       prompt,
       keywords,
@@ -1017,11 +1039,7 @@ export function createLearningService({
       notes,
       memoryMatches,
       featureScriptDocs,
-      knowledge: dedupeKnowledge([
-        ...rankedCadMemory,
-        ...rankedShapeKnowledge,
-        ...rankedCadKnowledge,
-      ], 16),
+      knowledge: dedupeKnowledge(rankedKnowledge, 16),
       adaptiveNetwork: {
         source: adaptiveStateSource,
         hiddenLayers: adaptiveState.hiddenLayers,
@@ -1270,6 +1288,16 @@ export function createLearningService({
    * This is the mechanism that makes cad_knowledge grow over time — currently it's stuck
    * at 8 seed rows because nothing writes to it during normal operation.
    */
+  function isPromotionSafeFeatureScript(code = "") {
+    const text = normalizeText(code);
+    if (!/^FeatureScript 2931;/.test(text)) return false;
+    if (!/import\(path : "onshape\/std\/geometry\.fs", version : "2931\.0"\);/.test(text)) return false;
+    if ((text.match(/\bexport const\b/g) || []).length !== 1) return false;
+    if (!/\bskSolve\s*\(/.test(text) && /\bnewSketch(?:OnPlane)?\s*\(/.test(text)) return false;
+    if (/\b(opCut|opBore|opPlateHoles|qEdges|qEdgeAll|qBodyFaces|qAllEdges)\s*\(/.test(text)) return false;
+    return text.length >= 120;
+  }
+
   async function promoteGenerationToKnowledge(generationId, signal, safeRating, prompt) {
     if (!supabase || !generationId) return;
     const isGood = ["good", "helpful", "copied"].includes(signal) || Number(safeRating) >= 4;
@@ -1285,7 +1313,7 @@ export function createLearningService({
       .eq("id", generationId)
       .maybeSingle();
 
-    if (error || !gen?.featurescript || gen.featurescript.length < 80) return;
+    if (error || !gen?.featurescript || !isPromotionSafeFeatureScript(gen.featurescript)) return;
 
     const basePrompt = normalizeText(prompt || gen.prompt || "");
     const title = (basePrompt.slice(0, 100) || `Good generation ${generationId.slice(0, 8)}`);
@@ -1299,8 +1327,11 @@ export function createLearningService({
       summary,
       tags: [shapeType, "confirmed", "user_approved"].filter(Boolean),
       keywords,
-      parameter_hints: [],
-      modeling_notes: [`User confirmed this generation works. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`],
+      parameter_hints: ["Preserve editable dimensions exposed in precondition."],
+      modeling_notes: [
+        `User confirmed this generation works. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`,
+        "Keep operation order compile-safe and preserve user-editable parameters.",
+      ],
       example_prompt: normalizeText(gen.prompt || "").slice(0, 200),
       feature_pattern: (gen.featurescript || "").slice(0, 1000),
     }, warned, "promote_knowledge");
@@ -1321,11 +1352,14 @@ export function createLearningService({
         shape_type: shapeType,
         tags: [shapeType, "confirmed", "user_approved"].filter(Boolean),
         keywords,
-        parameter_hints: [],
-        modeling_notes: [`User confirmed. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`],
+        parameter_hints: ["Preserve editable dimensions exposed in precondition."],
+        modeling_notes: [
+          `User confirmed. Prompt: ${normalizeText(gen.prompt || "").slice(0, 150)}`,
+          "Use this row when a similar part should remain editable after generation.",
+        ],
         feature_pattern: (gen.featurescript || "").slice(0, 1000),
         failure_modes: [],
-        validation_rules: ["Confirmed working by user"],
+        validation_rules: ["Confirmed working by user", "Keep generated geometry tied to definition parameters"],
         quality_score: 0.88,
         source_table: "generations",
         is_active: true,

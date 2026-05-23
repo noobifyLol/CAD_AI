@@ -1,7 +1,7 @@
 [
   {
     "title": "DeepCAD Prismatic Extrude Corpus",
-    "summary": "Sampled 80 DeepCAD construction files with 153 sketches and 137 extrudes; dominant curves Line3D:1173, Arc3D:297, Circle3D:260.",
+    "summary": "Sampled 160 DeepCAD construction files with 294 sketches and 250 extrudes; dominant curves Line3D:1818, Arc3D:759, Circle3D:570.",
     "tags": [
       "dataset",
       "deepcad",
@@ -72,7 +72,7 @@
   },
   {
     "title": "DeepCAD Circular Bore And Spacer Corpus",
-    "summary": "DeepCAD samples include 25 circle-dominant profiles suited for bushings, spacers, bores, and cylindrical interfaces.",
+    "summary": "DeepCAD samples include 38 circle-dominant profiles suited for bushings, spacers, bores, and cylindrical interfaces.",
     "tags": [
       "dataset",
       "deepcad",

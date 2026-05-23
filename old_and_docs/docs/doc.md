@@ -8,6 +8,16 @@ This is the active design now.
 2. The AI should use the model's own prompt understanding so the app does not depend on heavy keyword routing.
 3. After understanding the request, the AI should use FeatureScript documentation plus learned memory to generate the final FeatureScript.
 
+### Live runtime behavior
+
+- `/generate` and `/debug` are the main chatbot endpoints.
+- The active path is now:
+  - prompt understanding
+  - retrieval/context assembly
+  - generation -> validation -> repair -> simplification fallback
+- Hard blocked results are no longer the normal target behavior.
+- The only retained explicit template fallback is the spur gear path.
+
 ### Active runtime files
 
 - `server.js`
@@ -20,17 +30,93 @@ This is the active design now.
 
 - `learning.js`
   - loads FeatureScript documentation snippets
-  - retrieves learned memory from Supabase
+  - retrieves learned memory from Supabase and local dataset/source artifacts
   - logs generations and feedback
 
 - `adaptiveNetwork.js`
   - reranks memory rows so the best learned guidance is used first
+  - prefers confirmed successful rows over weak seed rows
 
 - `Auth.js`
   - sign up, login, token verification, and auth middleware
 
 - `public/script.js`
   - frontend logic for prompt submission, auth, and showing results
+
+### Memory row model
+
+The main reusable learning unit is a `cad_memory`-style row with fields such as:
+
+- `memory_type`
+- `title`
+- `summary`
+- `shape_type`
+- `tags`
+- `keywords`
+- `parameter_hints`
+- `modeling_notes`
+- `feature_pattern`
+- `failure_modes`
+- `validation_rules`
+- `quality_score`
+- `component_tags`
+- `operation_tags`
+- `usage_count`
+- `success_count`
+- `failure_count`
+
+Rows are now meant to be operational:
+
+- `summary`
+  - what the modeling pattern is for
+- `parameter_hints`
+  - editable dimensions and expected units
+- `modeling_notes`
+  - operation order and geometric constraints
+- `feature_pattern`
+  - compact FeatureScript pattern or pseudocode
+- `failure_modes`
+  - what commonly breaks
+- `validation_rules`
+  - what the validator should enforce
+
+### Retrieval priority
+
+`learning.js` now prefers:
+
+1. confirmed successful memory rows
+2. FeatureScript docs with strong operation overlap
+3. dataset rows with matching operation/component tags
+4. source knowledge rows
+5. lower-confidence seed rows
+
+### Regression and failure tracking
+
+The repo now keeps a tracked failure corpus in `data/failureCorpus.jsonl`.
+
+Each record stores:
+
+- `prompt`
+- `timestamp`
+- `generationMode`
+- `completionLevel`
+- `rawCode`
+- `sanitizedCode`
+- `validatorIssues`
+- `fatalIssues`
+- `compileErrors`
+- `userResult`
+- `fixedCode`
+- `notes`
+
+Supporting scripts:
+
+- `scripts/build_failure_corpus.js`
+  - builds or refreshes the corpus
+- `scripts/run_smoke_tests.js`
+  - runs prompt regressions against `/generate`
+- `scripts/ingest_cad_mllm_dataset.js`
+  - rebuilds compact dataset rows for retrieval
 
 ### Files removed from the active runtime
 

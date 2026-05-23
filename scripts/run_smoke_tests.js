@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateFeatureScript } from "../ai.js";
+import { hasFatalFeatureScriptPatterns, validateFeatureScript } from "../ai.js";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const LOG_DIR = join(ROOT, "logs");
@@ -9,7 +9,7 @@ const RAW_DIR = join(LOG_DIR, "raw_generations");
 const BASE_URL = process.env.CAD_AI_BASE_URL || "http://localhost:10000";
 const ENDPOINT = process.argv[2] || process.env.CAD_SMOKE_ENDPOINT || "/generate";
 
-const prompts = [
+const DEFAULT_PROMPTS = [
   "Create me a cube with the sides filleted.",
   "Create an open-top electronics enclosure 4x3x1.5 inches with 0.1 inch walls.",
   "Create a filleted and chamfered rectangular block with editable radius and chamfer width.",
@@ -21,6 +21,24 @@ const prompts = [
   "Create a belt-driven side plate using standard pulley spacing rules.",
   "Create me a cube with the letter E imprinted into it.",
 ];
+const FAILURE_CORPUS_PATH = join(ROOT, "data", "failureCorpus.jsonl");
+
+function loadPrompts() {
+  if (!existsSync(FAILURE_CORPUS_PATH)) return DEFAULT_PROMPTS;
+  try {
+    const lines = readFileSync(FAILURE_CORPUS_PATH, "utf8")
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+    const corpusPrompts = lines
+      .map(line => JSON.parse(line))
+      .map(entry => String(entry.prompt || "").trim())
+      .filter(Boolean);
+    return [...new Set([...DEFAULT_PROMPTS, ...corpusPrompts])];
+  } catch {
+    return DEFAULT_PROMPTS;
+  }
+}
 
 function stamp() {
   return new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
@@ -50,6 +68,7 @@ async function main() {
   ensureDir(LOG_DIR);
   ensureDir(RAW_DIR);
   const id = stamp();
+  const prompts = loadPrompts();
   const results = [];
 
   try {
@@ -73,9 +92,9 @@ async function main() {
     const prompt = prompts[index];
     const generation = await postJson(ENDPOINT, { prompt, history: [] });
     const code = generation.json.code || generation.json.fixed || "";
-    const blocked = generation.json.generationMode === "blocked_trace_only";
     if (code) writeFileSync(join(RAW_DIR, `smoke_${id}_${index + 1}.fs`), code);
     let issues = validateFeatureScript(code);
+    let fatalIssues = hasFatalFeatureScriptPatterns(code);
     let debug = null;
     if (issues.length && code) {
       debug = await postJson("/debug", {
@@ -86,6 +105,7 @@ async function main() {
       if (fixed) {
         writeFileSync(join(RAW_DIR, `smoke_${id}_${index + 1}_fixed.fs`), fixed);
         issues = validateFeatureScript(fixed);
+        fatalIssues = hasFatalFeatureScriptPatterns(fixed);
       }
     }
     results.push({
@@ -93,10 +113,10 @@ async function main() {
       endpoint: ENDPOINT,
       status: generation.status,
       ok: generation.ok,
-      blocked,
-      completionLevel: generation.json.completionLevel || (blocked ? "blocked" : "full"),
+      completionLevel: generation.json.completionLevel || (code ? "full" : "partial"),
       validationIssues: issues,
-      compileProxyOk: Boolean(code) && issues.length === 0,
+      fatalIssues,
+      compileProxyOk: Boolean(code) && issues.length === 0 && fatalIssues.length === 0,
       generation: generation.json,
       debug,
     });

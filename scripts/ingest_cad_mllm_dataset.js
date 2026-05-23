@@ -198,8 +198,8 @@ const omniTxtRoot = resolve("data/Omni-CAD/txt");
 const csvOutputPath = resolve(process.argv[2] || "data/cadMemoryExamples.dataset.csv");
 const jsonOutputPath = resolve(process.argv[3] || "data/cadDatasetSummaries.json");
 
-const deepCadSamples = walkFiles(deepCadJsonRoot, 80, path => path.endsWith(".json"));
-const omniCaptionShards = walkFiles(omniTxtRoot, 10, path => path.endsWith(".json"));
+const deepCadSamples = walkFiles(deepCadJsonRoot, 160, path => path.endsWith(".json"));
+const omniCaptionShards = walkFiles(omniTxtRoot, 20, path => path.endsWith(".json"));
 
 const deepCadSummary = summarizeDeepCadSamples(deepCadSamples);
 const omniSummary = summarizeOmniCaptions(omniCaptionShards);

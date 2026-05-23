@@ -982,7 +982,7 @@ async function main() {
     await writeFile(join(FS_DIR, file), `${code.trim()}\n`);
   }
 
-  const datasetRows = sampleDeepCadRows(96);
+  const datasetRows = sampleDeepCadRows(144);
   const memoryRows = [...fsMemoryRows(), ...datasetRows];
   await writeFile(join(DATA, "cadKnowledge.new.csv"), csv(knowledgeRows));
   await writeFile(join(DATA, "cadPruningTable.new.csv"), csv(pruningRows));

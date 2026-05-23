@@ -14,7 +14,9 @@
     "prune:cad-memory": "node scripts/pruneCadMemory.js",
     "db:learning-report": "node scripts/dbLearningReport.js",
     "build:research-import": "node scripts/build_research_import_artifacts.js",
+    "build:failure-corpus": "node scripts/build_failure_corpus.js",
     "smoke:generate": "node scripts/run_smoke_tests.js /generate",
+    "regression:corpus": "node scripts/run_smoke_tests.js /generate",
     "train:adaptive": "node scripts/train_adaptive_network.js data/adaptive_training.jsonl"
   },
   "dependencies": {

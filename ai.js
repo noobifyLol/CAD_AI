@@ -1116,6 +1116,40 @@ ${segStr}${boreStr}
         });`;
 }
 
+function tGear(d) {
+  const defaultTeeth = Math.max(8, Math.round(d.numTeeth || 20));
+  const defaultPitchRadius = d.pitchRadius || d.radiusInches || ((d.moduleInches || 0.0787402) * defaultTeeth / 2);
+  const defaultBoreRadius = d.boreRadius || d.holeRadiusInches || 0.2;
+  const defaultFaceWidth = d.faceWidth || d.depthInches || 0.5;
+  const gearBody = templateSpurGearFixed({
+    ...d,
+    numTeeth: defaultTeeth,
+    depthInches: defaultFaceWidth,
+    holeRadiusInches: defaultBoreRadius,
+    moduleInches: d.moduleInches || 0.0787402,
+  });
+
+  return {
+    precondition: [
+      preconditionPlane(),
+      preconditionInteger("numTeeth", "Number of Teeth", 6, defaultTeeth, 200),
+      preconditionLength("pitchRadius", "Pitch Radius", 0.1, defaultPitchRadius, 24),
+      preconditionLength("boreRadius", "Bore Radius", 0, defaultBoreRadius, 12),
+      preconditionLength("faceWidth", "Face Width", 0.05, defaultFaceWidth, 24),
+    ].join("\n"),
+    body: `${planeVar()}
+        var pitchRadius = definition.pitchRadius;
+        var faceWidth = definition.faceWidth;
+        var boreRadius = definition.boreRadius;
+${gearBody
+  .replace(`${planeVar()}\n`, "")
+  .replace(/\bmod\s*=\s*d\.moduleInches > 0 \? d\.moduleInches : 0\.0787402;/, 'mod = (2 * (pitchRadius / inch)) / max(1, definition.numTeeth);')
+  .replace(new RegExp(`${n(defaultPitchRadius)} \\* inch`, "g"), "pitchRadius")
+  .replace(new RegExp(`${n(defaultBoreRadius)} \\* inch`, "g"), "boreRadius")
+  .replace(new RegExp(`${n(defaultFaceWidth)} \\* inch`, "g"), "faceWidth")}`,
+  };
+}
+
 // ─── Assemble full FeatureScript file ───────────────────────────────────────── CHANGE THIS, THIS CAN BE USED AS A EXAMPLE NOT THE FINAL RESULT
 
 function buildFeatureScript(d) {
@@ -1242,11 +1276,10 @@ function buildLearningContextText(learningContext = {}) {
   const notes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
   const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
   const featureScriptDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
-  const promptKeywords = extractPromptKeywords(learningContext.prompt || "");
-
-  if (promptKeywords.length) {
-    lines.push(`User prompt keywords: ${promptKeywords.join(", ")}`);
-  }
+  const gearReference = USE_VALIDATED_TEMPLATES
+    ? knowledge.find(entry => normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase().includes("fs_example")
+      && /gear/i.test(String(entry.title || "")))
+    : null;
 
   if (notes.length) {
     lines.push("Project-specific guidance from prior runs:");
@@ -1283,7 +1316,14 @@ function buildLearningContextText(learningContext = {}) {
 
   if (knowledge.length) {
     lines.push("CAD modeling knowledge to apply:");
-    knowledge.slice(0, 6).forEach((entry, index) => {
+    const visibleKnowledge = knowledge
+      .filter(entry => {
+        const memoryType = normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase();
+        if (!memoryType.includes("fs_example")) return true;
+        return /gear/i.test(String(entry.title || "")) && /gear/i.test(String(learningContext.prompt || ""));
+      })
+      .slice(0, 6);
+    visibleKnowledge.forEach((entry, index) => {
       const title = normalizeText(entry.title || `Knowledge ${index + 1}`);
       const summary = normalizeText(entry.summary || "").slice(0, 150);
       const hints = Array.isArray(entry.parameter_hints || entry.parameterHints) ? (entry.parameter_hints || entry.parameterHints) : [];
@@ -1293,7 +1333,8 @@ function buildLearningContextText(learningContext = {}) {
       const validationRules = Array.isArray(entry.validation_rules || entry.validationRules) ? (entry.validation_rules || entry.validationRules) : [];
       const memoryType = normalizeText(entry.memory_type || entry.memoryType || "");
       const quality = Number.isFinite(Number(entry.quality_score)) ? Number(entry.quality_score).toFixed(2) : "";
-      const featurePattern = normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 420);
+      const allowPattern = /gear/i.test(String(entry.title || "")) || !normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase().includes("fs_example");
+      const featurePattern = allowPattern ? normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 420) : "";
 
       lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}${memoryType || quality ? ` (${[memoryType, quality && `q=${quality}`].filter(Boolean).join(", ")})` : ""}`);
       if (keywords.length) lines.push(`   keywords=${keywords.slice(0, 6).join(", ")}`);
@@ -1303,6 +1344,14 @@ function buildLearningContextText(learningContext = {}) {
       if (failureModes.length) lines.push(`   avoid=${failureModes.slice(0, 2).map(normalizeText).join(" | ")}`);
       if (validationRules.length) lines.push(`   validate=${validationRules.slice(0, 2).map(normalizeText).join(" | ")}`);
     });
+  }
+
+  if (gearReference) {
+    const featurePattern = normalizeText(gearReference.feature_pattern || gearReference.featurePattern || "").slice(0, 520);
+    if (featurePattern) {
+      lines.push("Gear reference pattern:");
+      lines.push(`Use this only as a gear-specific structural reference, not as a generic template: ${featurePattern}`);
+    }
   }
 
   return lines.join("\n").trim();
@@ -1776,6 +1825,8 @@ function performGeometricReasoning(dims) {
   const h = dims.heightInches || 2;
   const d = dims.depthInches  || 0.25;
   const r = dims.radiusInches || 0;
+  const maxDim = Math.max(w, h, d);
+  const minDim = Math.min(w, h, d);
 
   // ── 1. Bounding-box diagonal (3D Euclidean magnitude) ──────────────────────
   const diag = Math.sqrt(w * w + h * h + d * d);
@@ -1787,8 +1838,6 @@ function performGeometricReasoning(dims) {
   }
 
   // ── 2. Dominant axis + aspect classification ──────────────────────────────
-  const maxDim = Math.max(w, h, d);
-  const minDim = Math.min(w, h, d);
   const slenderness = maxDim / Math.max(minDim, 0.001);
   const profile =
     slenderness > 8  ? "highly_slender_rod" :
@@ -1858,42 +1907,11 @@ function performGeometricReasoning(dims) {
 
 // All known shapes that have a validated template — used for emergency fallback only.
 // Templates are NEVER the primary output; they are injected as reference examples for the AI.
-const TEMPLATE_SHAPES = new Set([
-  "BOX", "ROBOT_MECH", "CYLINDER", "PLATE", "POLYGON", "LINKAGE", "PLATE_HOLES",
-  "L_BRACKET", "T_BRACKET", "FLANGE", "HEX_NUT", "WASHER", "BUSHING",
-  "HITCH_PEG", "GEAR_SPUR", "CONE", "STEPPED_SHAFT", "PIPE",
-]);
+const TEMPLATE_SHAPES = new Set(["GEAR_SPUR"]);
 
 function canUseTemplateFallback(dims) {
   // Template fallback is a last resort only — never the primary generation path.
   return TEMPLATE_SHAPES.has(dims.shape);
-}
-
-function pickTemplateFallbackDims(prompt, dims) {
-  const heuristicDims = applyPromptHeuristics(prompt, dims);
-  if (canUseTemplateFallback(heuristicDims)) return heuristicDims;
-
-  const inferredShape = inferShapeFromPrompt(prompt);
-  const fallbackShape = TEMPLATE_SHAPES.has(inferredShape)
-    ? inferredShape
-    : /\b(wheel|roller|tube|pipe|magnet|cylinder|rod|shaft)\b/i.test(prompt)
-      ? "CYLINDER"
-      : /\b(linkage|arm|rod end|coupler)\b/i.test(prompt)
-        ? "LINKAGE"
-        : /\b(robot|mech|android|humanoid)\b/i.test(prompt)
-          ? "ROBOT_MECH"
-          : /\b(gear|pinion|spur)\b/i.test(prompt)
-            ? "GEAR_SPUR"
-            : /\b(carrot|cone|frustum|tapered)\b/i.test(prompt)
-              ? "CONE"
-              : "BOX";
-
-  return applyPromptHeuristics(prompt, {
-    ...heuristicDims,
-    shape: fallbackShape,
-    confidence: "LOW",
-    parseFailed: false,
-  });
 }
 
 /**
@@ -1911,16 +1929,6 @@ function buildTemplateExampleForDims(dims) {
   }
 }
 
-// AI always generates code — no shape is ever routed to template output.
-// "template_only" env override still works for CI/test environments.
-function decideGenerationMode(prompt, dims) {
-  if (GENERATION_STRATEGY === "template_only") {
-    // Only bypass for explicit CI/testing override — not a normal user path.
-    return canUseTemplateFallback(dims) ? "template" : "custom";
-  }
-  // All other strategies: AI generates, templates are examples.
-  return "custom";
-}
 // Clean and trim the featureScript to prevent errors
 //
 // FeatureScript spec (toplevel.md): named typed functions like
@@ -2475,14 +2483,18 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   const lines = [`Prompt analyzed: "${prompt}"`];
   lines.push(`Shape: ${d.shape}  |  Confidence: ${d.confidence}`);
   const generationLabel =
-    meta.generationMode === "blocked_trace_only"
-      ? "Blocked trace only — no code returned"
+    meta.generationMode === "multi_key_simplified"
+      ? "AI-authored simplified recovery — compile-safe fallback"
+      : meta.generationMode === "multi_key_repaired"
+      ? "AI-authored repaired result — validator and repair loop applied"
+      : meta.generationMode === "gear_template_fallback"
+      ? "Gear-specific template fallback — kept only for spur gears"
+      : meta.generationMode === "recovery_failed"
+      ? "AI-authored partial result — best available code with warnings"
       : meta.generationMode === "four_pass_operation_compiler_partial"
       ? "Hybrid operation compiler — partial result with source-backed omissions"
       : meta.generationMode === "four_pass_operation_compiler"
       ? "Hybrid operation compiler — compile-safe deterministic assembly"
-      : meta.generationMode === "template_fallback"
-      ? "AI-authored feature — emergency template fallback triggered after repair failure"
       : meta.generationMode === "template"
         ? "Template output (CI/test override — template_only env)"
         : "AI-authored parametric feature";
@@ -2684,6 +2696,8 @@ Do NOT return "blocked" for ANY of the following — these are auto-fixed by san
 - Fillet/chamfer edge selection style (qEdgeAll, qBodyFaces, etc.)
 - Code truncation or missing closing brackets
 - Syntax details that will be repaired in a subsequent pass
+- Length values used directly inside vector(...) without / inch conversion
+- opExtrude shortcut keys like "profile", "sketch", or "distance"
 
 When in doubt, return "pass" with notes rather than "blocked".`;
 
@@ -2694,10 +2708,11 @@ const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring
 - Always include skSolve before any downstream opExtrude/opRevolve/opLoft/opSweep.
 - Expose user-editable parameters in the precondition using isLength/isInteger/boolean and sensible bounds.
 - For numeric quantity parameters, set the default in the bounds spec. Use IntegerBoundSpec for isInteger instead of string Default annotations.
-- If the shape is recognized (gear, pulley, flange, cylinder, box), prefer source-backed compiler families and explicit operation ordering over template imitation.
+- Use prompt understanding and retrieved docs/memory to decide the modeling strategy. Do not depend on keyword-template routing.
 - If uncertain about an API key or environment, do not reference or output secrets.
 - If you must reference an example, only use sanitized examples that follow the above rules.
 - If any rule would be violated by the intended output, respond with a short JSON diagnostics object: {"error":"violation","reasons":[...]} and do not emit code.
+- Preserve editability: if you expose parameters in precondition, the resulting geometry must actually depend on those definition parameters.
 
 Return ONLY a JSON object — no markdown, no explanation outside the JSON:
 {
@@ -4802,6 +4817,276 @@ INSTRUCTIONS:
   }
 }
 
+function buildChatbotRetrievalBundle(prompt, dims, learningContext = {}) {
+  const promptKeywords = extractPromptKeywords(prompt, 14);
+  const knowledgeRows = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
+  const featureScriptDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
+  const dbRows = selectTraceableRows(
+    knowledgeRows.filter(row => !String(row.memory_type || "").includes("dataset") && !String(row.source_table || "").includes("source_docs")),
+    promptKeywords,
+    promptKeywords,
+    8,
+    "db"
+  );
+  const datasetRows = selectTraceableRows(
+    [
+      ...knowledgeRows.filter(row => String(row.memory_type || "").includes("dataset")),
+      ...loadDatasetSummaryRows(),
+    ],
+    promptKeywords,
+    promptKeywords,
+    8,
+    "dataset"
+  );
+  const sourceRows = selectTraceableRows(
+    [
+      ...knowledgeRows.filter(row => String(row.source_table || "").includes("source_docs")),
+      ...loadSourceKnowledgeRows(),
+    ],
+    promptKeywords,
+    promptKeywords,
+    8,
+    "source"
+  );
+  const docRows = featureScriptDocs.slice(0, 4).map((doc, index) => ({
+    title: doc.title || `FeatureScript Doc ${index + 1}`,
+    summary: normalizeText(doc.text || "").slice(0, 420),
+    source_table: "fs_docs",
+    source_type: "local_fs_doc",
+    operation_tags: [],
+    component_tags: [],
+    kind: "doc",
+  }));
+
+  return {
+    dbRows,
+    datasetRows,
+    sourceRows,
+    docRows,
+    summaries: {
+      db: summarizeTraceableRows(dbRows),
+      dataset: summarizeTraceableRows(datasetRows),
+      source: summarizeTraceableRows(sourceRows),
+      docs: docRows.map(row => row.title).join(" | "),
+    },
+  };
+}
+
+function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple = false }) {
+  const styleHints = {
+    c1: "Prioritize rich geometry, editable parameters, and strong operation sequencing.",
+    c2: "Prioritize compile-safe FeatureScript API usage and conservative query construction.",
+    c3: "Prioritize 3D-printable geometry, smooth but stable finishing, and no thin unsupported details.",
+    c4: "Prioritize clean parameterization so user edits actually change the resulting geometry.",
+    repair: "Rewrite the model more conservatively while preserving intent and editable dimensions.",
+    simplify: "Return a simplified but compile-safe version of the requested part that still respects the main prompt.",
+  };
+
+  return [
+    `USER REQUEST: ${prompt}`,
+    `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+    `CANDIDATE MODE: ${candidateId}`,
+    `STYLE HINT: ${styleHints[candidateId] || styleHints.c1}`,
+    `DOC_ROWS: ${JSON.stringify(retrieval.docRows.slice(0, 4))}`,
+    `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 5))}`,
+    `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 5))}`,
+    `SOURCE_ROWS: ${JSON.stringify(compactPromptRows(retrieval.sourceRows, 5))}`,
+    preferSimple
+      ? "OUTPUT POLICY: simplify the geometry if needed, but always keep the result editable, compile-oriented, and structurally faithful to the user intent."
+      : "OUTPUT POLICY: aim for the most detailed compile-safe FeatureScript you can produce while keeping all major requested geometry editable.",
+    "HARD RULES:",
+    "- Return JSON only with featureName, featureLabel, reasoning, and code.",
+    "- Always expose editable parameters in precondition.",
+    "- Use FeatureScript docs and retrieved rows as ground truth for API names and operation order.",
+    "- Never return an empty code field.",
+    "- If the request is complex, preserve the main components first and safely omit secondary details rather than inventing unsafe API calls.",
+  ].join("\n");
+}
+
+function parseFeatureScriptJson(raw, dims) {
+  const parsed = tryParseJson(raw, null);
+  if (parsed?.code) {
+    return {
+      featureName: parsed.featureName || dims.featureName,
+      featureLabel: parsed.featureLabel || dims.featureLabel,
+      reasoning: parsed.reasoning || "",
+      code: parsed.code,
+    };
+  }
+
+  const stripped = String(raw || "")
+    .replace(/```(?:featurescript|fs|json|javascript)?\s*/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  if (/FeatureScript\s+2931\s*;/.test(stripped)) {
+    return {
+      featureName: dims.featureName,
+      featureLabel: dims.featureLabel,
+      reasoning: "The model returned raw FeatureScript instead of JSON, so it was recovered directly.",
+      code: stripped,
+    };
+  }
+
+  return null;
+}
+
+function scoreFeatureScriptCandidate(code) {
+  const sanitized = sanitizeFeatureScript(code).code;
+  const localIssues = validateFeatureScript(sanitized);
+  const fatalIssues = hasFatalFeatureScriptPatterns(sanitized);
+  const exportCount = (sanitized.match(/\bexport const\b/g) || []).length;
+  const hasPrecondition = /precondition[\s\S]*definition\./.test(sanitized);
+  const score =
+    (sanitized.length > 80 ? 100 : 0)
+    + (exportCount === 1 ? 15 : -20)
+    + (hasPrecondition ? 10 : -20)
+    - localIssues.length * 4
+    - fatalIssues.length * 12;
+
+  return { sanitized, localIssues, fatalIssues, score };
+}
+
+async function generateChatbotCandidates(prompt, dims, learningContext, retrieval, requestId) {
+  const slots = ["k3", "k4", "k5", "k6"].slice(0, Math.max(1, Math.min(CAD_CANDIDATE_COUNT, 4)));
+  const candidateIds = slots.map((_, index) => `c${index + 1}`);
+  const settled = await Promise.allSettled(candidateIds.map((candidateId, index) => chat([
+    { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+    { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId }) },
+  ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "generation",
+    affinity: `${requestId}:chatbot:${candidateId}`,
+    keySlot: slots[index],
+    maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 5200),
+  })));
+
+  return settled.map((item, index) => {
+    const candidateId = candidateIds[index];
+    if (item.status !== "fulfilled") {
+      return {
+        candidateId,
+        ok: false,
+        error: item.reason?.message || "candidate_failed",
+        score: -999,
+        code: "",
+        reasoning: "",
+        localIssues: [],
+        fatalIssues: [],
+      };
+    }
+
+    const parsed = parseFeatureScriptJson(item.value, dims);
+    if (!parsed?.code) {
+      return {
+        candidateId,
+        ok: false,
+        error: "candidate_invalid_json",
+        score: -999,
+        code: "",
+        reasoning: "",
+        localIssues: [],
+        fatalIssues: [],
+      };
+    }
+
+    const scored = scoreFeatureScriptCandidate(parsed.code);
+    return {
+      candidateId,
+      ok: true,
+      featureName: parsed.featureName,
+      featureLabel: parsed.featureLabel,
+      reasoning: parsed.reasoning,
+      code: scored.sanitized,
+      score: scored.score,
+      localIssues: scored.localIssues,
+      fatalIssues: scored.fatalIssues,
+    };
+  }).sort((a, b) => b.score - a.score);
+}
+
+async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_ATTEMPTS) {
+  let workingCode = sanitizeFeatureScript(code).code;
+  let localIssues = validateFeatureScript(workingCode);
+  let fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+  const explanations = [];
+  let repaired = false;
+
+  for (let attempt = 0; attempt < maxAttempts && (localIssues.length || fatalIssues.length); attempt += 1) {
+    const issueText = [
+      ...localIssues.map(issue => `Line ${issue.line || "?"}: ${issue.message}`),
+      ...fatalIssues.map(issue => `Fatal: ${issue.message}`),
+    ].slice(0, 16).join("\n");
+
+    const repair = await debugFeatureScript(workingCode, issueText, {
+      learningContext,
+      stage: "repair",
+      affinity: `repair:${stableHash(workingCode)}:${attempt}`,
+    });
+    if (!repair?.fixed) break;
+    workingCode = sanitizeFeatureScript(repair.fixed).code;
+    explanations.push(repair.explanation || `Repair pass ${attempt + 1} applied.`);
+    repaired = true;
+    localIssues = validateFeatureScript(workingCode);
+    fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+  }
+
+  return { code: workingCode, localIssues, fatalIssues, repaired, explanations };
+}
+
+async function generateSimplifiedCandidate(prompt, dims, learningContext, retrieval, requestId) {
+  const raw = await chat([
+    { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+    { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId: "simplify", preferSimple: true }) },
+  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    stage: "generation",
+    affinity: `${requestId}:chatbot:simplify`,
+    keySlot: "k9",
+    maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 4800),
+  });
+  return parseFeatureScriptJson(raw, dims);
+}
+
+function buildGearTemplateResult(prompt, dims, learningContext, retrieval, warnings = []) {
+  const code = buildFeatureScript({ ...dims, shape: "GEAR_SPUR" });
+  const orchestration = {
+    status: "completed",
+    completionLevel: "simplified",
+    failedPass: null,
+    keySlotsUsed: buildKeySlotUsage(),
+    passes: {
+      intent: { shape: dims.shape, confidence: dims.confidence },
+      retrieval: { summaries: retrieval.summaries },
+      generation: { selectedCandidateId: "gear_template_fallback" },
+      repair: { repaired: false, explanation: [] },
+      fallback: { used: "gear_template" },
+    },
+    provenance: {
+      dbRows: normalizeRetrievedRows(retrieval.dbRows, "db"),
+      datasetRows: normalizeRetrievedRows(retrieval.datasetRows, "dataset"),
+      sourceRows: normalizeRetrievedRows(retrieval.sourceRows, "source"),
+      docRows: retrieval.docRows || [],
+    },
+    warnings,
+    omissions: ["Returned the dedicated spur gear fallback because AI candidates were not compile-safe."],
+  };
+
+  return {
+    code,
+    featureName: dims.featureName,
+    featureLabel: dims.featureLabel,
+    thinking: buildThinkingTrace(prompt, dims, {
+      generationMode: "gear_template_fallback",
+      learningExamples: learningContext.examples.length,
+      orchestration,
+    }),
+    dims,
+    generationMode: "gear_template_fallback",
+    completionLevel: "simplified",
+    warnings,
+    omissions: orchestration.omissions,
+    orchestration,
+  };
+}
+
 // ─── Public: Generate ─────────────────────────────────────────────────────────
 
 export async function generateFeatureScript(prompt, options = {}) {
@@ -4816,245 +5101,238 @@ export async function generateFeatureScript(prompt, options = {}) {
   const mathAnalysis = performGeometricReasoning(dims);
   learningContext.notes.push(`Geometric Reasoning: ${mathAnalysis}`);
 
-  const generationMode = decideGenerationMode(prompt, dims);
-
-  if (generationMode === "template") {
-    const code = buildFeatureScript(dims);
-    const thinking = buildThinkingTrace(prompt, dims, {
-      generationMode: "template",
-      learningExamples: learningContext.examples.length,
-    });
-    return {
-      code,
-      featureName: dims.featureName,
-      featureLabel: dims.featureLabel,
-      thinking,
-      dims,
-      generationMode: "template",
-      completionLevel: "full",
-      warnings: [],
-      omissions: [],
-      orchestration: {
-        status: "completed",
-        completionLevel: "full",
-        keySlotsUsed: buildKeySlotUsage(),
-        passes: {},
-        provenance: { dbRows: [], datasetRows: [], sourceRows: [] },
-        blockers: [],
-        warnings: [],
-        omissions: [],
-      },
-    };
-  }
-
   try {
-    const decomposition = await buildFourPassDecomposition(prompt, dims, learningContext, requestId);
-    const retrieval = await buildDatabaseRetrievalPass(prompt, dims, learningContext, decomposition, requestId);
-    const blockPass = await runBlockSynthesisPass(prompt, dims, learningContext, decomposition, retrieval, requestId);
-    const weavePass = await runTopologyWeaverPass(prompt, dims, learningContext, decomposition, retrieval, blockPass, requestId);
-    const validationPass = await runValidationRepairPass(prompt, dims, learningContext, decomposition, blockPass, weavePass, requestId);
+    const retrieval = buildChatbotRetrievalBundle(prompt, dims, learningContext);
+    const candidates = await generateChatbotCandidates(prompt, dims, learningContext, retrieval, requestId);
+    const bestCandidate = candidates[0] || null;
+
+    let selectedCode = bestCandidate?.code || "";
+    let selectedFeatureName = bestCandidate?.featureName || dims.featureName;
+    let selectedFeatureLabel = bestCandidate?.featureLabel || dims.featureLabel;
+    let selectedReasoning = bestCandidate?.reasoning || "The chatbot generator assembled a FeatureScript candidate from retrieved docs, memory rows, and dataset hints.";
+    let generationModeLabel = "multi_key_detailed";
+    let completionLevel = "full";
+    let warnings = [];
+    let omissions = [];
+    let repairSummary = { repaired: false, explanation: [], localIssues: [], fatalIssues: [] };
+    let fallbackUsed = "none";
+
+    if (selectedCode) {
+      repairSummary = await runRepairCycle(selectedCode, learningContext);
+      selectedCode = repairSummary.code;
+      if (repairSummary.repaired) {
+        generationModeLabel = "multi_key_repaired";
+        completionLevel = "repaired";
+      }
+    }
+
+    if (!selectedCode || repairSummary.localIssues.length || repairSummary.fatalIssues.length) {
+      const simplified = await generateSimplifiedCandidate(prompt, dims, learningContext, retrieval, requestId)
+        .catch(() => null);
+      if (simplified?.code) {
+        const simplifiedRepair = await runRepairCycle(simplified.code, learningContext, 1);
+        if (simplifiedRepair.code) {
+          selectedCode = simplifiedRepair.code;
+          selectedFeatureName = simplified.featureName || selectedFeatureName;
+          selectedFeatureLabel = simplified.featureLabel || selectedFeatureLabel;
+          selectedReasoning = simplified.reasoning || selectedReasoning;
+          repairSummary = simplifiedRepair;
+          generationModeLabel = "multi_key_simplified";
+          completionLevel = "simplified";
+          fallbackUsed = "ai_simplification";
+          omissions.push("Secondary details may have been simplified to preserve compile safety and editability.");
+        }
+      }
+    }
+
+    if ((!selectedCode || repairSummary.fatalIssues.length) && dims.shape === "GEAR_SPUR" && canUseTemplateFallback(dims)) {
+      return buildGearTemplateResult(prompt, dims, learningContext, retrieval, [
+        "Used the retained spur gear fallback because AI-generated gear candidates were not compile-safe.",
+      ]);
+    }
+
+    if (!selectedCode && bestCandidate?.code) {
+      selectedCode = bestCandidate.code;
+      generationModeLabel = "recovery_failed";
+      completionLevel = "partial";
+      warnings.push("Returned the best sanitized AI candidate even though some validator issues remain.");
+      omissions.push("Automatic repair and simplification did not fully resolve all validator issues.");
+    }
+
+    if (!selectedCode) {
+      const aiRecovery = await generateWithAiThinking(prompt, dims, learningContext, requestId);
+      if (aiRecovery?.code) {
+        const recovered = await runRepairCycle(aiRecovery.code, learningContext, 1);
+        selectedCode = recovered.code || aiRecovery.code;
+        selectedFeatureName = aiRecovery.featureName || selectedFeatureName;
+        selectedFeatureLabel = aiRecovery.featureLabel || selectedFeatureLabel;
+        selectedReasoning = aiRecovery.reasoning || selectedReasoning;
+        repairSummary = recovered;
+        generationModeLabel = "multi_key_simplified";
+        completionLevel = "simplified";
+        fallbackUsed = "ai_recovery";
+        omissions.push("Returned the recovery candidate after the main candidate set failed.");
+      }
+    }
+
+    if (!selectedCode) {
+      warnings.push("No compile-safe FeatureScript could be produced. Returning an empty code payload was avoided where possible, but all recovery paths failed.");
+      completionLevel = "partial";
+      generationModeLabel = "recovery_failed";
+    }
+
+    if (repairSummary.localIssues.length) {
+      warnings.push(`Validator still reports ${repairSummary.localIssues.length} issue(s).`);
+    }
+    if (repairSummary.fatalIssues.length) {
+      warnings.push(`Fatal validator checks still report ${repairSummary.fatalIssues.length} issue(s).`);
+    }
+    if (repairSummary.repaired) {
+      warnings.push("Automatic repair was applied to improve FeatureScript correctness.");
+    }
 
     const orchestration = {
-      status: validationPass.blockers.length ? "blocked" : "completed",
-      completionLevel: validationPass.blockers.length ? "blocked" : (validationPass.omissions.length ? "partial" : "full"),
-      failedPass: validationPass.blockers.length
-        ? (!weavePass.code ? "weave" : "validation")
-        : null,
+      status: "completed",
+      completionLevel,
+      failedPass: null,
       keySlotsUsed: buildKeySlotUsage(),
-      context_meta: {
-        ...buildContextMeta(dims, learningContext),
-        complexAssembly: isComplexAssemblyPrompt(prompt),
-      },
       passes: {
-        decomposition,
-        retrieval: {
-          sourcePrecedence: retrieval.sourcePrecedence,
-          summaries: retrieval.summaries,
-          stepMatches: retrieval.stepMatches,
-          operationRows: retrieval.operationRows || [],
+        intent: {
+          shape: dims.shape,
+          confidence: dims.confidence,
+          dimensions: summarizeDimsForPrompt(dims),
         },
-        blocks: {
-          selectedCandidateId: blockPass.selectedCandidateId,
-          candidates: blockPass.candidates.map(candidate => ({
+        retrieval: {
+          summaries: retrieval.summaries,
+          docRows: retrieval.docRows.map(row => row.title),
+        },
+        generation: {
+          selectedCandidateId: bestCandidate?.candidateId || "none",
+          candidateScores: candidates.map(candidate => ({
             candidateId: candidate.candidateId,
-            coverage: candidate.coverage,
-            missingRequirements: candidate.missingRequirements || [],
-            coverageNotes: candidate.coverageNotes || [],
-            blockCount: (candidate.blocks || []).length,
-            operationPlan: candidate.operationPlan
-              ? {
-                  family: candidate.operationPlan.family,
-                  operationKinds: candidate.operationPlan.operationKinds || [],
-                  finishingRequests: candidate.operationPlan.finishingRequests || [],
-                }
-              : null,
+            score: candidate.score,
+            ok: candidate.ok,
+            issueCount: candidate.localIssues?.length || 0,
+            fatalCount: candidate.fatalIssues?.length || 0,
           })),
         },
-        weave: {
-          status: weavePass.status || (weavePass.code ? "completed" : "blocked"),
-          reasoning: weavePass.reasoning || "",
-          warnings: weavePass.warnings || [],
-          omissions: weavePass.omissions || [],
+        repair: {
+          repaired: repairSummary.repaired,
+          explanation: repairSummary.explanations || [],
         },
-        operationPlan: selectedOperationPlanSummary(blockPass.selectedCandidate?.operationPlan),
-        finishingPlan: weavePass.finishingPlan || null,
+        fallback: {
+          used: fallbackUsed,
+        },
       },
       provenance: {
         dbRows: normalizeRetrievedRows(retrieval.dbRows, "db"),
         datasetRows: normalizeRetrievedRows(retrieval.datasetRows, "dataset"),
         sourceRows: normalizeRetrievedRows(retrieval.sourceRows, "source"),
-        operationRows: normalizeRetrievedRows(retrieval.operationRows || [], "operation"),
-        tab_citations: Array.isArray(learningContext.tabCitations) ? learningContext.tabCitations : [],
+        docRows: retrieval.docRows,
       },
-      blockers: validationPass.blockers,
-      warnings: validationPass.warnings,
-      omissions: validationPass.omissions,
+      warnings,
+      omissions,
       validation: {
-        status: validationPass.validatorPass?.status || "repair",
-        repaired: validationPass.repaired,
-        notes: validationPass.validatorPass?.notes || [],
-        localIssueCount: validationPass.localIssues.length,
-        fatalIssueCount: validationPass.fatalIssues.length,
+        localIssueCount: repairSummary.localIssues.length,
+        fatalIssueCount: repairSummary.fatalIssues.length,
+        repaired: repairSummary.repaired,
       },
     };
 
-    if (validationPass.blockers.length || !validationPass.finalCode) {
-      const localResult = buildLocalRobustFeatureScript(prompt, dims, decomposition, retrieval, learningContext);
-      if (localResult?.code) {
-        console.warn(`[AI] four-pass model output blocked; completed with deterministic operation compiler for request=${requestId}`);
-        return buildCompletedLocalResult(
-          prompt,
-          dims,
-          learningContext,
-          orchestration,
-          localResult,
-          "Model-authored weave or validation failed, so the deterministic operation compiler produced a compile-safe result from the same decomposition and retrieval context."
-        );
-      }
-      console.warn(`[AI] Validation failed; attempting AI deep thinking recovery...`);
-      const aiResult = await generateWithAiThinking(prompt, dims, learningContext, requestId);
-      if (aiResult?.code) {
-        console.warn(`[AI] AI thinking recovery succeeded for request=${requestId}`);
-        const recoveryOrchestration = { ...orchestration, status: "completed", completionLevel: "partial", recoveryMode: "ai_thinking_validation_failed" };
-        const recoveryThinking = buildThinkingTrace(prompt, dims, { generationMode: "ai_thinking_recovery", customReasoning: aiResult.reasoning || "Validation issues encountered. AI deep thinking generated recovery code.", orchestration: recoveryOrchestration });
-        return {
-          code: aiResult.code,
-          featureName: aiResult.featureName,
-          featureLabel: aiResult.featureLabel,
-          thinking: recoveryThinking,
-          dims,
-          generationMode: "ai_thinking_recovery",
-          completionLevel: "partial",
-          warnings: [...validationPass.warnings, ...(aiResult.warnings || []), "Recovery: AI deep thinking generated code"],
-          omissions: [...validationPass.omissions, ...validationPass.blockers.slice(0, 3)],
-          orchestration: recoveryOrchestration,
-        };
-      }
-      console.warn(`[AI] AI thinking recovery also failed; generation returns partial with empty code for request=${requestId}`);
-      const failedOrchestration = { ...orchestration, status: "completed", completionLevel: "partial", recoveryMode: "validation_failed_ai_recovery_failed" };
-      const failedThinking = buildThinkingTrace(prompt, dims, { generationMode: "recovery_failed", customReasoning: "Both validation and AI recovery failed. Returning partial completion.", orchestration: failedOrchestration });
-      return {
-        code: "",
-        featureName: dims.featureName,
-        featureLabel: dims.featureLabel,
-        thinking: failedThinking,
-        dims,
-        generationMode: "recovery_failed",
-        completionLevel: "partial",
-        warnings: [...validationPass.warnings, "Validation and AI recovery both failed"],
-        omissions: [...validationPass.omissions, ...validationPass.blockers, "FeatureScript generation was not possible"],
-        orchestration: failedOrchestration,
-      };
-    }
-
     const thinking = buildThinkingTrace(prompt, dims, {
-      generationMode: "four_pass_multi_key",
+      generationMode: generationModeLabel,
       learningExamples: learningContext.examples.length,
-      customReasoning: `Completed decomposition, retrieval, block synthesis, topology weave, and validation across fixed key slots ${buildKeySlotUsage().map(slot => slot.slotLabel).join(", ")}.`,
+      customReasoning: selectedReasoning,
       orchestration,
     });
-    const finalCode = validationPass.finalCode;
 
-    console.log(`[AI] done — ${finalCode.length} chars`);
     return {
-      code: finalCode,
-      featureName: weavePass.featureName || dims.featureName,
-      featureLabel: weavePass.featureLabel || dims.featureLabel,
+      code: selectedCode,
+      featureName: selectedFeatureName,
+      featureLabel: selectedFeatureLabel,
       thinking,
       dims,
-      generationMode: validationPass.omissions.length ? "four_pass_operation_compiler_partial" : "four_pass_operation_compiler",
-      completionLevel: validationPass.omissions.length ? "partial" : "full",
-      warnings: validationPass.warnings,
-      omissions: validationPass.omissions,
+      generationMode: generationModeLabel,
+      completionLevel,
+      warnings,
+      omissions,
       orchestration,
     };
   } catch (err) {
-    console.error("[AI] Four-pass orchestration failed.", err?.message || String(err));
-    const fallbackDecomposition = planFallbackForPrompt(prompt, dims);
-    const fallbackRetrieval = buildLocalRetrievalFallback(prompt, dims, learningContext, fallbackDecomposition);
-    const localResult = buildLocalRobustFeatureScript(prompt, dims, fallbackDecomposition, fallbackRetrieval, learningContext);
-    if (localResult?.code) {
-      return buildCompletedLocalResult(
-        prompt,
-        dims,
-        learningContext,
-        {
-          status: "completed",
-          failedPass: null,
-          keySlotsUsed: buildKeySlotUsage(),
-          provenance: {
-            dbRows: normalizeRetrievedRows(fallbackRetrieval.dbRows, "db"),
-            datasetRows: normalizeRetrievedRows(fallbackRetrieval.datasetRows, "dataset"),
-            sourceRows: normalizeRetrievedRows(fallbackRetrieval.sourceRows, "source"),
-          },
-          passes: {
-            decomposition: fallbackDecomposition,
-            retrieval: {
-              sourcePrecedence: fallbackRetrieval.sourcePrecedence,
-              summaries: fallbackRetrieval.summaries,
-              stepMatches: fallbackRetrieval.stepMatches,
-            },
-            blocks: { selectedCandidateId: "operation_compiler", candidates: [] },
-            weave: { status: "operation_compiler", reasoning: localResult.strategy },
-          },
+    console.error("[AI] Chatbot generation failed.", err?.message || String(err));
+    const retrieval = buildChatbotRetrievalBundle(prompt, dims, learningContext);
+    if (dims.shape === "GEAR_SPUR" && canUseTemplateFallback(dims)) {
+      return buildGearTemplateResult(prompt, dims, learningContext, retrieval, [
+        `Main chatbot generation failed: ${String(err?.message || "unknown").slice(0, 100)}`,
+      ]);
+    }
+
+    const aiRecovery = await generateWithAiThinking(prompt, dims, learningContext, requestId);
+    const repaired = aiRecovery?.code ? await runRepairCycle(aiRecovery.code, learningContext, 1) : null;
+    const recoveryCode = repaired?.code || aiRecovery?.code || "";
+    const warnings = [`Main chatbot generation failed: ${String(err?.message || "unknown").slice(0, 100)}`];
+    if (repaired?.repaired) warnings.push("Recovery code was automatically repaired.");
+    if (!recoveryCode) warnings.push("All AI recovery paths failed.");
+    const omissions = recoveryCode
+      ? ["Returned the best available recovery candidate after a generation failure."]
+      : ["No FeatureScript could be produced by the main or recovery paths."];
+    const orchestration = {
+      status: "completed",
+      completionLevel: recoveryCode ? "simplified" : "partial",
+      failedPass: "generation",
+      keySlotsUsed: buildKeySlotUsage(),
+      passes: {
+        intent: {
+          shape: dims.shape,
+          confidence: dims.confidence,
+          dimensions: summarizeDimsForPrompt(dims),
         },
-        localResult,
-        "The model pipeline failed before completion, so the deterministic operation compiler produced a compile-safe result from local source and dataset retrieval."
-      );
-    }
-    console.warn(`[AI] Orchestration failure: attempting AI deep thinking recovery...`);
-    const orchestrationAiResult = await generateWithAiThinking(prompt, dims, learningContext, requestId);
-    if (orchestrationAiResult?.code) {
-      console.warn(`[AI] AI thinking recovery succeeded after orchestration failure for request=${requestId}`);
-      const recoveryOrchestration = { status: "completed", completionLevel: "partial", failedPass: "pipeline", keySlotsUsed: buildKeySlotUsage(), recoveryMode: "ai_thinking_orchestration_failed", provenance: { dbRows: [], datasetRows: [], sourceRows: [] }, passes: {} };
-      const recoveryThinking = buildThinkingTrace(prompt, dims, { generationMode: "ai_thinking_recovery", customReasoning: orchestrationAiResult.reasoning || `Pipeline orchestration error. AI deep thinking generated recovery code.`, orchestration: recoveryOrchestration });
-      return {
-        code: orchestrationAiResult.code,
-        featureName: orchestrationAiResult.featureName,
-        featureLabel: orchestrationAiResult.featureLabel,
-        thinking: recoveryThinking,
-        dims,
-        generationMode: "ai_thinking_recovery",
-        completionLevel: "partial",
-        warnings: [`Pipeline orchestration failed: ${String(err?.message || "unknown").slice(0, 100)}`, ...(orchestrationAiResult.warnings || []), "Recovery: AI deep thinking generated code"],
-        omissions: ["Full four-pass generation was not completed due to orchestration error"],
-        orchestration: recoveryOrchestration,
-      };
-    }
-    console.warn(`[AI] AI thinking recovery also failed; orchestration error returns partial with empty code for request=${requestId}`);
-    const failedOrchestrOrchestration = { status: "completed", completionLevel: "partial", failedPass: "pipeline", keySlotsUsed: buildKeySlotUsage(), recoveryMode: "orchestration_failed_ai_recovery_failed", provenance: { dbRows: [], datasetRows: [], sourceRows: [] }, passes: {} };
-    const failedOrchestrThinking = buildThinkingTrace(prompt, dims, { generationMode: "recovery_failed", customReasoning: `Pipeline orchestration error: ${String(err?.message || "unknown").slice(0, 80)}. AI recovery also failed. Returning partial completion.`, orchestration: failedOrchestrOrchestration });
+        retrieval: {
+          summaries: retrieval.summaries,
+          docRows: retrieval.docRows.map(row => row.title),
+        },
+        generation: {
+          selectedCandidateId: "recovery",
+          candidateScores: [],
+        },
+        repair: {
+          repaired: Boolean(repaired?.repaired),
+          explanation: repaired?.explanations || [],
+        },
+        fallback: {
+          used: recoveryCode ? "ai_recovery" : "none",
+        },
+      },
+      provenance: {
+        dbRows: normalizeRetrievedRows(retrieval.dbRows, "db"),
+        datasetRows: normalizeRetrievedRows(retrieval.datasetRows, "dataset"),
+        sourceRows: normalizeRetrievedRows(retrieval.sourceRows, "source"),
+        docRows: retrieval.docRows,
+      },
+      warnings,
+      omissions,
+      validation: {
+        localIssueCount: repaired?.localIssues?.length || 0,
+        fatalIssueCount: repaired?.fatalIssues?.length || 0,
+        repaired: Boolean(repaired?.repaired),
+      },
+    };
+
     return {
-      code: "",
-      featureName: dims.featureName,
-      featureLabel: dims.featureLabel,
-      thinking: failedOrchestrThinking,
+      code: recoveryCode,
+      featureName: aiRecovery?.featureName || dims.featureName,
+      featureLabel: aiRecovery?.featureLabel || dims.featureLabel,
+      thinking: buildThinkingTrace(prompt, dims, {
+        generationMode: recoveryCode ? "multi_key_simplified" : "recovery_failed",
+        customReasoning: aiRecovery?.reasoning || `Main chatbot generation failed: ${String(err?.message || "unknown").slice(0, 100)}`,
+        orchestration,
+      }),
       dims,
-      generationMode: "recovery_failed",
-      completionLevel: "partial",
-      warnings: [`Pipeline orchestration failed: ${String(err?.message || "unknown").slice(0, 100)}`, "AI deep thinking recovery also failed"],
-      omissions: ["Full four-pass generation was not completed", "FeatureScript generation was not possible"],
-      orchestration: failedOrchestrOrchestration,
+      generationMode: recoveryCode ? "multi_key_simplified" : "recovery_failed",
+      completionLevel: recoveryCode ? "simplified" : "partial",
+      warnings,
+      omissions,
+      orchestration,
     };
   }
 }
@@ -5270,11 +5548,35 @@ export function validateFeatureScript(code) {
     if (/\bopCylinder\s*\(/.test(line)) {
       addIssue(lineNo, "Unsupported opCylinder call — replace with fCylinder(...) or sketch + opExtrude.", line);
     }
+    if (/\b(opCut|opBore|opPlateHoles)\s*\(/.test(line)) {
+      addIssue(lineNo, "Unsupported helper operation detected. Use standard FeatureScript sketch, extrude, boolean, or query APIs instead.", line);
+    }
+    if (/\b(qEdges|qEdgeAll|qBodyFaces|qAllEdges)\s*\(/.test(line)) {
+      addIssue(lineNo, "Unsupported edge/body helper detected. Use qOwnedByBody(...) and qEdgeTopologyFilter(...) patterns instead.", line);
+    }
+    if (/\bnewSketch\s*\([^)]*evPlane\s*\(\s*context\s*,\s*definition\.\w+/.test(line)) {
+      addIssue(lineNo, "newSketch with raw definition face/plane selection is fragile here. Prefer newSketchOnPlane with a resolved skPlane variable.", line);
+    }
+    if (/evPlane\s*\(\s*context\s*,\s*definition\.\w+\s*\)/.test(line)) {
+      addIssue(lineNo, "evPlane must receive a map such as { \"face\" : definition.location }.", line);
+    }
+    if (/\bopExtrude\s*\(/.test(line) && /"(profile|sketch|distance)"\s*:/.test(text)) {
+      addIssue(lineNo, "opExtrude should use entities/direction/endBound/endDepth, not sketch/profile/distance shortcut keys.", line);
+    }
+    if (/\bvector\s*\(\s*definition\.\w+\s*(?:,|\))/.test(line) && !/\/\s*inch/.test(line) && /\*\s*inch/.test(line)) {
+      addIssue(lineNo, "Length values used inside vector(...) must be converted to unitless numbers with / inch before multiplying the vector by * inch.", line);
+    }
+    if (/\bopFillet\s*\(/.test(line) && /qSketchRegion\s*\(/.test(text)) {
+      addIssue(lineNo, "Fillet targets should come from body edge queries, not sketch region queries.", line);
+    }
   });
 
   // Check that defineFeature has 'definition is map'
   if (/\bdefineFeature\s*\(\s*function\s*\(/.test(text) && !/\bdefinition\s+is\s+map\b/.test(text)) {
     addIssue(0, "defineFeature third parameter must be typed as 'definition is map' — the 'is map' annotation is missing or was stripped.", "(global)");
+  }
+  if (!/\}\s*\)\s*;\s*$/.test(text.trim())) {
+    addIssue(0, "FeatureScript file appears truncated or missing the final defineFeature closure and semicolon.", "(global)");
   }
 
   const isLengthParams = new Set();
@@ -5311,6 +5613,13 @@ export function validateFeatureScript(code) {
   }
   if (looksLikeGear && /\bopBoolean\s*\([\s\S]*?BooleanOperationType\.UNION/.test(text) && /\bid\s+\+\s*"ext1"/.test(text) && /\bid\s+\+\s*"ext2"/.test(text)) {
     addIssue(0, "Two generated gears were unioned into one body. Gear pairs should stay as separate bodies unless the prompt explicitly asks for a merged solid.", "(global)");
+  }
+  if (looksLikeGear && /\bsk(LineSegment|Arc)\s*\(/.test(text) && /\b(isInteger|isLength)\(\s*definition\./.test(text)) {
+    const parameterNames = [...isLengthParams];
+    const hardcodedSketch = parameterNames.length > 0 && !parameterNames.some(name => new RegExp(`\\bdefinition\\.${name}\\b`).test(text.split(/skSolve\s*\(/)[0] || text));
+    if (hardcodedSketch) {
+      addIssue(0, "Editable result preservation: gear geometry exposes parameters but the tooth sketch is still mostly hardcoded. Tie tooth/body geometry back to definition parameters.", "(global)");
+    }
   }
 
   const declarationRegex = /^\s*(?:const|var)\s+([A-Za-z_]\w*)\s*=/;
@@ -5374,6 +5683,22 @@ export function hasFatalFeatureScriptPatterns(code) {
     issues.push({ code: 'legacy_opCylinder_usage', message: 'Legacy opCylinder usage detected; replace it with fCylinder or a sketch/extrude workflow.' });
   }
 
+  if (/\b(opCut|opBore|opPlateHoles)\s*\(/.test(code)) {
+    issues.push({ code: 'unsupported_helper_operation', message: 'Unsupported helper operation detected; rewrite it using standard FeatureScript operations.' });
+  }
+
+  if (/\b(qEdges|qEdgeAll|qBodyFaces|qAllEdges)\s*\(/.test(code)) {
+    issues.push({ code: 'unsupported_query_helper', message: 'Unsupported body/edge helper query detected; use qOwnedByBody and qEdgeTopologyFilter patterns.' });
+  }
+
+  if (/evPlane\s*\(\s*context\s*,\s*definition\.\w+\s*\)/.test(code)) {
+    issues.push({ code: 'invalid_evPlane_usage', message: 'evPlane called with a raw definition property instead of a face map.' });
+  }
+
+  if (!/\}\s*\)\s*;\s*$/.test(String(code || "").trim())) {
+    issues.push({ code: 'truncated_file', message: 'FeatureScript appears truncated or is missing the final defineFeature closure.' });
+  }
+
   // 5) qSketchRegion called with variable
   if (/qSketchRegion\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/.test(code)) {
     issues.push({ code: 'qSketchRegion_variable', message: 'qSketchRegion called with a variable; must use explicit sketch id string.' });
@@ -5382,6 +5707,14 @@ export function hasFatalFeatureScriptPatterns(code) {
   // 6) Missing skSolve before downstream ops
   if (/(opExtrude|opRevolve|opLoft|opSweep)/.test(code) && !/skSolve\s*\(/.test(code)) {
     issues.push({ code: 'missing_skSolve', message: 'Downstream op found without skSolve present.' });
+  }
+
+  if (/\bvector\s*\(\s*definition\.\w+\s*(?:,|\))/.test(code) && /\*\s*inch/.test(code) && !/\/\s*inch/.test(code)) {
+    issues.push({ code: 'length_inside_vector', message: 'Length values were inserted into vector(...) without conversion to unitless numbers.' });
+  }
+
+  if (/\bopExtrude\s*\([\s\S]*?"(profile|sketch|distance)"\s*:/.test(code)) {
+    issues.push({ code: 'invalid_opExtrude_map', message: 'opExtrude uses unsupported shortcut keys like profile/sketch/distance.' });
   }
 
   return issues;

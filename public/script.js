@@ -79,14 +79,21 @@ function formatOrchestration(orchestration) {
   if (passes.weave?.status) {
     lines.push(`Weave status: ${passes.weave.status}`);
   }
+  if (passes.generation?.selectedCandidateId) {
+    lines.push(`Selected candidate: ${passes.generation.selectedCandidateId}`);
+  }
+  if (passes.fallback?.used && passes.fallback.used !== 'none') {
+    lines.push(`Fallback used: ${passes.fallback.used}`);
+  }
+  if (orchestration.validation) {
+    lines.push(`Validator issues: ${orchestration.validation.localIssueCount || 0}`);
+    lines.push(`Fatal checks: ${orchestration.validation.fatalIssueCount || 0}`);
+  }
   if (Array.isArray(orchestration.omissions) && orchestration.omissions.length) {
     lines.push(`Omissions: ${orchestration.omissions.join(' | ')}`);
   }
   if (Array.isArray(orchestration.warnings) && orchestration.warnings.length) {
     lines.push(`Warnings: ${orchestration.warnings.join(' | ')}`);
-  }
-  if (Array.isArray(orchestration.blockers) && orchestration.blockers.length) {
-    lines.push(`Blockers: ${orchestration.blockers.join(' | ')}`);
   }
   return lines.join('\n');
 }
@@ -326,18 +333,24 @@ async function generate() {
     if (!r.ok) throw new Error(data.error || 'Generation failed');
     setOutput('gen-output', data.code, 'copy-btn', data.generationId);
     setThinking('gen', data.thinking || '');
-    const blocked = data.completionLevel === 'blocked' || data.generationMode === 'blocked_trace_only';
+    const simplified = data.completionLevel === 'simplified' || data.generationMode === 'multi_key_simplified' || data.generationMode === 'gear_template_fallback';
+    const repaired = data.completionLevel === 'repaired' || data.generationMode === 'multi_key_repaired';
     const partial = data.completionLevel === 'partial';
-    setStatus('gen-status', blocked
-      ? `Blocked "${data.featureLabel}" - ${databaseStatusText(data.database)}`
+    const statusMessage = simplified
+      ? `Generated simplified "${data.featureLabel}" - ${databaseStatusText(data.database)}`
+      : repaired
+      ? `Generated repaired "${data.featureLabel}" - ${databaseStatusText(data.database)}`
       : partial
       ? `Generated partial "${data.featureLabel}" - ${databaseStatusText(data.database)}`
-      : `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`, blocked ? 'error' : 'ok');
+      : `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`;
+    setStatus('gen-status', statusMessage, data.code ? 'ok' : 'error');
     showRunModal({
-      title: blocked ? 'Generation blocked' : partial ? 'Generation partial' : 'Generation complete',
-      ok: !blocked,
-      message: blocked
-        ? `Blocked "${data.featureLabel}". ${data.orchestration?.blockers?.join(' | ') || 'No compile-safe result was produced.'}`
+      title: simplified ? 'Generation simplified' : repaired ? 'Generation repaired' : partial ? 'Generation partial' : 'Generation complete',
+      ok: Boolean(data.code),
+      message: simplified
+        ? `Generated simplified "${data.featureLabel}". ${data.warnings?.join(' | ') || 'The fallback path simplified the model to preserve compile safety and editability.'}`
+        : repaired
+        ? `Generated repaired "${data.featureLabel}". ${data.warnings?.join(' | ') || 'Validator-guided repair was applied.'}`
         : partial
         ? `Generated partial "${data.featureLabel}". ${data.omissions?.join(' | ') || 'Some features were safely omitted.'}`
         : `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
