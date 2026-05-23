@@ -14,6 +14,7 @@ const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first"
 // Template injection and template fallback stay opt-in for emergency recovery only.
 const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "false").toLowerCase() === "true";
 const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
+const ENABLE_OPERATION_COMPILER_FALLBACK = String(process.env.CAD_ENABLE_OPERATION_COMPILER_FALLBACK || "false").toLowerCase() === "true";
 
 // ------------------------------
 // Model configuration
@@ -24,8 +25,8 @@ const GROQ_MAX_PROMPT_CHARS = Number(process.env.GROQ_MAX_PROMPT_CHARS || 160000
 const GROQ_TEMPERATURE = Number(process.env.GROQ_TEMPERATURE || 0.2);
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
 const VISION_MAX_TOKENS = Number(process.env.GROQ_VISION_MAX_TOKENS || 800);
-const CAD_CANDIDATE_COUNT = Math.max(1, Math.min(6, Number(process.env.CAD_CANDIDATE_COUNT || 3)));
-const CAD_REPAIR_ATTEMPTS = Math.max(1, Math.min(3, Number(process.env.CAD_REPAIR_ATTEMPTS || 3)));
+const CAD_CANDIDATE_COUNT = Math.max(1, Math.min(9, Number(process.env.CAD_CANDIDATE_COUNT || 3)));
+const CAD_REPAIR_ATTEMPTS = Math.max(1, Math.min(3, Number(process.env.CAD_REPAIR_ATTEMPTS || 1)));
 const CAD_RETRIEVAL_WORKERS = Math.max(1, Math.min(6, Number(process.env.CAD_RETRIEVAL_WORKERS || 3)));
 const MULTI_KEY_ENABLED = String(process.env.GROQ_MULTI_KEY_ENABLED || "true").toLowerCase() !== "false";
 const MAX_RETRIEVED_SNIPPETS = Math.max(1, Math.min(6, Number(process.env.CAD_MAX_RETRIEVED_SNIPPETS || 6)));
@@ -110,10 +111,10 @@ function stableHash(input) {
   return Math.abs(hash);
 }
 
-function pickStageCredential(stage = "generation", affinity = "") {
+function pickStageCredential(stage = "generation", affinity = "", keySlot = null) {
   const pool = getStageKeyPool(stage);
   let slotIndex = 0;
-  const requestedSlot = arguments.length > 2 ? arguments[2] : null;
+  const requestedSlot = keySlot;
 
   if (requestedSlot && /^k\d+$/i.test(String(requestedSlot))) {
     const explicitIndex = Math.max(0, Number(String(requestedSlot).slice(1)) - 1);
@@ -418,9 +419,45 @@ export const CAD_MLLM_EXECUTE_PROMPT = `CAD-MLLM execution pass:
 Use retrieved examples and pruning rules to write one complete FeatureScript 2931 file.
 Expose all user-editable dimensions in precondition, call skSolve before downstream operations, use real Line axes for revolves, use profileSubqueries for opLoft, use connected edge paths for opSweep, validate the static rules, repair once if needed, then return compile-safe FeatureScript only.`;
 
+function extractFirstJsonObject(text = "") {
+  const source = String(text || "");
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const ch = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = inString;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0 && start !== -1) return source.slice(start, index + 1);
+    }
+  }
+
+  return "";
+}
+
 function stripJson(text) {
-  const m = text?.match(/```json?\s*([\s\S]*?)```/i);
-  return (m ? m[1] : (text || "{}")).trim();
+  const raw = String(text || "");
+  const m = raw.match(/```(?:json|javascript)?\s*([\s\S]*?)```/i);
+  const candidate = (m ? m[1] : raw).trim();
+  return extractFirstJsonObject(candidate) || candidate || "{}";
 }
 
 function promptRequestsAxialHole(prompt = "") {
@@ -487,7 +524,8 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
       lastError = err;
       const message = String(err?.message || "");
       if (/rate limit|tokens per minute|tpm|429/i.test(message) && options.retryOnRateLimit !== false) {
-        const waitMs = Number(options.rateLimitBackoffMs || 1200);
+        const retrySeconds = Number(message.match(/try again in\s+([\d.]+)s/i)?.[1] || 0);
+        const waitMs = Number(options.rateLimitBackoffMs || Math.max(1200, Math.ceil(retrySeconds * 1000) + 500));
         console.warn(`[AI] Rate limit on stage=${options.stage || "generation"} model=${candidate}; retrying after ${waitMs}ms with next fallback when available.`);
         await new Promise(resolve => setTimeout(resolve, waitMs));
       }
@@ -1301,7 +1339,7 @@ function buildLearningContextText(learningContext = {}) {
     lines.push("FeatureScript core syntax reference (use these rules as ground truth):");
     lines.push(`1. Feature structure: export const name = defineFeature(function(context is Context, id is Id, definition is map) precondition { ... } { ... });`);
     lines.push(`2. Length params: annotation { "Name": "Label", "Default": "1 * inch" } isLength(definition.param, LENGTH_BOUNDS); — in the body, definition.param already carries Length; never multiply by * inch again.`);
-    lines.push(`3. Integer params in FS 2931 require a bounds map: annotation { "Name": "Count", "Default": "20" } isInteger(definition.count, {(unitless) : [1, 20, 200]});`);
+    lines.push(`3. Integer params in FS 2931 require a bounds map: annotation { "Name": "Count" } isInteger(definition.count, { (unitless) : [1, 20, 200] } as IntegerBoundSpec);`);
     lines.push(`4. Degrees and other dimensionless dialog values should also use isInteger bounds. Do not write definition.x is number; or separate >= / <= lines in the precondition.`);
     lines.push(`5. Plane selection: annotation { "Name": "Plane", "Filter": GeometryType.PLANE, "MaxNumberOfPicks": 1 } definition.location is Query;`);
     lines.push(`   In body: var skPlane = isQueryEmpty(context, definition.location) ? plane(WORLD_ORIGIN, Z_DIRECTION) : evPlane(context, { "face": definition.location });`);
@@ -1471,14 +1509,21 @@ function buildContextMeta(dims, learningContext = {}) {
     generationStrategy: GENERATION_STRATEGY,
     validatedTemplates: USE_VALIDATED_TEMPLATES,
     allowTemplateFallback: ALLOW_TEMPLATE_FALLBACK,
+    operationCompilerFallback: ENABLE_OPERATION_COMPILER_FALLBACK,
     adaptiveExamples: Array.isArray(learningContext.examples) ? learningContext.examples.length : 0,
     adaptiveKnowledge: Array.isArray(learningContext.knowledge) ? learningContext.knowledge.length : 0,
   };
 }
 
 function buildKeySlotUsage() {
-  return FIXED_KEY_SLOT_SEQUENCE.map((slotLabel, index) => ({
+  const configuredKeyCount = Math.max(
+    safeStageKeyCount("generation"),
+    safeStageKeyCount("shared"),
+    1
+  );
+  return FIXED_KEY_SLOT_SEQUENCE.slice(0, configuredKeyCount).map((slotLabel, index) => ({
     slotLabel,
+    configured: index < configuredKeyCount,
     stage: [
       "dimensions",
       "planning",
@@ -1929,6 +1974,51 @@ function buildTemplateExampleForDims(dims) {
   }
 }
 
+function findMatchingBrace(text, openIndex) {
+  if (openIndex < 0 || text[openIndex] !== "{") return -1;
+  let depth = 0;
+  for (let index = openIndex; index < text.length; index += 1) {
+    const ch = text[index];
+    if (ch === "{") depth += 1;
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function findDefineFeatureEndIndex(text) {
+  const defineFeatureIndex = String(text || "").indexOf("defineFeature(");
+  if (defineFeatureIndex === -1) return -1;
+
+  let parenDepth = 0;
+  let seenOpen = false;
+  for (let index = defineFeatureIndex; index < text.length; index += 1) {
+    const ch = text[index];
+    if (ch === "(") {
+      parenDepth += 1;
+      seenOpen = true;
+    } else if (ch === ")") {
+      parenDepth -= 1;
+      if (seenOpen && parenDepth === 0) {
+        let endIndex = index + 1;
+        while (endIndex < text.length && /\s/.test(text[endIndex])) endIndex += 1;
+        return text[endIndex] === ";" ? endIndex : -1;
+      }
+    }
+  }
+  return -1;
+}
+
+function hasClosedDefineFeature(text) {
+  return findDefineFeatureEndIndex(String(text || "")) !== -1;
+}
+
+function looksLikeTopLevelFeatureScriptConstruct(text) {
+  return /^(?:\/\/|\/\*|annotation\b|export\s+(?:const|function|enum|predicate|type)\b|function\b|enum\b|type\b|predicate\b|operator\b|const\b|var\b|import\s*\()/i.test(String(text || "").trim());
+}
+
 // Clean and trim the featureScript to prevent errors
 //
 // FeatureScript spec (toplevel.md): named typed functions like
@@ -1986,17 +2076,17 @@ function _coreFeatureScriptSanitize(code) {
       /isInteger\((definition\.\w+)\)\s*;\s*\n(\s*)\1\s*>=\s*(\d+)\s*;\s*\n\s*\1\s*<=\s*(\d+)\s*;/g,
       (_, param, indent, min, max) => {
         const defaultValue = Math.round((Number(min) + Number(max)) / 2);
-        return `${indent}isInteger(${param}, {(unitless) : [${min}, ${defaultValue}, ${max}]});`;
+        return `${indent}isInteger(${param}, { (unitless) : [${min}, ${defaultValue}, ${max}] } as IntegerBoundSpec);`;
       }
     )
     .replace(
       /definition\.(\w+)\s+is\s+number\s*;\s*\n(\s*)definition\.\1\s*>=\s*(\d+)\s*;\s*\n\s*definition\.\1\s*<=\s*(\d+)\s*;/g,
       (_, name, indent, min, max) => {
         const defaultValue = Math.round((Number(min) + Number(max)) / 2);
-        return `${indent}isInteger(definition.${name}, {(unitless) : [${min}, ${defaultValue}, ${max}]});`;
+        return `${indent}isInteger(definition.${name}, { (unitless) : [${min}, ${defaultValue}, ${max}] } as IntegerBoundSpec);`;
       }
     )
-    .replace(/\bisInteger\((definition\.\w+)\)\s*;/g, 'isInteger($1, {(unitless) : [1, 10, 200]});')
+    .replace(/\bisInteger\((definition\.\w+)\)\s*;/g, 'isInteger($1, { (unitless) : [1, 10, 200] } as IntegerBoundSpec);')
     .replace(/\bfunction\s*\(([^)]*?)\bis\s+vector\b([^)]*)\)/g, (_, before, after) => {
       const normalizedBefore = before.replace(/,\s*$/, "").trim();
       const normalizedAfter = after.replace(/^\s*,\s*/, "").trim();
@@ -2021,53 +2111,30 @@ function _coreFeatureScriptSanitize(code) {
   // any top-level named function declarations to const lambda form.
   const featureBodyStart = cleaned.search(/\bdefineFeature\s*\(/);
   if (featureBodyStart !== -1) {
-    // Find the body block — it's the second { block after the precondition block
-    let depth = 0;
-    let inPrecondition = false;
-    let preconditionDone = false;
-    let bodyOpen = -1;
-    let i = featureBodyStart;
-
-    while (i < cleaned.length) {
-      const ch = cleaned[i];
-      if (cleaned.slice(i, i + 12) === "precondition") {
-        inPrecondition = true;
-      }
-      if (ch === '{') {
-        depth++;
-        if (inPrecondition && depth === 2) { /* entering precondition block */ }
-        else if (inPrecondition && depth === 1) { /* shouldn't happen */ }
-        else if (!inPrecondition && !preconditionDone && depth === 2) {
-          // This is the feature body opening brace
-          bodyOpen = i;
-          break;
-        }
-      }
-      if (ch === '}') {
-        depth--;
-        if (inPrecondition && depth === 1) {
-          inPrecondition = false;
-          preconditionDone = true;
-        }
-      }
-      i++;
-    }
+    const preconditionIndex = cleaned.indexOf("precondition", featureBodyStart);
+    const preconditionOpen = preconditionIndex === -1 ? -1 : cleaned.indexOf("{", preconditionIndex);
+    const preconditionClose = findMatchingBrace(cleaned, preconditionOpen);
+    const bodyOpen = preconditionClose === -1 ? -1 : cleaned.indexOf("{", preconditionClose + 1);
 
     if (bodyOpen !== -1) {
-      // Within the body region, convert named function declarations to const lambdas.
-      // Pattern: function <name>(<args>) returns <type> { or function <name>(<args>) {
-      const bodyRegion = cleaned.slice(bodyOpen);
-      const fixedBody = bodyRegion.replace(
-        /\bfunction\s+([a-zA-Z_]\w*)\s*(\([^)]*\))\s*(?:returns\s+\w+\s*)?\{/g,
-        (match, name, args) => `const ${name} = function${args}\n        {`
-      );
-      // Also fix the closing — named functions end with just `}` but lambdas need `};`
-      // We do a targeted fix: replace `}\n` that closes a `const X = function` with `};\n`
-      const withSemicolons = fixedBody.replace(
-        /(const\s+\w+\s*=\s*function[^{]*\{[\s\S]*?)\n(\s*\})\n/g,
-        (match, body, closing) => `${body}\n${closing};\n`
-      );
-      cleaned = cleaned.slice(0, bodyOpen) + withSemicolons;
+      // Within the feature body only, convert named function declarations to const lambdas.
+      // Module-level helpers after the feature are intentionally preserved.
+      const bodyClose = findMatchingBrace(cleaned, bodyOpen);
+      if (bodyClose !== -1) {
+        // Pattern: function <name>(<args>) returns <type> { or function <name>(<args>) {
+        const bodyRegion = cleaned.slice(bodyOpen, bodyClose + 1);
+        const fixedBody = bodyRegion.replace(
+          /\bfunction\s+([a-zA-Z_]\w*)\s*(\([^)]*\))\s*(?:returns\s+\w+\s*)?\{/g,
+          (match, name, args) => `const ${name} = function${args}\n        {`
+        );
+        // Also fix the closing — named functions end with just `}` but lambdas need `};`
+        // We do a targeted fix: replace `}\n` that closes a `const X = function` with `};\n`
+        const withSemicolons = fixedBody.replace(
+          /(const\s+\w+\s*=\s*function[^{]*\{[\s\S]*?)\n(\s*\})\n/g,
+          (match, body, closing) => `${body}\n${closing};\n`
+        );
+        cleaned = cleaned.slice(0, bodyOpen) + withSemicolons + cleaned.slice(bodyClose + 1);
+      }
     }
   }
 
@@ -2092,30 +2159,12 @@ function _coreFeatureScriptSanitize(code) {
     cleaned = `FeatureScript 2931;\nimport(path : "onshape/std/geometry.fs", version : "2931.0");\n\n${cleaned}`;
   }
 
-  const defineFeatureIndex = cleaned.indexOf("defineFeature(");
-  if (defineFeatureIndex !== -1) {
-    let parenDepth = 0;
-    let seenOpen = false;
-    let endIndex = -1;
-    for (let i = defineFeatureIndex; i < cleaned.length; i++) {
-      const ch = cleaned[i];
-      if (ch === "(") {
-        parenDepth++;
-        seenOpen = true;
-      } else if (ch === ")") {
-        parenDepth--;
-        if (seenOpen && parenDepth === 0) {
-          endIndex = i;
-          break;
-        }
-      }
-    }
-    if (endIndex !== -1) {
-      let trimAt = endIndex + 1;
-      while (trimAt < cleaned.length && /\s/.test(cleaned[trimAt])) trimAt++;
-      if (cleaned[trimAt] === ";") trimAt++;
-      const trailing = cleaned.slice(trimAt).trim();
-      if (trailing) cleaned = cleaned.slice(0, trimAt).trim();
+  const defineFeatureEndIndex = findDefineFeatureEndIndex(cleaned);
+  if (defineFeatureEndIndex !== -1) {
+    const trimAt = defineFeatureEndIndex + 1;
+    const trailing = cleaned.slice(trimAt).trim();
+    if (trailing && !looksLikeTopLevelFeatureScriptConstruct(trailing)) {
+      cleaned = cleaned.slice(0, trimAt).trim();
     }
   }
 
@@ -2138,6 +2187,15 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   function record(rule, before, after) {
     changes.push({ rule, beforeSnippet: before.slice(0, 300), afterSnippet: after.slice(0, 300) });
   }
+
+  // 0) Convert Length parameters used as vector coordinates into unitless
+  // coordinates before the final "* inch" multiplier.
+  code = code.replace(/vector\s*\(([^)]*\bdefinition\.\w+[^)]*)\)\s*\*\s*inch/g, (match, args) => {
+    const fixedArgs = args.replace(/\bdefinition\.(\w+)\b(?!\s*\/\s*inch)/g, "(definition.$1 / inch)");
+    const after = `vector(${fixedArgs}) * inch`;
+    if (after !== match) record("convert_length_params_inside_vector", match, after);
+    return after;
+  });
 
   // 1) Remove typed lambda annotations: function(x is number, y is number) -> function(x, y)
   const typedLambdaRegex = /function\s*\(\s*([a-zA-Z0-9_$]+)\s+is\s+[a-zA-Z0-9_]+\s*(?:,\s*[a-zA-Z0-9_$]+\s+is\s+[a-zA-Z0-9_]+\s*)*\)/g;
@@ -2709,9 +2767,10 @@ const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring
 - Expose user-editable parameters in the precondition using isLength/isInteger/boolean and sensible bounds.
 - For numeric quantity parameters, set the default in the bounds spec. Use IntegerBoundSpec for isInteger instead of string Default annotations.
 - Use prompt understanding and retrieved docs/memory to decide the modeling strategy. Do not depend on keyword-template routing.
+- Think like a custom-feature author, not a snippet filler: decompose the prompt into visible parametric components, then choose the documented FeatureScript operations needed for those components.
 - If uncertain about an API key or environment, do not reference or output secrets.
 - If you must reference an example, only use sanitized examples that follow the above rules.
-- If any rule would be violated by the intended output, respond with a short JSON diagnostics object: {"error":"violation","reasons":[...]} and do not emit code.
+- If a complex detail is risky, implement the nearest compile-safe parametric approximation. Never return diagnostics instead of code.
 - Preserve editability: if you expose parameters in precondition, the resulting geometry must actually depend on those definition parameters.
 
 Return ONLY a JSON object — no markdown, no explanation outside the JSON:
@@ -2722,27 +2781,51 @@ Return ONLY a JSON object — no markdown, no explanation outside the JSON:
   "code": "complete raw FeatureScript file — no backticks"
 }
 
+═══ OFFICIAL FEATURESCRIPT LIMITATIONS TO RESPECT ═══
+- FeatureScript is deterministic: do not use randomness, time, external calls, or hidden runtime state.
+- Feature types are custom functions defined in Feature Studios. The feature body runs during Part Studio regeneration and creates/modifies geometry in context.
+- Operations start with op or f, take context + id + definition map, mutate context, and return undefined. Never assign opExtrude/opSweep/opBoolean/opShell/etc. into a variable.
+- Queries are how you refer to geometry. After an operation, use qCreatedBy(id + "operationId", EntityType.BODY/EDGE/FACE) instead of expecting an operation return value.
+- Sketches made from FeatureScript require full control of the sketch plane, usually newSketchOnPlane(...), and skSolve is still required.
+- Advanced sketch helpers are limited; if a sketch-only operation is unavailable, build solids/wires and use modeling operations such as opFillet, opThicken, opBoolean, opLoft, opSweep, or opShell.
+- FeatureScript values carry units. isLength parameters are already ValueWithUnits, so convert only when a unitless vector coordinate is needed: definition.width / inch, then multiply the vector by inch.
+- Semicolons are not optional. Use size(array) rather than .length, and use += 1 instead of ++.
+
 ═══ HOW TO USE REFERENCE EXAMPLES IN DATABASE CONTEXT ═══
 When DATABASE CONTEXT contains sanitized FeatureScript examples, use them as operation references only:
 1. Extract the safe API pattern and operation order.
 2. Rebuild the requested geometry from the user's dimensions and retrieved evidence.
 3. Do not copy example code wholesale.
 
-═══ MANDATORY FILE STRUCTURE (HARD CONSTRAINT — DO NOT VIOLATE) ═══\r\nEvery file MUST follow this EXACT structure — the layout and punctuation matter:\r\n\r\n  FeatureScript 2931;\r\n  import(path : "onshape/std/geometry.fs", version : "2931.0");\r\n\r\n  annotation { "Feature Type Name" : "My Feature" }\r\n  export const myFeature = defineFeature(function(context is Context, id is Id, definition is map)\r\n      precondition {\r\n          // parameter declarations here\r\n      }\r\n      {\r\n          // feature body here\r\n      });
+═══ MANDATORY FILE STRUCTURE (HARD CONSTRAINT — DO NOT VIOLATE) ═══
+Every file MUST use this module shape. Helper functions/enums may be placed at module top level before or after the exported feature, like Onshape standard-library/custom-feature examples. Do not place named top-level function declarations inside the feature body.
+
+  FeatureScript 2931;
+  import(path : "onshape/std/geometry.fs", version : "2931.0");
+
+  annotation { "Feature Type Name" : "My Feature" }
+  export const myFeature = defineFeature(function(context is Context, id is Id, definition is map)
+      precondition
+      {
+          // parameter declarations here
+      }
+      {
+          // feature body here
+      });
 
 ═══ STRUCTURE PUNCTUATION RULES (CRITICAL — THESE SYNTAX ERRORS BREAK COMPILATION) ═══
 -- defineFeature takes EXACTLY: defineFeature(function(context is Context, id is Id, definition is map)
--- The body BLOCK opens IMMEDIATELY after the closing paren on the SAME LINE with no newline between ) and {
 -- The closing MUST be }); with semicolon (NOT just } or ));
--- NEVER split precondition or body opening across lines.
+-- Top-level helper functions use typed signatures, e.g. function makeRib(context is Context, id is Id, width is ValueWithUnits) { ... }
+-- Helper lambdas inside the feature body must be const f = function(x, y) { ... }; with untyped parameters.
 
 ═══ PRECONDITION RULES (from official FS docs) ═══
 - Integer parameter (FS 2931 requires the bounds map form):
     annotation { "Name" : "Count", "Default" : "4" }
-    isInteger(definition.count, {(unitless) : [1, 4, 100]});
+    isInteger(definition.count, { (unitless) : [1, 4, 100] } as IntegerBoundSpec);
 - Degrees and other plain dimensionless dialog values should also use isInteger:
     annotation { "Name" : "Angle (deg)", "Default" : "20" }
-    isInteger(definition.angleDeg, {(unitless) : [10, 20, 30]});
+    isInteger(definition.angleDeg, { (unitless) : [10, 20, 30] } as IntegerBoundSpec);
     // In the body convert with: definition.angleDeg * PI / 180
 - NEVER write:
     isInteger(definition.count);
@@ -2808,8 +2891,7 @@ When DATABASE CONTEXT contains sanitized FeatureScript examples, use them as ope
    NEVER use var myFunc = function(...) { ... }; for helper lambdas.
 3. UNITS: definition.param is already a Length if declared with isLength. 
    NEVER write: definition.param * inch. This doubles units and fails.
-4. The file must end immediately after the exported feature closes with });.
-   NEVER append template libraries, helper examples, or backup code after the main feature.
+4. The file may include real top-level helper functions after the exported feature, but never append prose, backup templates, alternate features, or copied libraries.
 
 ═══ SKETCH API ═══
 - skLineSegment(sk, "line1", { "start": vector(0,0) * inch, "end": vector(1,0) * inch });
@@ -3388,12 +3470,14 @@ function classifyOperationFamily(prompt, dims, decomposition = null) {
   const text = String(prompt || "").toLowerCase();
   const requestedOps = uniqueStrings((decomposition?.steps || []).map(step => step.operation));
   if (/\bletter\b|\bimprint|engrave|emboss/.test(text)) return "imprinted_box";
+  if (/\b(cup|mug|tumbler|glass)\b/.test(text)) return "cup";
   if (/\bopen[\s-]?top\b|\benclosure\b|\bhousing\b/.test(text) || requestedOps.includes("shell")) return "open_top_shell_box";
   if (/\bfillet(?:ed)?\b/.test(text) && /\bchamfer(?:ed)?\b/.test(text)) return "fillet_chamfer_block";
   if (/\bfillet(?:ed)?\b/.test(text) && (/\bbox|cube|block|rectangular/.test(text) || dims.shape === "BOX")) return "filleted_box";
   if (/\bgear\b|\bspur\b|\bpinion\b/.test(text)) return "spur_gear";
   if (/\bcarrot\b/.test(text)) return "carrot";
   if (/\bmushroom\b/.test(text)) return "mushroom";
+  if (dims.shape === "L_BRACKET" || /\bl[\s-]?bracket\b|\bangle bracket\b|\bcorner bracket\b/.test(text)) return "l_bracket";
   if (/\bswerve\b/.test(text)) return "swerve_module";
   if (/\btrain\b.*\bcab\b|\bcab\b/.test(text)) return "train_cab";
   if (/\b2\s*x\s*1\b|\b2x1\b|\bfrc\s+tube\b|\btube\b.*\bbearing\b|\btube\b.*\bmount/i.test(prompt)) return "frc_tube";
@@ -3405,12 +3489,14 @@ function classifyOperationFamily(prompt, dims, decomposition = null) {
 function operationKindsForFamily(family) {
   const map = {
     imprinted_box: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_remove", "boolean"],
+    cup: ["sketch_profile", "extrude_add", "shell"],
     open_top_shell_box: ["sketch_profile", "extrude_add", "shell"],
     filleted_box: ["sketch_profile", "extrude_add", "fillet"],
     fillet_chamfer_block: ["sketch_profile", "extrude_add", "fillet", "chamfer"],
     carrot: ["sketch_profile", "revolve_add"],
     mushroom: ["sketch_profile", "extrude_add", "sketch_profile", "revolve_add", "boolean"],
     spur_gear: ["sketch_profile", "extrude_add", "pattern"],
+    l_bracket: ["sketch_profile", "extrude_add"],
     swerve_module: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_add", "boolean"],
     frc_tube: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_add"],
     belt_side_plate: ["sketch_profile", "extrude_add", "sketch_profile", "extrude_add"],
@@ -3423,12 +3509,14 @@ function operationKindsForFamily(family) {
 function plannedComponentsForFamily(family, prompt = "") {
   const map = {
     imprinted_box: ["base body", "letter cut"],
+    cup: ["outer wall", "open top cavity"],
     open_top_shell_box: ["outer shell", "open top cavity"],
     filleted_box: ["base block", "edge finishing"],
     fillet_chamfer_block: ["base block", "fillet", "chamfer"],
     carrot: ["revolved body"],
     mushroom: ["stem", "cap"],
     spur_gear: ["tooth profile", "bore"],
+    l_bracket: ["horizontal leg", "vertical leg"],
     swerve_module: ["base plate", "bearing ring", "fork", "wheel"],
     frc_tube: ["tube profile", "bearing pattern plate"],
     belt_side_plate: ["side plate", "boss pads", "center rib"],
@@ -3450,12 +3538,14 @@ function buildDeterministicOperationPlan(prompt, dims, decomposition = null, ret
   const family = classifyOperationFamily(prompt, dims, decomposition);
   const featureNameMap = {
     imprinted_box: "imprintedLetterBox",
+    cup: "openTopCup",
     open_top_shell_box: "openTopShellEnclosure",
     filleted_box: "filletedBlock",
     fillet_chamfer_block: "filletChamferBlock",
     carrot: "realisticCarrot",
     mushroom: "mushroomModel",
     spur_gear: "spurGear",
+    l_bracket: "lBracket",
     swerve_module: "swerveModule",
     frc_tube: "frcTubeBearingPattern",
     belt_side_plate: "beltDrivenSidePlate",
@@ -3465,12 +3555,14 @@ function buildDeterministicOperationPlan(prompt, dims, decomposition = null, ret
   };
   const labelMap = {
     imprinted_box: "Imprinted Letter Box",
+    cup: "Open Top Cup",
     open_top_shell_box: "Open Top Shell Enclosure",
     filleted_box: "Filleted Block",
     fillet_chamfer_block: "Fillet And Chamfer Block",
     carrot: "Realistic Carrot",
     mushroom: "Mushroom Model",
     spur_gear: "Spur Gear",
+    l_bracket: "L Bracket",
     swerve_module: "Swerve Module",
     frc_tube: "FRC Tube Bearing Pattern",
     belt_side_plate: "Belt Driven Side Plate",
@@ -3502,12 +3594,14 @@ function compileOperationPlanToFeatureScript(operationPlan, prompt, dims, retrie
   const family = operationPlan.family || "custom";
   let result = null;
   if (family === "imprinted_box") result = buildLocalImprintedBox(prompt, dims);
+  else if (family === "cup") result = buildLocalCup(prompt, dims);
   else if (family === "open_top_shell_box") result = buildLocalOpenTopShellEnclosure(prompt, dims);
   else if (family === "filleted_box") result = buildLocalFilletedBox(prompt, dims);
   else if (family === "fillet_chamfer_block") result = buildLocalFilletChamferBlock(prompt, dims);
   else if (family === "carrot") result = buildLocalCarrot(prompt, dims);
   else if (family === "mushroom") result = buildLocalMushroom(prompt, dims);
   else if (family === "spur_gear") result = buildLocalSpurGear(prompt, dims);
+  else if (family === "l_bracket") result = buildLocalLBracket(prompt, dims);
   else if (family === "swerve_module") result = buildLocalSwerveModule(prompt, dims);
   else if (family === "frc_tube") result = buildLocalFrcTube(prompt, dims);
   else if (family === "belt_side_plate") result = buildLocalBeltSidePlate(prompt, dims);
@@ -4131,6 +4225,78 @@ ${fsRect("enclosureSketch", "outerProfile", "-halfW", "-halfD", "halfW", "halfD"
     featureLabel: "Open Top Shell Enclosure",
     code: buildLocalFeatureScriptFile({ featureName: "openTopShellEnclosure", featureLabel: "Open Top Shell Enclosure", precondition, body }),
     strategy: "Deterministic operation compiler generated an extruded enclosure body and shelled it from the top cap with a clamped inward wall thickness.",
+  };
+}
+
+function buildLocalCup(prompt, dims) {
+  const defaultRadius = dims.radiusInches || Math.max(0.75, (dims.widthInches || 1.8) / 2);
+  const defaultHeight = dims.heightInches || Math.max(2.5, dims.depthInches || 3.5);
+  const defaultWall = dims.wallThicknessInches || 0.12;
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("outerRadius", "Outer Radius", 0.2, defaultRadius, 24),
+    preconditionLength("height", "Height", 0.5, defaultHeight, 120),
+    preconditionLength("wallThickness", "Wall Thickness", 0.02, defaultWall, 4),
+  ].join("\n");
+  const body = `${planeVar()}
+        var safeWallThickness = min(definition.wallThickness, min(definition.outerRadius * 0.45, definition.height * 0.3));
+        var cupSketch = newSketchOnPlane(context, id + "cupSketch", { "sketchPlane" : skPlane });
+${fsCircle("cupSketch", "outerWall", "0 * inch", "0 * inch", "definition.outerRadius")}
+        skSolve(cupSketch);
+        opExtrude(context, id + "cupBody", {
+            "entities" : qSketchRegion(id + "cupSketch"),
+            "direction" : skPlane.normal,
+            "endBound" : BoundingType.BLIND,
+            "endDepth" : definition.height
+        });
+        opShell(context, id + "cupShell", {
+            "entities" : qCapEntity(id + "cupBody", CapType.END, EntityType.FACE),
+            "thickness" : -safeWallThickness
+        });`;
+  return {
+    featureName: "openTopCup",
+    featureLabel: "Open Top Cup",
+    code: buildLocalFeatureScriptFile({ featureName: "openTopCup", featureLabel: "Open Top Cup", precondition, body }),
+    strategy: "Deterministic operation compiler generated a circular vessel, extruded it, and shelled the top cap so the result can actually hold liquid.",
+    omissions: /\bhandle\b|\bmug\b/i.test(prompt) ? ["Handle generation was omitted in the deterministic fallback to preserve compile safety; the body remains a usable liquid-holding cup."] : [],
+  };
+}
+
+function buildLocalLBracket(prompt, dims) {
+  const defaultWidth = dims.widthInches || 3;
+  const defaultHeight = dims.heightInches || 3;
+  const defaultDepth = dims.depthInches || 0.25;
+  const defaultThickness = dims.wallThicknessInches || Math.min(defaultWidth, defaultHeight) * 0.2;
+  const precondition = [
+    preconditionPlane(),
+    preconditionLength("width", "Horizontal Leg Length", 0.5, defaultWidth, 120),
+    preconditionLength("height", "Vertical Leg Length", 0.5, defaultHeight, 120),
+    preconditionLength("depth", "Thickness", 0.05, defaultDepth, 12),
+    preconditionLength("wallThickness", "Leg Width", 0.05, defaultThickness, 24),
+  ].join("\n");
+  const body = `${planeVar()}
+        var halfW = definition.width / 2;
+        var halfH = definition.height / 2;
+        var safeWall = min(definition.wallThickness, min(definition.width, definition.height) * 0.45);
+        var lSketch = newSketchOnPlane(context, id + "lSketch", { "sketchPlane" : skPlane });
+${fsLine("lSketch", "bottom", "-halfW", "-halfH", "halfW", "-halfH")}
+${fsLine("lSketch", "innerRight", "halfW", "-halfH", "halfW", "-halfH + safeWall")}
+${fsLine("lSketch", "innerBottom", "halfW", "-halfH + safeWall", "-halfW + safeWall", "-halfH + safeWall")}
+${fsLine("lSketch", "uprightInner", "-halfW + safeWall", "-halfH + safeWall", "-halfW + safeWall", "halfH")}
+${fsLine("lSketch", "leftOuter", "-halfW + safeWall", "halfH", "-halfW", "halfH")}
+${fsLine("lSketch", "closeOuter", "-halfW", "halfH", "-halfW", "-halfH")}
+        skSolve(lSketch);
+        opExtrude(context, id + "lBracketBody", {
+            "entities" : qSketchRegion(id + "lSketch"),
+            "direction" : skPlane.normal,
+            "endBound" : BoundingType.BLIND,
+            "endDepth" : definition.depth
+        });`;
+  return {
+    featureName: "lBracket",
+    featureLabel: "L Bracket",
+    code: buildLocalFeatureScriptFile({ featureName: "lBracket", featureLabel: "L Bracket", precondition, body }),
+    strategy: "Deterministic operation compiler generated a closed L-profile sketch and extruded it as a true bracket instead of collapsing to a generic block.",
   };
 }
 
@@ -4878,6 +5044,11 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     c2: "Prioritize compile-safe FeatureScript API usage and conservative query construction.",
     c3: "Prioritize 3D-printable geometry, smooth but stable finishing, and no thin unsupported details.",
     c4: "Prioritize clean parameterization so user edits actually change the resulting geometry.",
+    c5: "Prioritize multi-body decomposition and visible secondary details without using placeholder primitives.",
+    c6: "Prioritize Onshape spotlight-style structure: clear feature, helpers, robust ids, attributes/properties when useful.",
+    c7: "Prioritize organic/mechanical realism with sweeps, lofts, shells, and fillets only where the docs support them.",
+    c8: "Prioritize manufacturable proportions and robust fallbacks inside the same authored design, not separate template code.",
+    c9: "Prioritize final self-review: every definition parameter is used, every sketch is solved, every op is queried by id.",
     repair: "Rewrite the model more conservatively while preserving intent and editable dimensions.",
     simplify: "Return a simplified but compile-safe version of the requested part that still respects the main prompt.",
   };
@@ -4887,18 +5058,24 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
     `CANDIDATE MODE: ${candidateId}`,
     `STYLE HINT: ${styleHints[candidateId] || styleHints.c1}`,
-    `DOC_ROWS: ${JSON.stringify(retrieval.docRows.slice(0, 4))}`,
-    `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 5))}`,
-    `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 5))}`,
-    `SOURCE_ROWS: ${JSON.stringify(compactPromptRows(retrieval.sourceRows, 5))}`,
+    `DOC_ROWS: ${JSON.stringify(retrieval.docRows.slice(0, 3))}`,
+    `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 3))}`,
+    `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 3))}`,
+    `SOURCE_ROWS: ${JSON.stringify(compactPromptRows(retrieval.sourceRows, 3))}`,
     preferSimple
       ? "OUTPUT POLICY: simplify the geometry if needed, but always keep the result editable, compile-oriented, and structurally faithful to the user intent."
       : "OUTPUT POLICY: aim for the most detailed compile-safe FeatureScript you can produce while keeping all major requested geometry editable.",
+    "AUTHORING POLICY: do not choose from a template catalog. Invent the operation sequence from the user request, docs, and your own modeling plan.",
+    "QUALITY TARGET: code should be substantial enough to create recognizable geometry, not a single placeholder primitive unless the prompt itself asks for a primitive.",
     "HARD RULES:",
     "- Return JSON only with featureName, featureLabel, reasoning, and code.",
+    "- In reasoning, name the main components you will create and the documented FeatureScript operations used for each.",
     "- Always expose editable parameters in precondition.",
     "- Use FeatureScript docs and retrieved rows as ground truth for API names and operation order.",
     "- Never return an empty code field.",
+    "- Never return diagnostics instead of code; if a detail is uncertain, build a conservative visible approximation.",
+    "- Never store op* calls in variables; query created geometry with qCreatedBy.",
+    "- Top-level helper functions are allowed; named functions inside the feature body are not.",
     "- If the request is complex, preserve the main components first and safely omit secondary details rather than inventing unsafe API calls.",
   ].join("\n");
 }
@@ -4936,28 +5113,64 @@ function scoreFeatureScriptCandidate(code) {
   const fatalIssues = hasFatalFeatureScriptPatterns(sanitized);
   const exportCount = (sanitized.match(/\bexport const\b/g) || []).length;
   const hasPrecondition = /precondition[\s\S]*definition\./.test(sanitized);
+  const blockingIssueCount = countBlockingValidationIssues(localIssues);
   const score =
     (sanitized.length > 80 ? 100 : 0)
     + (exportCount === 1 ? 15 : -20)
     + (hasPrecondition ? 10 : -20)
-    - localIssues.length * 4
+    - blockingIssueCount * 10
+    - (localIssues.length - blockingIssueCount) * 2
     - fatalIssues.length * 12;
 
   return { sanitized, localIssues, fatalIssues, score };
 }
 
+function isNonBlockingValidationIssue(issue) {
+  const message = String(issue?.message || "");
+  return /declared but never used/i.test(message);
+}
+
+function countBlockingValidationIssues(issues = []) {
+  return (Array.isArray(issues) ? issues : []).filter(issue => !isNonBlockingValidationIssue(issue)).length;
+}
+
+function keySlotsForStage(stage, count, affinity = "") {
+  const configuredCount = Math.max(1, Math.min(
+    FIXED_KEY_SLOT_SEQUENCE.length,
+    safeStageKeyCount(stage) || safeStageKeyCount("shared") || FIXED_KEY_SLOT_SEQUENCE.length
+  ));
+  const availableSlots = FIXED_KEY_SLOT_SEQUENCE.slice(0, configuredCount);
+  const startIndex = stableHash(`${stage}:${affinity}`) % availableSlots.length;
+  return Array.from({ length: Math.max(1, Math.min(count, availableSlots.length)) }, (_, index) =>
+    availableSlots[(startIndex + index) % availableSlots.length]
+  );
+}
+
 async function generateChatbotCandidates(prompt, dims, learningContext, retrieval, requestId) {
-  const slots = ["k3", "k4", "k5", "k6"].slice(0, Math.max(1, Math.min(CAD_CANDIDATE_COUNT, 4)));
+  const slots = keySlotsForStage("generation", CAD_CANDIDATE_COUNT, `${requestId}:chatbot`);
   const candidateIds = slots.map((_, index) => `c${index + 1}`);
-  const settled = await Promise.allSettled(candidateIds.map((candidateId, index) => chat([
-    { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
-    { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId }) },
-  ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
-    stage: "generation",
-    affinity: `${requestId}:chatbot:${candidateId}`,
-    keySlot: slots[index],
-    maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 5200),
-  })));
+  const settled = [];
+
+  for (let index = 0; index < candidateIds.length; index += 1) {
+    const candidateId = candidateIds[index];
+    try {
+      const value = await chat([
+        { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+        { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId }) },
+      ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+        stage: "generation",
+        affinity: `${requestId}:chatbot:${candidateId}`,
+        keySlot: slots[index],
+        maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2800),
+      });
+      settled.push({ status: "fulfilled", value });
+    } catch (reason) {
+      settled.push({ status: "rejected", reason });
+    }
+    if (index < candidateIds.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+  }
 
   return settled.map((item, index) => {
     const candidateId = candidateIds[index];
@@ -5033,14 +5246,15 @@ async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_AT
 }
 
 async function generateSimplifiedCandidate(prompt, dims, learningContext, retrieval, requestId) {
+  const [slot] = keySlotsForStage("generation", 1, `${requestId}:chatbot:simplify`);
   const raw = await chat([
     { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
     { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId: "simplify", preferSimple: true }) },
   ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
     stage: "generation",
     affinity: `${requestId}:chatbot:simplify`,
-    keySlot: "k9",
-    maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 4800),
+    keySlot: slot,
+    maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2600),
   });
   return parseFeatureScriptJson(raw, dims);
 }
@@ -5116,6 +5330,7 @@ export async function generateFeatureScript(prompt, options = {}) {
     let omissions = [];
     let repairSummary = { repaired: false, explanation: [], localIssues: [], fatalIssues: [] };
     let fallbackUsed = "none";
+    let localFallbackReason = "";
 
     if (selectedCode) {
       repairSummary = await runRepairCycle(selectedCode, learningContext);
@@ -5145,6 +5360,45 @@ export async function generateFeatureScript(prompt, options = {}) {
       }
     }
 
+    const hasBlockingSelectedIssues = () =>
+      !selectedCode
+      || repairSummary.fatalIssues.length > 0
+      || countBlockingValidationIssues(repairSummary.localIssues) > 0;
+
+    if (hasBlockingSelectedIssues() && ENABLE_OPERATION_COMPILER_FALLBACK) {
+      const localResult = buildLocalRobustFeatureScript(prompt, dims, null, retrieval, learningContext);
+      if (localResult?.code) {
+        return buildCompletedLocalResult(
+          prompt,
+          dims,
+          learningContext,
+          {
+            status: "completed",
+            completionLevel,
+            failedPass: "ai_generation",
+            passes: {
+              generation: {
+                selectedCandidateId: bestCandidate?.candidateId || "none",
+                fallbackUsed: fallbackUsed || "operation_compiler",
+              },
+              validation: {
+                localIssueCount: repairSummary.localIssues.length,
+                fatalIssueCount: repairSummary.fatalIssues.length,
+                repaired: repairSummary.repaired,
+              },
+            },
+          },
+          localResult,
+          "Deterministic operation compiler replaced the AI candidate because validator checks still showed blocking FeatureScript issues after repair."
+        );
+      }
+      localFallbackReason = "No deterministic local fallback matched this prompt, so AI recovery continued.";
+      selectedCode = "";
+    } else if (hasBlockingSelectedIssues()) {
+      localFallbackReason = "Operation-compiler fallback is disabled; continuing with AI repair/recovery only.";
+      selectedCode = "";
+    }
+
     if ((!selectedCode || repairSummary.fatalIssues.length) && dims.shape === "GEAR_SPUR" && canUseTemplateFallback(dims)) {
       return buildGearTemplateResult(prompt, dims, learningContext, retrieval, [
         "Used the retained spur gear fallback because AI-generated gear candidates were not compile-safe.",
@@ -5152,11 +5406,8 @@ export async function generateFeatureScript(prompt, options = {}) {
     }
 
     if (!selectedCode && bestCandidate?.code) {
-      selectedCode = bestCandidate.code;
-      generationModeLabel = "recovery_failed";
-      completionLevel = "partial";
-      warnings.push("Returned the best sanitized AI candidate even though some validator issues remain.");
-      omissions.push("Automatic repair and simplification did not fully resolve all validator issues.");
+      warnings.push("The best AI candidate was withheld because validator checks still found blocking issues after repair and simplification.");
+      omissions.push("Automatic repair and simplification did not fully resolve all blocking validator issues.");
     }
 
     if (!selectedCode) {
@@ -5175,8 +5426,14 @@ export async function generateFeatureScript(prompt, options = {}) {
       }
     }
 
+    if (selectedCode && (repairSummary.fatalIssues.length || countBlockingValidationIssues(repairSummary.localIssues))) {
+      warnings.push("Recovery candidate still has blocking validator issues and will not be returned as final output.");
+      selectedCode = "";
+    }
+
     if (!selectedCode) {
-      warnings.push("No compile-safe FeatureScript could be produced. Returning an empty code payload was avoided where possible, but all recovery paths failed.");
+      warnings.push("No compile-safe FeatureScript could be produced after AI generation, repair, simplification, and AI recovery.");
+      if (localFallbackReason) warnings.push(localFallbackReason);
       completionLevel = "partial";
       generationModeLabel = "recovery_failed";
     }
@@ -5214,6 +5471,9 @@ export async function generateFeatureScript(prompt, options = {}) {
             ok: candidate.ok,
             issueCount: candidate.localIssues?.length || 0,
             fatalCount: candidate.fatalIssues?.length || 0,
+            issues: (candidate.localIssues || []).map(issue => issue.message).slice(0, 4),
+            fatal: (candidate.fatalIssues || []).map(issue => issue.code).slice(0, 4),
+            error: candidate.error || null,
           })),
         },
         repair: {
@@ -5363,8 +5623,8 @@ FEATURESCRIPT API FACTS (use these exactly, do not invent):
 
 PRECONDITION EXACT SYNTAX:
   Length:   isLength(definition.width, LENGTH_BOUNDS);
-  Integer:  isInteger(definition.count, {(unitless) : [1, 10, 200]});
-  Degrees:  isInteger(definition.angleDeg, {(unitless) : [10, 20, 30]}); then use definition.angleDeg * PI / 180 in the body
+  Integer:  isInteger(definition.count, { (unitless) : [1, 10, 200] } as IntegerBoundSpec);
+  Degrees:  isInteger(definition.angleDeg, { (unitless) : [10, 20, 30] } as IntegerBoundSpec); then use definition.angleDeg * PI / 180 in the body
   Boolean:  definition.addBore is boolean;
   Query:    definition.location is Query;
   NEVER:    isInteger(definition.x);
@@ -5494,6 +5754,7 @@ export function validateFeatureScript(code) {
   const lines = text.split(/\r?\n/);
   const issues = [];
   const featureSignatureRegex = /\bdefineFeature\s*\(\s*function\s*\(\s*context\s+is\s+Context\s*,\s*id\s+is\s+Id\s*,\s*definition\s+is\s+map\s*\)/;
+  const integerBoundRegex = /\bisInteger\(\s*definition\.(\w+)\s*,\s*\{\s*\(unitless\)\s*:\s*\[([^\]]+)\]\s*\}\s+as\s+IntegerBoundSpec\s*\)\s*;/;
   const addIssue = (line, message, snippet) => {
     issues.push({ line, message, text: String(snippet || "").trim() });
   };
@@ -5505,6 +5766,15 @@ export function validateFeatureScript(code) {
     }
     if (/\bisInteger\s*\(\s*definition\.\w+\s*,\s*\{\s*\(unitless\)\s*:\s*\[[^\]]+\]\s*\}\s*\)\s*;/.test(line)) {
       addIssue(lineNo, "Custom isInteger bounds should be typed as IntegerBoundSpec.", line);
+    }
+    const integerBoundsMatch = line.match(integerBoundRegex);
+    if (integerBoundsMatch) {
+      const rawBounds = integerBoundsMatch[2].split(",").map(value => Number(value.trim()));
+      if (rawBounds.length !== 3 || rawBounds.some(value => !Number.isFinite(value))) {
+        addIssue(lineNo, `definition.${integerBoundsMatch[1]}: Integer bounds must be a numeric [min, default, max] triple.`, line);
+      } else if (!(rawBounds[0] <= rawBounds[1] && rawBounds[1] <= rawBounds[2])) {
+        addIssue(lineNo, `definition.${integerBoundsMatch[1]}: Integer bounds must satisfy min <= default <= max.`, line);
+      }
     }
     if (/"startAngle"\s*:|"endAngle"\s*:/.test(line)) {
       addIssue(lineNo, "opCylinder startAngle/endAngle keys do not exist — remove them.", line);
@@ -5566,17 +5836,26 @@ export function validateFeatureScript(code) {
     if (/\bvector\s*\(\s*definition\.\w+\s*(?:,|\))/.test(line) && !/\/\s*inch/.test(line) && /\*\s*inch/.test(line)) {
       addIssue(lineNo, "Length values used inside vector(...) must be converted to unitless numbers with / inch before multiplying the vector by * inch.", line);
     }
-    if (/\bopFillet\s*\(/.test(line) && /qSketchRegion\s*\(/.test(text)) {
-      addIssue(lineNo, "Fillet targets should come from body edge queries, not sketch region queries.", line);
+    if (/^\s*(?:const|var)\s+\w+\s*=\s*op(Extrude|Revolve|Boolean|Shell|Fillet|Chamfer|Pattern|Loft|Sweep)\s*\(/.test(line)) {
+      addIssue(lineNo, "Do not store op* calls in variables; query the created body with qCreatedBy(id + \"featureId\", EntityType.BODY) instead.", line);
     }
   });
+
+  const geometryImportMatches = text.match(/^\s*import\s*\(\s*path\s*:\s*"onshape\/std\/geometry\.fs"\s*,\s*version\s*:\s*"2931\.0"\s*\)\s*;/gm) || [];
+  if (geometryImportMatches.length > 1) {
+    addIssue(0, "Duplicate geometry.fs imports detected. Keep exactly one top-level import.", "(global)");
+  }
+
+  if (/\bopFillet\s*\([\s\S]*?"entities"\s*:\s*qSketchRegion\s*\(/.test(text)) {
+    addIssue(0, "Fillet targets should come from body edge queries, not sketch region queries.", "(global)");
+  }
 
   // Check that defineFeature has 'definition is map'
   if (/\bdefineFeature\s*\(\s*function\s*\(/.test(text) && !/\bdefinition\s+is\s+map\b/.test(text)) {
     addIssue(0, "defineFeature third parameter must be typed as 'definition is map' — the 'is map' annotation is missing or was stripped.", "(global)");
   }
-  if (!/\}\s*\)\s*;\s*$/.test(text.trim())) {
-    addIssue(0, "FeatureScript file appears truncated or missing the final defineFeature closure and semicolon.", "(global)");
+  if (/\bdefineFeature\s*\(/.test(text) && !hasClosedDefineFeature(text)) {
+    addIssue(0, "FeatureScript file appears truncated or missing a closed defineFeature(...); block with semicolon.", "(global)");
   }
 
   const isLengthParams = new Set();
@@ -5633,13 +5912,17 @@ export function validateFeatureScript(code) {
     }
   });
 
-  const bodyMatch = text.match(/defineFeature\s*\(\s*function\s*\([^)]*\)[^{]*\{[\s\S]*?\n\s*\{/);
-  if (bodyMatch) {
-    const bodyStart = text.indexOf(bodyMatch[0]) + bodyMatch[0].length;
-    const bodyText = text.slice(bodyStart);
+  const featureBodyStart = text.search(/\bdefineFeature\s*\(/);
+  if (featureBodyStart !== -1) {
+    const preconditionIndex = text.indexOf("precondition", featureBodyStart);
+    const preconditionOpen = preconditionIndex === -1 ? -1 : text.indexOf("{", preconditionIndex);
+    const preconditionClose = findMatchingBrace(text, preconditionOpen);
+    const bodyOpen = preconditionClose === -1 ? -1 : text.indexOf("{", preconditionClose + 1);
+    const bodyClose = bodyOpen === -1 ? -1 : findMatchingBrace(text, bodyOpen);
+    const bodyText = bodyOpen === -1 || bodyClose === -1 ? "" : text.slice(bodyOpen + 1, bodyClose);
     const nestedFunction = bodyText.match(/\bfunction\s+[a-zA-Z_]\w*\s*\(/);
     if (nestedFunction) {
-      const before = text.slice(0, bodyStart + nestedFunction.index);
+      const before = text.slice(0, bodyOpen + 1 + nestedFunction.index);
       addIssue(before.split(/\r?\n/).length, "Named function detected inside feature body; use a const lambda instead.", nestedFunction[0]);
     }
   }
@@ -5695,8 +5978,8 @@ export function hasFatalFeatureScriptPatterns(code) {
     issues.push({ code: 'invalid_evPlane_usage', message: 'evPlane called with a raw definition property instead of a face map.' });
   }
 
-  if (!/\}\s*\)\s*;\s*$/.test(String(code || "").trim())) {
-    issues.push({ code: 'truncated_file', message: 'FeatureScript appears truncated or is missing the final defineFeature closure.' });
+  if (/\bdefineFeature\s*\(/.test(code) && !hasClosedDefineFeature(code)) {
+    issues.push({ code: 'truncated_file', message: 'FeatureScript appears truncated or is missing a closed defineFeature(...); block.' });
   }
 
   // 5) qSketchRegion called with variable
@@ -5732,10 +6015,15 @@ export async function debugFeatureScript(code, errors, options = {}) {
     ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
       stage: options.stage || "repair",
       affinity: options.affinity || `repair:${stableHash(sanitizedInput)}`,
+      maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2600),
     });
-    const parsed = JSON.parse(stripJson(raw));
-    const fixed = sanitizeFeatureScript(parsed.fixed || sanitizedInput).code;
-    return { fixed, explanation: parsed.explanation || "Fixed." };
+    const parsed = tryParseJson(raw, null);
+    const rawFeatureScript = /FeatureScript\s+\d+\s*;/.test(raw) ? raw : "";
+    if (!parsed?.fixed && !rawFeatureScript) {
+      throw new Error("Debug assistant returned neither JSON.fixed nor raw FeatureScript.");
+    }
+    const fixed = sanitizeFeatureScript(parsed?.fixed || rawFeatureScript || sanitizedInput).code;
+    return { fixed, explanation: parsed?.explanation || "Fixed." };
   } catch (err) {
     console.warn(`[AI] Debug fallback used: ${err.message}`);
     return { fixed: sanitizedInput, explanation: `Debug assistant unavailable. Returned sanitized original code unchanged. Reason: ${err.message}` };

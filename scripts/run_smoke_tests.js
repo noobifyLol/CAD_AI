@@ -10,20 +10,35 @@ const BASE_URL = process.env.CAD_AI_BASE_URL || "http://localhost:10000";
 const ENDPOINT = process.argv[2] || process.env.CAD_SMOKE_ENDPOINT || "/generate";
 
 const DEFAULT_PROMPTS = [
-  "Create me a cube with the sides filleted.",
-  "Create an open-top electronics enclosure 4x3x1.5 inches with 0.1 inch walls.",
-  "Create a filleted and chamfered rectangular block with editable radius and chamfer width.",
   "Create me a spur gear with a gear ratio of 2:1.",
+  "Create me a rectangular prism with the letter E imprinted on it.",
+  "Create me a nightlamp.",
+  "Create me airpods that I can 3d print.",
   "Create me a realistic carrot.",
-  "Create me a mushroom.",
-  "Create me a swerve module.",
-  "Create a 2x1 FRC tube with bearing and mounting pattern.",
-  "Create a belt-driven side plate using standard pulley spacing rules.",
-  "Create me a cube with the letter E imprinted into it.",
+  "Create me a spiral notebook.",
+  "Create me a computer monitor.",
+  "Create me a school No2 pencil.",
+  "Create me a cup that can hold liquid.",
+  "Create me an L-bracket.",
 ];
 const FAILURE_CORPUS_PATH = join(ROOT, "data", "failureCorpus.jsonl");
 
 function loadPrompts() {
+  if (process.env.CAD_SMOKE_PROMPTS_JSON) {
+    try {
+      const prompts = JSON.parse(process.env.CAD_SMOKE_PROMPTS_JSON);
+      if (Array.isArray(prompts)) return prompts.map(prompt => String(prompt || "").trim()).filter(Boolean);
+    } catch {
+      // Fall back to the normal prompt set below.
+    }
+  }
+  if (process.env.CAD_SMOKE_PROMPTS) {
+    return process.env.CAD_SMOKE_PROMPTS
+      .split(/\s*\|\|\s*/)
+      .map(prompt => prompt.trim())
+      .filter(Boolean);
+  }
+  if (String(process.env.CAD_SMOKE_ONLY_DEFAULT || "false").toLowerCase() === "true") return DEFAULT_PROMPTS;
   if (!existsSync(FAILURE_CORPUS_PATH)) return DEFAULT_PROMPTS;
   try {
     const lines = readFileSync(FAILURE_CORPUS_PATH, "utf8")

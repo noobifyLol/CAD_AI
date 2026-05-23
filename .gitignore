@@ -30,3 +30,4 @@ data/**/*.npy
 !data/*.jsonl
 
 logs/raw_generations/
+logs/generations_*.json
