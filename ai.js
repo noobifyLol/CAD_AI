@@ -32,6 +32,38 @@ const MULTI_KEY_ENABLED = String(process.env.GROQ_MULTI_KEY_ENABLED || "true").t
 const MAX_RETRIEVED_SNIPPETS = Math.max(1, Math.min(6, Number(process.env.CAD_MAX_RETRIEVED_SNIPPETS || 6)));
 const MAX_RETRIEVED_SNIPPET_CHARS = Math.max(400, Math.min(4000, Number(process.env.CAD_MAX_RETRIEVED_SNIPPET_CHARS || 2200)));
 const MAX_OMNI_SUMMARY_CHARS = Math.max(400, Math.min(2400, Number(process.env.CAD_MAX_OMNI_SUMMARY_CHARS || 1100)));
+export const FS_COMPILER_AGENT_CONTRACT = `FEATURESCRIPT 2931 COMPILER-AGENT CONTRACT
+Output policy:
+- Return JSON only with featureName, featureLabel, reasoning, and code.
+- The code field must be one complete FeatureScript 2931 file with exactly one exported defineFeature.
+- Preserve the app response contract outside the model, but candidates themselves use only the strict JSON schema.
+
+Required file skeleton:
+FeatureScript 2931;
+import(path : "onshape/std/geometry.fs", version : "2931.0");
+
+annotation { "Feature Type Name" : "Readable Feature Name" }
+export const camelCaseFeature = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        // Parameter declarations only.
+    }
+    {
+        // Feature body execution.
+    });
+
+Hard FeatureScript syntax rules:
+1. const is allowed only at module top level, or for helper lambda assignments at the direct top level of the feature body. Inside if/else/for/while blocks, use var.
+2. Helper lambdas inside the feature body must be untyped and must end with a semicolon: const helper = function(x, y) { ... };
+3. FeatureScript has no ++ or -- operators. Use += 1 or -= 1.
+4. FeatureScript arrays do not have .length. Use size(array) or track a counter.
+5. Numeric preconditions never use a "Default" annotation key. Defaults belong in the bounds triple.
+6. Length bounds use explicit LengthBoundSpec, for example isLength(definition.width, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec);
+7. Integer and degree-like bounds use IntegerBoundSpec, for example isInteger(definition.numTeeth, { (unitless) : [6, 20, 200] } as IntegerBoundSpec);
+8. The precondition block contains declarations only. No var declarations, sketches, loops, conditionals, operation calls, or plane evaluation.
+9. Every sketch with entities must call skSolve(sketchVar) before opExtrude, opRevolve, opLoft, or opSweep consumes it.
+10. qSketchRegion must receive the sketch id expression, such as qSketchRegion(id + "sk1"), never the sketch variable.
+11. isLength parameters already carry Length units. Do not multiply definition.lengthParam by * inch in the body; divide by inch only when a unitless vector coordinate is needed.`;
 const PROJECT_ROOT = fileURLToPath(new URL(".", import.meta.url));
 const FS_EXAMPLES_DIR = join(PROJECT_ROOT, "data", "fs_examples");
 const SOURCE_KNOWLEDGE_PATH = join(PROJECT_ROOT, "data", "sourceKnowledge.new.json");
@@ -537,7 +569,8 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
 // ─── FeatureScript building blocks ───────────────────────────────────────────
 //
 // Key FeatureScript rules baked in here, not left to the AI:
-//   - isLength(definition.foo, BOUNDS) in precondition → gives user an editable slider
+//   - isLength(definition.foo, { (inch) : [min, default, max] } as LengthBoundSpec)
+//     in precondition gives the user an editable slider without numeric Default annotations
 //   - definition.foo in body already has Length type — do NOT multiply by * inch
 //   - sketch circles + extrude are the most reliable path for cylinders with bores
 //   - fCylinder takes: context, id, { bottomCenter, topCenter, radius }
@@ -552,9 +585,12 @@ function preconditionPlane() {
 }
 
 function preconditionLength(paramName, label, min, def, max) {
-  const defaultExpr = `${n(Math.min(Math.max(def, min), max))} * inch`;
-  return `        annotation { "Name" : "${label}", "Default" : "${defaultExpr}" }
-        isLength(definition.${paramName}, LENGTH_BOUNDS);`;
+  const safeMin = Number.isFinite(Number(min)) ? Number(min) : 0.01;
+  const safeMax = Math.max(safeMin, Number.isFinite(Number(max)) ? Number(max) : safeMin * 10);
+  const rawDefault = Number.isFinite(Number(def)) ? Number(def) : safeMin;
+  const defaultValue = Math.min(Math.max(rawDefault, safeMin), safeMax);
+  return `        annotation { "Name" : "${label}" }
+        isLength(definition.${paramName}, { (inch) : [${n(safeMin)}, ${n(defaultValue)}, ${n(safeMax)}] } as LengthBoundSpec);`;
 }
 
 function preconditionInteger(paramName, label, min, def, max) {
@@ -700,8 +736,7 @@ function tCylinder(d) {
       preconditionPlane(),
       preconditionLength("radius", "Radius",  0.01, d.radiusInches, 24),
       preconditionLength("height", "Height",  0.01, d.depthInches,  48),
-      `        annotation { "Name" : "Hole Radius", "Default" : "${n(Math.max(0, boreDefault))} * inch" }
-        isLength(definition.holeRadius, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);`,
+      preconditionLength("holeRadius", "Hole Radius", 0, Math.max(0, boreDefault), 24),
       blindTopHole
         ? preconditionLength("holeDepth", "Top Hole Depth", 0.01, holeDepthDefault, Math.max(1, d.depthInches || 1))
         : "",
@@ -1338,7 +1373,7 @@ function buildLearningContextText(learningContext = {}) {
     // No indexed FS docs on disk — inject core FeatureScript syntax reference inline.
     lines.push("FeatureScript core syntax reference (use these rules as ground truth):");
     lines.push(`1. Feature structure: export const name = defineFeature(function(context is Context, id is Id, definition is map) precondition { ... } { ... });`);
-    lines.push(`2. Length params: annotation { "Name": "Label", "Default": "1 * inch" } isLength(definition.param, LENGTH_BOUNDS); — in the body, definition.param already carries Length; never multiply by * inch again.`);
+    lines.push(`2. Length params: annotation { "Name": "Label" } isLength(definition.param, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec); — in the body, definition.param already carries Length; never multiply by * inch again.`);
     lines.push(`3. Integer params in FS 2931 require a bounds map: annotation { "Name": "Count" } isInteger(definition.count, { (unitless) : [1, 20, 200] } as IntegerBoundSpec);`);
     lines.push(`4. Degrees and other dimensionless dialog values should also use isInteger bounds. Do not write definition.x is number; or separate >= / <= lines in the precondition.`);
     lines.push(`5. Plane selection: annotation { "Name": "Plane", "Filter": GeometryType.PLANE, "MaxNumberOfPicks": 1 } definition.location is Query;`);
@@ -1349,7 +1384,7 @@ function buildLearningContextText(learningContext = {}) {
     lines.push(`9. fCylinder(context, id + "cyl1", { "bottomCenter": skPlane.origin, "topCenter": skPlane.origin + skPlane.normal * definition.height, "radius": r });`);
     lines.push(`10. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
     lines.push(`11. Remove helper variables that are computed but never used if they do not affect the final geometry.`);
-    lines.push(`12. Lambdas inside feature body MUST use const: const fn = function(x is number) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
+    lines.push(`12. Lambdas inside feature body MUST use untyped const assignments: const fn = function(x) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
   }
 
   if (knowledge.length) {
@@ -2019,6 +2054,31 @@ function looksLikeTopLevelFeatureScriptConstruct(text) {
   return /^(?:\/\/|\/\*|annotation\b|export\s+(?:const|function|enum|predicate|type)\b|function\b|enum\b|type\b|predicate\b|operator\b|const\b|var\b|import\s*\()/i.test(String(text || "").trim());
 }
 
+function lineNumberAt(text, index) {
+  if (index <= 0) return 1;
+  return String(text || "").slice(0, index).split(/\r?\n/).length;
+}
+
+function getFeatureBlockRanges(text) {
+  const source = String(text || "");
+  const featureStart = source.search(/\bdefineFeature\s*\(/);
+  const preconditionIndex = featureStart === -1 ? -1 : source.indexOf("precondition", featureStart);
+  const preconditionOpen = preconditionIndex === -1 ? -1 : source.indexOf("{", preconditionIndex);
+  const preconditionClose = preconditionOpen === -1 ? -1 : findMatchingBrace(source, preconditionOpen);
+  const bodyOpen = preconditionClose === -1 ? -1 : source.indexOf("{", preconditionClose + 1);
+  const bodyClose = bodyOpen === -1 ? -1 : findMatchingBrace(source, bodyOpen);
+  return {
+    featureStart,
+    preconditionIndex,
+    preconditionOpen,
+    preconditionClose,
+    bodyOpen,
+    bodyClose,
+    preconditionText: preconditionOpen !== -1 && preconditionClose !== -1 ? source.slice(preconditionOpen + 1, preconditionClose) : "",
+    bodyText: bodyOpen !== -1 && bodyClose !== -1 ? source.slice(bodyOpen + 1, bodyClose) : "",
+  };
+}
+
 // Clean and trim the featureScript to prevent errors
 //
 // FeatureScript spec (toplevel.md): named typed functions like
@@ -2049,8 +2109,8 @@ function _coreFeatureScriptSanitize(code) {
     .replace(/^\s*return\s+[^;{][^;]*;\s*$/gm, "")          // remove value-returning returns in bodies
     .replace(/\bskSpline\s*\(/g, "skFitSpline(")
     .replace(/\bskPolygon\s*\(/g, "skRegularPolygon(")
-    .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, LENGTH_BOUNDS);')
-    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, LENGTH_BOUNDS);')
+    .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, { (inch) : [0.01, 1.0, 100.0] } as LengthBoundSpec);')
+    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, $2 as LengthBoundSpec);')
     // Quantity defaults belong in the bound spec for numeric quantity parameters.
     .replace(/(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*),\s*"Default"\s*:\s*"[-0-9.]+"\s*\}(\s*\n\s*isInteger\()/g, '$1 }$2')
     .replace(/isInteger\((definition\.\w+),\s*\{\s*\(unitless\)\s*:\s*\[([^\]]+)\]\s*\}\s*\);/g, 'isInteger($1, { (unitless) : [$2] } as IntegerBoundSpec);')
@@ -2181,54 +2241,100 @@ function _coreFeatureScriptSanitize(code) {
 function sanitizeFeatureScript(rawCode, opts = {}) {
   const arrFixedIndexMap = opts.arrFixedIndexMap || {}; // optional mapping for known arrays
   const changes = [];
-  // First run through the existing comprehensive sanitizer
+
   let code = _coreFeatureScriptSanitize(rawCode);
 
   function record(rule, before, after) {
+    if (typeof before !== "string" || typeof after !== "string") return;
     changes.push({ rule, beforeSnippet: before.slice(0, 300), afterSnippet: after.slice(0, 300) });
   }
 
-  // 0) Convert Length parameters used as vector coordinates into unitless
-  // coordinates before the final "* inch" multiplier.
-  code = code.replace(/vector\s*\(([^)]*\bdefinition\.\w+[^)]*)\)\s*\*\s*inch/g, (match, args) => {
-    const fixedArgs = args.replace(/\bdefinition\.(\w+)\b(?!\s*\/\s*inch)/g, "(definition.$1 / inch)");
-    const after = `vector(${fixedArgs}) * inch`;
-    if (after !== match) record("convert_length_params_inside_vector", match, after);
-    return after;
-  });
+  // ========= Fatal catchers: loop/operator/array fixes =========
 
-  // 1) Remove typed lambda annotations: function(x is number, y is number) -> function(x, y)
-  const typedLambdaRegex = /function\s*\(\s*([a-zA-Z0-9_$]+)\s+is\s+[a-zA-Z0-9_]+\s*(?:,\s*[a-zA-Z0-9_$]+\s+is\s+[a-zA-Z0-9_]+\s*)*\)/g;
-  code = code.replace(typedLambdaRegex, (match, _firstParam, offset) => {
-    const prefix = code.slice(Math.max(0, offset - 40), offset);
-    if (/defineFeature\s*\(\s*$/.test(prefix)) {
-      return match;
+  // Operator fixes: i++ / i-- (avoid FeatureScript parse errors)
+  {
+    const before = code;
+    code = code.replace(/\b([A-Za-z_]\w*)\s*\+\+\s*/g, "$1 += 1");
+    code = code.replace(/\b([A-Za-z_]\w*)\s*--\s*/g, "$1 -= 1");
+    if (code !== before) record("op_inc_dec_fix", before, code);
+  }
+
+  // Array length fix: replace arr.length with size(arr)
+  {
+    const before = code;
+    code = code.replace(/\b([A-Za-z_]\w*)\.length\b/g, "size($1)");
+    if (code !== before) record("array_length_to_size", before, code);
+  }
+
+  // Loop fix: const inside for/while blocks -> var (FeatureScript restriction)
+  try {
+    const loopStart = /\b(for|while)\s*\(/;
+    if (loopStart.test(code)) {
+      code = code.replace(/(\bfor\s*\([^)]*\)\s*\{|\bwhile\s*\([^)]*\)\s*\{)([\s\S]*?)(\n\s*\})/g, (m, open, inner, closing) => {
+        const fixedInner = inner.replace(/^([\t ]*)const\s+([A-Za-z_]\w*)\s*=\s*/gm, "$1var $2 = ");
+        if (fixedInner !== inner) record("loop_const_to_var", inner, fixedInner);
+        return open + fixedInner + closing;
+      });
     }
-    const before = match;
-    const after = match.replace(/\s+is\s+[a-zA-Z0-9_]+/g, '');
-    if (before !== after) record('remove_typed_lambda_annotations', before, after);
-    return after;
-  });
+  } catch {
+    // ignore
+  }
 
-  // 2) Replace dynamic .length indexing patterns when safe to do so
-  // Pattern: arr[arr.length - N] -> arr[<computed_index>] using arrFixedIndexMap or fallback heuristic
-  const lengthIndexRegex = /\b([a-zA-Z0-9_]+)\s*\[\s*\1\.length\s*-\s*([0-9]+)\s*\]/g;
-  code = code.replace(lengthIndexRegex, (match, arr, nStr) => {
-    const n = Number(nStr);
-    const fallbackIndex = (arrFixedIndexMap[arr] !== undefined) ? arrFixedIndexMap[arr] : Math.max(0, 6 - n);
-    const before = match;
-    const after = `${arr}[${fallbackIndex}]`;
-    record('replace_length_index', before, after);
-    return after;
-  });
+  // ========= Constraint normalization: bounds specs & unit stripping =========
 
-  // 3) Normalize legacy opCylinder calls to the documented primitive name fCylinder.
-  code = code.replace(/\bopCylinder\s*\(/g, (match) => {
-    record('normalize_opCylinder_to_fCylinder', match, 'fCylinder(');
-    return 'fCylinder(';
-  });
+  // Legacy numeric Default in isLength bounds: enforce LengthBoundSpec
+  {
+    const before = code;
+    code = code.replace(
+      /\(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*\),\s*"Default"\s*:\s*"([0-9.]+)"\s*\*\s*inch\s*\}/g,
+      (match, annotationStart, defaultInches, paramName) => {
+        const def = Number(defaultInches);
+        const min = def <= 0 ? 0 : Math.min(0.01, Math.max(0, def * 0.1));
+        const max = Math.max(def * 10, min + 1);
+        const after = annotationStart + " }\n        isLength(definition." + paramName + ", { (inch) : [" + n(min) + ", " + n(def) + ", " + n(max) + "] } as LengthBoundSpec);";
+        record("normalize_length_default_bounds", match, after);
+        return after;
+      }
+    );
+    if (code !== before) {}
+  }
 
-  // 4) Ensure skSolve present before downstream ops (best-effort insertion)
+  // Normalize bounds-only isLength calls
+  {
+    code = code.replace(
+      /\bisLength\(\s*definition\.(\w+)\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/g,
+      (match, paramName) => {
+        const after = "isLength(definition." + paramName + ", { (inch) : [0.01, 1.0, 100.0] } as LengthBoundSpec);";
+        record("normalize_length_bounds_constant", match, after);
+        return after;
+      }
+    );
+  }
+
+  // Ensure isLength(..., { (inch): [...] }) has as LengthBoundSpec
+  {
+    code = code.replace(
+      /\bisLength\(\s*definition\.(\w+)\s*,\s*(\{\s*\(inch\)\s*:\s*\[[^\]]+\]\s*\})\s*\)\s*;/g,
+      (match, paramName, spec) => {
+        const after = "isLength(definition." + paramName + ", " + spec + " as LengthBoundSpec);";
+        record("add_length_bounds_spec_type", match, after);
+        return after;
+      }
+    );
+  }
+
+  // Unit stripping inside vector(...): definition.len -> (definition.len / inch) before * inch
+  {
+    code = code.replace(/vector\s*\(([^)]*\bdefinition\.\w+[^)]*)\)\s*\*\s*inch/g, (match, args) => {
+      const fixedArgs = String(args).replace(/\bdefinition\.(\w+)\b(?!\s*\/\s*inch)/g, "(definition.$1 / inch)");
+      const after = `vector(${fixedArgs}) * inch`;
+      if (after !== match) record("convert_length_params_inside_vector", match, after);
+      return after;
+    });
+  }
+
+  // ========= Skeleton enforcement: ensure sketches are solved & file ends properly =========
+
   try {
     const sketchCreateRegex = /(\bvar\s+([a-zA-Z0-9_$]+)\s*=\s*newSketch(?:OnPlane)?\s*\([^;]*\);?)/g;
     let sketchMatches = [];
@@ -2237,152 +2343,44 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
       sketchMatches.push({ full: m[1], varName: m[2], index: m.index });
     }
     if (sketchMatches.length) {
-      sketchMatches.reverse(); // process from bottom to top to keep indices valid
+      sketchMatches.reverse();
       for (const s of sketchMatches) {
         const varName = s.varName;
         const afterSketch = code.slice(s.index + s.full.length);
-        const hasSkSolve = new RegExp(`skSolve\\s*\\(\\s*${varName}\\s*\\)`).test(afterSketch);
+        const hasSkSolve = new RegExp("skSolve\\s*\\(\\s*" + varName + "\\s*\\)").test(afterSketch);
         const hasDownstreamOp = /(opExtrude|opRevolve|opLoft|opSweep)/.test(afterSketch);
         if (hasDownstreamOp && !hasSkSolve) {
-          const insertion = `\n// AUTO-INSERTED: ensure sketch solved before downstream ops\nskSolve(${varName});\n`;
+          const insertion = "\nskSolve(" + varName + ");\n";
           const insertPos = s.index + s.full.length;
           code = code.slice(0, insertPos) + insertion + code.slice(insertPos);
-          record('insert_skSolve_after_sketch', s.full, insertion.trim());
+          record("insert_skSolve_after_sketch", s.full, insertion);
         }
       }
     }
-  } catch (e) {
-    // never throw; log as change
-    record('skSolve_insertion_error', '', `error:${String(e).slice(0, 200)}`);
+  } catch {
+    // ignore
   }
 
-  // 5) Sanitize qSketchRegion usage: qSketchRegion(sketchVar) -> qSketchRegion("sketch_<id>") best-effort
-  const sketchIdMap = new Map();
-  const sketchAssignmentRegex = /\bvar\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*newSketch(?:OnPlane)?\s*\(\s*context\s*,\s*(id\s*\+\s*"[^"]+")/g;
-  let assignmentMatch;
-  while ((assignmentMatch = sketchAssignmentRegex.exec(code)) !== null) {
-    sketchIdMap.set(assignmentMatch[1], assignmentMatch[2]);
-  }
-
-  const qSketchRegionRegex = /qSketchRegion\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g;
-  code = code.replace(qSketchRegionRegex, (match, varName) => {
-    const before = match;
-    const sketchId = sketchIdMap.get(varName);
-    const after = sketchId ? `qSketchRegion(${sketchId})` : `qSketchRegion(id + "${varName}")`;
-    record('sanitize_qSketchRegion_variable', before, after);
-    return after;
-  });
-
-  // 6) Replace hallucinated / non-existent FeatureScript API functions with safe equivalents
-  const invalidFunctionReplacements = [
-    // opExtrudeBlind → opExtrude (FS has no opExtrudeBlind; the user meant opExtrude with BoundingType.BLIND)
-    [/\bopExtrudeBlind\s*\(/g, 'opExtrude(', 'replace_opExtrudeBlind'],
-    // opBooleanSub → opBoolean (FS has no opBooleanSub; use opBoolean with BooleanOperationType.SUBTRACTION)
-    [/\bopBooleanSub\s*\(/g, 'opBoolean(', 'replace_opBooleanSub'],
-    // opBore → not a real FS function; remove entire call (cannot safely rewrite)
-    [/\bopBore\s*\([^;]*;\s*/g, '// REMOVED: opBore is not a valid FeatureScript function\n', 'remove_opBore'],
-    // opCut → not a real FS function
-    [/\bopCut\s*\([^;]*;\s*/g, '// REMOVED: opCut is not a valid FeatureScript function\n', 'remove_opCut'],
-    // opPlateHoles → not a real FS function
-    [/\bopPlateHoles\s*\([^;]*;\s*/g, '// REMOVED: opPlateHoles is not a valid FeatureScript function\n', 'remove_opPlateHoles'],
-    // qEdges → not valid; use qOwnedByBody + qEdgeTopologyFilter pattern
-    [/\bqEdges\s*\(/g, 'qOwnedByBody(', 'replace_qEdges'],
-    // qEdgeAll → not valid
-    [/\bqEdgeAll\s*\(/g, 'qOwnedByBody(', 'replace_qEdgeAll'],
-    // qBodyFaces → not valid; use qOwnedByBody
-    [/\bqBodyFaces\s*\(/g, 'qOwnedByBody(', 'replace_qBodyFaces'],
-    // qAllEdges → not valid
-    [/\bqAllEdges\s*\(/g, 'qOwnedByBody(', 'replace_qAllEdges'],
-    // evEdgeTopologyFilter → should be qEdgeTopologyFilter
-    [/\bevEdgeTopologyFilter\s*\(/g, 'qEdgeTopologyFilter(', 'replace_evEdgeTopologyFilter'],
-    // skLine → should be skLineSegment
-    [/\bskLine\s*\(/g, 'skLineSegment(', 'replace_skLine'],
-    // skSpline → should be skFitSpline (also caught in core sanitizer, but be safe)
-    [/\bskSpline\s*\(/g, 'skFitSpline(', 'replace_skSpline'],
-    // skPolygon → should be skRegularPolygon
-    [/\bskPolygon\s*\(/g, 'skRegularPolygon(', 'replace_skPolygon'],
-  ];
-
-  for (const [pattern, replacement, ruleName] of invalidFunctionReplacements) {
-    const beforeCode = code;
-    code = code.replace(pattern, (match) => {
-      record(ruleName, match, typeof replacement === 'string' ? replacement : '(removed)');
-      return replacement;
-    });
-  }
-
-  // 6b) Fix opBoolean calls that came from opBooleanSub: rename singular "tool"/"target" keys
-  //     to plural "tools"/"targets" and inject operationType SUBTRACTION if missing.
-  code = code.replace(
-    /\bopBoolean\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)\}\s*\)/g,
-    (match, ctx, idExpr, argsRaw) => {
-      if (!/"tool"\s*:/.test(argsRaw) && !/"target"\s*:/.test(argsRaw)) return match;
-      const fixedArgs = argsRaw
-        .replace(/"tool"\s*:/g, '"tools" :')
-        .replace(/"target"\s*:/g, '"targets" :');
-      const hasOpType = /operationType/.test(fixedArgs);
-      const after = `opBoolean(${ctx}, ${idExpr}, {${fixedArgs}${hasOpType ? '' : ', "operationType" : BooleanOperationType.SUBTRACTION'}})`;
-      record('fix_opBooleanSub_args', match.slice(0, 100), after.slice(0, 100));
-      return after;
-    }
-  );
-
-  // 6c) Fix qOwnedByBody(singleVar) missing EntityType argument — result of replacing
-  //     invalid functions like qEdgeAll/qEdges/qBodyFaces/qAllEdges.
-  code = code.replace(/\bqOwnedByBody\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g, (match, bodyVar) => {
-    const after = `qOwnedByBody(${bodyVar}, EntityType.EDGE)`;
-    record('fix_qOwnedByBody_entitytype', match, after);
-    return after;
-  });
-
-  // 7) Fix opExtrude calls using non-existent key names (profile → entities, distance → endDepth)
-  code = code.replace(
-    /opExtrude\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)"profile"\s*:/g,
-    (match, ctx, idExpr, prefix) => {
-      const after = `opExtrude(${ctx}, ${idExpr}, {${prefix}"entities" :`;
-      record('fix_opExtrude_profile_key', match.slice(0, 100), after.slice(0, 100));
-      return after;
-    }
-  );
-  code = code.replace(
-    /opExtrude\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)"distance"\s*:/g,
-    (match, ctx, idExpr, prefix) => {
-      const after = `opExtrude(${ctx}, ${idExpr}, {${prefix}"endDepth" :`;
-      record('fix_opExtrude_distance_key', match.slice(0, 100), after.slice(0, 100));
-      return after;
-    }
-  );
-  // Fix opExtrude using "sketch" key instead of "entities"
-  code = code.replace(
-    /opExtrude\s*\(\s*([^,]+),\s*([^,]+),\s*\{([^}]*)"sketch"\s*:/g,
-    (match, ctx, idExpr, prefix) => {
-      const after = `opExtrude(${ctx}, ${idExpr}, {${prefix}"entities" :`;
-      record('fix_opExtrude_sketch_key', match.slice(0, 100), after.slice(0, 100));
-      return after;
-    }
-  );
-
-  // 8) Ensure the file ends with }); — fix missing closing for defineFeature
   const trimmedCode = code.trimEnd();
-  if (/\bdefineFeature\s*\(/.test(trimmedCode) && !trimmedCode.endsWith(');')) {
-    // Count braces/parens to determine what's missing
+  if (/\bdefineFeature\s*\(/.test(trimmedCode) && !trimmedCode.endsWith(";")) {
+    // Ensure defineFeature terminates with });
+    // (Best-effort: if missing, reconstruct minimal suffix by counting braces/parens)
     let braceDepth = 0;
     let parenDepth = 0;
     for (let i = 0; i < trimmedCode.length; i++) {
       const ch = trimmedCode[i];
-      if (ch === '{') braceDepth++;
-      else if (ch === '}') braceDepth--;
-      else if (ch === '(') parenDepth++;
-      else if (ch === ')') parenDepth--;
+      if (ch === "{") braceDepth++;
+      else if (ch === "}") braceDepth--;
+      else if (ch === "(") parenDepth++;
+      else if (ch === ")") parenDepth--;
     }
-    let suffix = '';
-    while (braceDepth > 0) { suffix += '\n    }'; braceDepth--; }
-    while (parenDepth > 0) { suffix += ')'; parenDepth--; }
-    if (!suffix.endsWith(';')) suffix += ';';
-    // suffix.length > 0 (not > 1) so a lone ';' is also applied (fixes "});  " → "});\n")
+    let suffix = "";
+    while (braceDepth > 0) { suffix += "\n    }"; braceDepth--; }
+    while (parenDepth > 0) { suffix += ")"; parenDepth--; }
+    if (!suffix.endsWith(";")) suffix += ";";
     if (suffix.length > 0) {
-      code = trimmedCode + suffix + '\n';
-      record('fix_truncated_file_ending', '(truncated file)', suffix.trim() || '(added semicolon)');
+      code = trimmedCode + suffix + "\n";
+      record("fix_truncated_file_ending", "(truncated file)", suffix);
     }
   }
 
@@ -2759,13 +2757,16 @@ Do NOT return "blocked" for ANY of the following — these are auto-fixed by san
 
 When in doubt, return "pass" with notes rather than "blocked".`;
 
-const CUSTOM_FEATURE_SYSTEM = ` SYSTEM: You are a strict FeatureScript authoring assistant. Follow these rules exactly:
+const CUSTOM_FEATURE_SYSTEM = `SYSTEM: You are a deterministic FeatureScript compiler agent.
+${FS_COMPILER_AGENT_CONTRACT}
+
+Follow these additional modeling rules exactly:
 - Output only valid FeatureScript 2931 code and nothing else unless asked for explanation.
 - The exported feature signature must accept a single map parameter named "definition" declared in the precondition. Use isLength/isInteger/boolean/Query as appropriate. Do not emit alternate function signatures (e.g., "function(definition is map)").
 - Forbidden constructs: typed lambda parameter annotations (e.g., "is number"), any use of ".length" on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and unsupported opCylinder calls.
 - Always include skSolve before any downstream opExtrude/opRevolve/opLoft/opSweep.
 - Expose user-editable parameters in the precondition using isLength/isInteger/boolean and sensible bounds.
-- For numeric quantity parameters, set the default in the bounds spec. Use IntegerBoundSpec for isInteger instead of string Default annotations.
+- For numeric quantity parameters, set the default in the bounds spec. Use LengthBoundSpec/IntegerBoundSpec instead of string Default annotations.
 - Use prompt understanding and retrieved docs/memory to decide the modeling strategy. Do not depend on keyword-template routing.
 - Think like a custom-feature author, not a snippet filler: decompose the prompt into visible parametric components, then choose the documented FeatureScript operations needed for those components.
 - If uncertain about an API key or environment, do not reference or output secrets.
@@ -2820,11 +2821,14 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
 -- Helper lambdas inside the feature body must be const f = function(x, y) { ... }; with untyped parameters.
 
 ═══ PRECONDITION RULES (from official FS docs) ═══
+- Length parameter:
+    annotation { "Name" : "Width" }
+    isLength(definition.width, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec);
 - Integer parameter (FS 2931 requires the bounds map form):
-    annotation { "Name" : "Count", "Default" : "4" }
+    annotation { "Name" : "Count" }
     isInteger(definition.count, { (unitless) : [1, 4, 100] } as IntegerBoundSpec);
 - Degrees and other plain dimensionless dialog values should also use isInteger:
-    annotation { "Name" : "Angle (deg)", "Default" : "20" }
+    annotation { "Name" : "Angle (deg)" }
     isInteger(definition.angleDeg, { (unitless) : [10, 20, 30] } as IntegerBoundSpec);
     // In the body convert with: definition.angleDeg * PI / 180
 - NEVER write:
@@ -2904,7 +2908,7 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
   ("skPolygon" does NOT exist — always use skRegularPolygon)
 
 ═══ COMMON MISTAKES TO AVOID ═══
-1. Writing "definition.x is Length" in precondition — WRONG. Use isLength(definition.x, LENGTH_BOUNDS).
+1. Writing "definition.x is Length" in precondition — WRONG. Use isLength(definition.x, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec).
 2. Writing "definition.x * inch" in the body when x is an isLength param — doubles the units, WRONG.
 3. Passing qSketchRegion(sk) or qSketchRegion(sketch1) — WRONG. Use qSketchRegion(id + "sk1").
 4. Forgetting skSolve(sk) before opExtrude — sketch geometry will not appear without it.
@@ -3076,13 +3080,15 @@ Use a revolved spline profile for any organic tapered shape:
 - The code must compile and produce visible 3D geometry with zero errors.`;
 
 const MULTI_CANDIDATE_AUTHOR_SYSTEM = `SYSTEM: You are a strict FeatureScript 2931 authoring assistant used inside a multi-key, multi-model CAD orchestration pipeline.
+${FS_COMPILER_AGENT_CONTRACT}
+
 NEVER include, reference, or request API keys, secrets, or internal key identifiers in any output.
 Output valid FeatureScript 2931 inside the JSON "code" field only.
 The exported feature signature must accept a single map parameter named definition declared in the precondition.
 Forbidden constructs: typed lambda parameter annotations, .length on arrays, dynamic index expressions like [arr.length - 1], passing Query objects as opRevolve axis, qSketchRegion(sketchVariable), and unsupported opCylinder usage.
 Always include skSolve before opExtrude/opRevolve/opLoft/opSweep.
 Expose user-editable parameters in the precondition using isLength/isInteger/boolean/Query with sensible defaults.
-For numeric quantity parameters, place default values in the bound spec. Use IntegerBoundSpec for isInteger rather than string Default annotations.
+For numeric quantity parameters, place default values in the bound spec. Use LengthBoundSpec/IntegerBoundSpec rather than string Default annotations.
 Use only sanitized retrieved snippets and local Omni-CAD summaries provided in the prompt; never invent provenance.
 Return JSON only with this schema:
 {
@@ -5108,21 +5114,23 @@ function parseFeatureScriptJson(raw, dims) {
 }
 
 function scoreFeatureScriptCandidate(code) {
-  const sanitized = sanitizeFeatureScript(code).code;
-  const localIssues = validateFeatureScript(sanitized);
-  const fatalIssues = hasFatalFeatureScriptPatterns(sanitized);
+  const strict = validateFeatureScriptStrict(code);
+  const sanitized = strict.code;
+  const localIssues = strict.validationIssues;
+  const fatalIssues = strict.fatalIssues;
   const exportCount = (sanitized.match(/\bexport const\b/g) || []).length;
   const hasPrecondition = /precondition[\s\S]*definition\./.test(sanitized);
-  const blockingIssueCount = countBlockingValidationIssues(localIssues);
+  const blockingIssueCount = strict.blockingIssueCount;
   const score =
     (sanitized.length > 80 ? 100 : 0)
+    + (strict.ok ? 60 : 0)
     + (exportCount === 1 ? 15 : -20)
     + (hasPrecondition ? 10 : -20)
-    - blockingIssueCount * 10
+    - blockingIssueCount * 18
     - (localIssues.length - blockingIssueCount) * 2
-    - fatalIssues.length * 12;
+    - fatalIssues.length * 24;
 
-  return { sanitized, localIssues, fatalIssues, score };
+  return { sanitized, localIssues, fatalIssues, score, strict };
 }
 
 function isNonBlockingValidationIssue(issue) {
@@ -5132,6 +5140,24 @@ function isNonBlockingValidationIssue(issue) {
 
 function countBlockingValidationIssues(issues = []) {
   return (Array.isArray(issues) ? issues : []).filter(issue => !isNonBlockingValidationIssue(issue)).length;
+}
+
+export function validateFeatureScriptStrict(code, opts = {}) {
+  const sanitized = sanitizeFeatureScript(code, opts);
+  const validationIssues = validateFeatureScript(sanitized.code);
+  const fatalIssues = hasFatalFeatureScriptPatterns(sanitized.code);
+  const blockingIssues = validationIssues.filter(issue => !isNonBlockingValidationIssue(issue));
+  return {
+    ok: blockingIssues.length === 0 && fatalIssues.length === 0 && Boolean(sanitized.code),
+    code: sanitized.code,
+    sanitizerChanges: sanitized.changes || [],
+    validationIssues,
+    blockingIssues,
+    fatalIssues,
+    localIssueCount: validationIssues.length,
+    blockingIssueCount: blockingIssues.length,
+    fatalIssueCount: fatalIssues.length,
+  };
 }
 
 function keySlotsForStage(stage, count, affinity = "") {
@@ -5212,20 +5238,22 @@ async function generateChatbotCandidates(prompt, dims, learningContext, retrieva
       score: scored.score,
       localIssues: scored.localIssues,
       fatalIssues: scored.fatalIssues,
+      strict: scored.strict,
     };
   }).sort((a, b) => b.score - a.score);
 }
 
 async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_ATTEMPTS) {
-  let workingCode = sanitizeFeatureScript(code).code;
-  let localIssues = validateFeatureScript(workingCode);
-  let fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+  let strict = validateFeatureScriptStrict(code);
+  let workingCode = strict.code;
+  let localIssues = strict.validationIssues;
+  let fatalIssues = strict.fatalIssues;
   const explanations = [];
   let repaired = false;
 
-  for (let attempt = 0; attempt < maxAttempts && (localIssues.length || fatalIssues.length); attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts && (!strict.ok); attempt += 1) {
     const issueText = [
-      ...localIssues.map(issue => `Line ${issue.line || "?"}: ${issue.message}`),
+      ...strict.blockingIssues.map(issue => `Line ${issue.line || "?"}: ${issue.message}`),
       ...fatalIssues.map(issue => `Fatal: ${issue.message}`),
     ].slice(0, 16).join("\n");
 
@@ -5235,14 +5263,15 @@ async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_AT
       affinity: `repair:${stableHash(workingCode)}:${attempt}`,
     });
     if (!repair?.fixed) break;
-    workingCode = sanitizeFeatureScript(repair.fixed).code;
+    strict = validateFeatureScriptStrict(repair.fixed);
+    workingCode = strict.code;
     explanations.push(repair.explanation || `Repair pass ${attempt + 1} applied.`);
     repaired = true;
-    localIssues = validateFeatureScript(workingCode);
-    fatalIssues = hasFatalFeatureScriptPatterns(workingCode);
+    localIssues = strict.validationIssues;
+    fatalIssues = strict.fatalIssues;
   }
 
-  return { code: workingCode, localIssues, fatalIssues, repaired, explanations };
+  return { code: workingCode, localIssues, fatalIssues, repaired, explanations, strict };
 }
 
 async function generateSimplifiedCandidate(prompt, dims, learningContext, retrieval, requestId) {
@@ -5318,7 +5347,8 @@ export async function generateFeatureScript(prompt, options = {}) {
   try {
     const retrieval = buildChatbotRetrievalBundle(prompt, dims, learningContext);
     const candidates = await generateChatbotCandidates(prompt, dims, learningContext, retrieval, requestId);
-    const bestCandidate = candidates[0] || null;
+    const bestStrictCandidate = candidates.find(candidate => candidate.strict?.ok) || null;
+    const bestCandidate = bestStrictCandidate || candidates[0] || null;
 
     let selectedCode = bestCandidate?.code || "";
     let selectedFeatureName = bestCandidate?.featureName || dims.featureName;
@@ -5328,7 +5358,13 @@ export async function generateFeatureScript(prompt, options = {}) {
     let completionLevel = "full";
     let warnings = [];
     let omissions = [];
-    let repairSummary = { repaired: false, explanation: [], localIssues: [], fatalIssues: [] };
+    let repairSummary = {
+      repaired: false,
+      explanation: [],
+      localIssues: bestCandidate?.strict?.validationIssues || [],
+      fatalIssues: bestCandidate?.strict?.fatalIssues || [],
+      strict: bestCandidate?.strict || null,
+    };
     let fallbackUsed = "none";
     let localFallbackReason = "";
 
@@ -5341,7 +5377,7 @@ export async function generateFeatureScript(prompt, options = {}) {
       }
     }
 
-    if (!selectedCode || repairSummary.localIssues.length || repairSummary.fatalIssues.length) {
+    if (!selectedCode || !repairSummary.strict?.ok) {
       const simplified = await generateSimplifiedCandidate(prompt, dims, learningContext, retrieval, requestId)
         .catch(() => null);
       if (simplified?.code) {
@@ -5362,6 +5398,7 @@ export async function generateFeatureScript(prompt, options = {}) {
 
     const hasBlockingSelectedIssues = () =>
       !selectedCode
+      || !repairSummary.strict?.ok
       || repairSummary.fatalIssues.length > 0
       || countBlockingValidationIssues(repairSummary.localIssues) > 0;
 
@@ -5426,7 +5463,7 @@ export async function generateFeatureScript(prompt, options = {}) {
       }
     }
 
-    if (selectedCode && (repairSummary.fatalIssues.length || countBlockingValidationIssues(repairSummary.localIssues))) {
+    if (selectedCode && (!repairSummary.strict?.ok || repairSummary.fatalIssues.length || countBlockingValidationIssues(repairSummary.localIssues))) {
       warnings.push("Recovery candidate still has blocking validator issues and will not be returned as final output.");
       selectedCode = "";
     }
@@ -5473,6 +5510,8 @@ export async function generateFeatureScript(prompt, options = {}) {
             fatalCount: candidate.fatalIssues?.length || 0,
             issues: (candidate.localIssues || []).map(issue => issue.message).slice(0, 4),
             fatal: (candidate.fatalIssues || []).map(issue => issue.code).slice(0, 4),
+            strictOk: Boolean(candidate.strict?.ok),
+            sanitizerChanges: (candidate.strict?.sanitizerChanges || []).map(change => change.rule).slice(0, 6),
             error: candidate.error || null,
           })),
         },
@@ -5493,9 +5532,13 @@ export async function generateFeatureScript(prompt, options = {}) {
       warnings,
       omissions,
       validation: {
+        strictGate: Boolean(repairSummary.strict?.ok && selectedCode),
         localIssueCount: repairSummary.localIssues.length,
+        blockingIssueCount: repairSummary.strict?.blockingIssueCount ?? countBlockingValidationIssues(repairSummary.localIssues),
         fatalIssueCount: repairSummary.fatalIssues.length,
         repaired: repairSummary.repaired,
+        sanitizerChanges: (repairSummary.strict?.sanitizerChanges || []).map(change => change.rule),
+        weakDataQuarantined: Boolean(learningContext.dataTrust?.weakRowsQuarantined || retrieval.dataTrust?.weakRowsQuarantined),
       },
     };
 
@@ -5604,7 +5647,9 @@ export async function generateFeatureScript(prompt, options = {}) {
 //   - Adding startAngle/endAngle to cylinder creation calls → those params don't exist
 //   - Changing hardcoded * inch values to definition.param * inch → wrong if param isn't isLength
 
-const DEBUG_SYSTEM = ` DEBUG SYSTEM: You are a FeatureScript repair assistant.
+const DEBUG_SYSTEM = `DEBUG SYSTEM: You are a FeatureScript repair assistant.
+${FS_COMPILER_AGENT_CONTRACT}
+
 Input: { code, issues }.
 For each issue:
 - typed_lambda_or_typed_param: remove all "is <type>" annotations from function parameter lists and typed lambdas.
@@ -5622,7 +5667,7 @@ If you cannot deterministically fix an issue, return { fixed: null, explanation:
 FEATURESCRIPT API FACTS (use these exactly, do not invent):
 
 PRECONDITION EXACT SYNTAX:
-  Length:   isLength(definition.width, LENGTH_BOUNDS);
+  Length:   isLength(definition.width, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec);
   Integer:  isInteger(definition.count, { (unitless) : [1, 10, 200] } as IntegerBoundSpec);
   Degrees:  isInteger(definition.angleDeg, { (unitless) : [10, 20, 30] } as IntegerBoundSpec); then use definition.angleDeg * PI / 180 in the body
   Boolean:  definition.addBore is boolean;
@@ -5649,8 +5694,8 @@ Cylinders — use one of these valid patterns:
   });
 
 isLength in precondition:
-  annotation { "Name" : "My Param", "Default" : "1 * inch" }
-  isLength(definition.myParam, LENGTH_BOUNDS);
+  annotation { "Name" : "My Param" }
+  isLength(definition.myParam, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec);
   "definition.myParam is Length" is WRONG — Length is not a type specifier.
 
 newSketchOnPlane (for user-selected planes, not newSketch):
@@ -5726,7 +5771,7 @@ FUNCTION SCOPE RULE (causes "missing TOP_SEMI" and "no viable alternative" parse
   top level (before the annotation block) OR convert them to const lambda form with untyped params.
 
 FIX RULES:
-1. "definition.param is Length" → change to "isLength(definition.param, LENGTH_BOUNDS);" in precondition
+1. "definition.param is Length" → change to "isLength(definition.param, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec);" in precondition
 2. opCylinder → replace with fCylinder or with skCircle + skSolve + opExtrude
 3. definition.param * inch in body when param is isLength → remove the * inch
 4. Raw number without units in geometry (e.g. "endDepth" : 2) → add * inch or use a definition param
@@ -5749,18 +5794,37 @@ FIX RULES:
 19. const inside a for/while loop body → change to var; const is only valid at the direct top-level of the feature body, not inside nested blocks
 20. arr[arr.length - 1] → FS arrays have no .length; use a hardcoded index (e.g. arr[5]) or track the count with a separate variable`;
 
-export function validateFeatureScript(code) {
+function validateFeatureScript(code) {
   const text = String(code || "");
   const lines = text.split(/\r?\n/);
   const issues = [];
   const featureSignatureRegex = /\bdefineFeature\s*\(\s*function\s*\(\s*context\s+is\s+Context\s*,\s*id\s+is\s+Id\s*,\s*definition\s+is\s+map\s*\)/;
   const integerBoundRegex = /\bisInteger\(\s*definition\.(\w+)\s*,\s*\{\s*\(unitless\)\s*:\s*\[([^\]]+)\]\s*\}\s+as\s+IntegerBoundSpec\s*\)\s*;/;
+  const lengthBoundRegex = /\bisLength\(\s*definition\.(\w+)\s*,\s*\{\s*\(inch\)\s*:\s*\[([^\]]+)\]\s*\}\s+as\s+LengthBoundSpec\s*\)\s*;/;
   const addIssue = (line, message, snippet) => {
     issues.push({ line, message, text: String(snippet || "").trim() });
   };
 
   lines.forEach((line, index) => {
     const lineNo = index + 1;
+    if (/annotation\s*\{[^}]*"Default"\s*:/.test(line)) {
+      addIssue(lineNo, "Numeric parameter defaults must be expressed in the bounds triple, not an annotation Default key.", line);
+    }
+    if (/\bisLength\s*\(\s*definition\.\w+\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/.test(line)) {
+      addIssue(lineNo, "Use explicit LengthBoundSpec bounds instead of LENGTH_BOUNDS constants.", line);
+    }
+    if (/\bisLength\s*\(\s*definition\.\w+\s*,\s*\{[^}]+\}\s*\)\s*;/.test(line)) {
+      addIssue(lineNo, "Custom isLength bounds should be typed as LengthBoundSpec.", line);
+    }
+    const lengthBoundsMatch = line.match(lengthBoundRegex);
+    if (lengthBoundsMatch) {
+      const rawBounds = lengthBoundsMatch[2].split(",").map(value => Number(value.trim()));
+      if (rawBounds.length !== 3 || rawBounds.some(value => !Number.isFinite(value))) {
+        addIssue(lineNo, `definition.${lengthBoundsMatch[1]}: Length bounds must be a numeric [min, default, max] triple.`, line);
+      } else if (!(rawBounds[0] <= rawBounds[1] && rawBounds[1] <= rawBounds[2])) {
+        addIssue(lineNo, `definition.${lengthBoundsMatch[1]}: Length bounds must satisfy min <= default <= max.`, line);
+      }
+    }
     if (/\bisInteger\s*\(\s*definition\.\w+\s*\)\s*;/.test(line)) {
       addIssue(lineNo, "isInteger() is missing the required FS 2931 bounds map.", line);
     }
@@ -5806,7 +5870,7 @@ export function validateFeatureScript(code) {
       addIssue(lineNo, "Lambda parameters cannot have type annotations (e.g. 'x is number'). Use untyped params: function(x, y).", line);
     }
     // .length on FeatureScript arrays is invalid — FS has no .length property
-    if (/\w+\s*\[\s*\w+\.length\b/.test(line) || /\.\blength\b/.test(line) && /\[/.test(line)) {
+    if (/\w+\s*\[\s*\w+\.length\b/.test(line) || /\.\s*length\b/.test(line)) {
       addIssue(lineNo, "FeatureScript arrays have no .length property. Use a hardcoded index or size() if available.", line);
     }
     if (/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/.test(line)) {
@@ -5856,6 +5920,16 @@ export function validateFeatureScript(code) {
   }
   if (/\bdefineFeature\s*\(/.test(text) && !hasClosedDefineFeature(text)) {
     addIssue(0, "FeatureScript file appears truncated or missing a closed defineFeature(...); block with semicolon.", "(global)");
+  }
+  if (!/^FeatureScript\s+2931\s*;/m.test(text)) {
+    addIssue(0, "FeatureScript file must start with 'FeatureScript 2931;'.", "(global)");
+  }
+  if (geometryImportMatches.length === 0) {
+    addIssue(0, "Missing required geometry.fs import for FeatureScript 2931.", "(global)");
+  }
+  const exportCount = (text.match(/\bexport\s+const\b/g) || []).length;
+  if (exportCount !== 1) {
+    addIssue(0, "FeatureScript file must contain exactly one exported feature.", "(global)");
   }
 
   const isLengthParams = new Set();
@@ -5912,18 +5986,31 @@ export function validateFeatureScript(code) {
     }
   });
 
-  const featureBodyStart = text.search(/\bdefineFeature\s*\(/);
-  if (featureBodyStart !== -1) {
-    const preconditionIndex = text.indexOf("precondition", featureBodyStart);
-    const preconditionOpen = preconditionIndex === -1 ? -1 : text.indexOf("{", preconditionIndex);
-    const preconditionClose = findMatchingBrace(text, preconditionOpen);
-    const bodyOpen = preconditionClose === -1 ? -1 : text.indexOf("{", preconditionClose + 1);
-    const bodyClose = bodyOpen === -1 ? -1 : findMatchingBrace(text, bodyOpen);
-    const bodyText = bodyOpen === -1 || bodyClose === -1 ? "" : text.slice(bodyOpen + 1, bodyClose);
-    const nestedFunction = bodyText.match(/\bfunction\s+[a-zA-Z_]\w*\s*\(/);
+  const blocks = getFeatureBlockRanges(text);
+  if (blocks.featureStart !== -1) {
+    if (!blocks.preconditionText || blocks.bodyOpen === -1 || blocks.bodyClose === -1) {
+      addIssue(0, "FeatureScript defineFeature must have both precondition and feature body blocks.", "(global)");
+    }
+    const preconditionExecutable = blocks.preconditionText.match(/\b(var|const|for|while|if|newSketch(?:OnPlane)?|sk[A-Z]\w*|op[A-Z]\w*|fCylinder|evPlane|qSketchRegion)\b/);
+    if (preconditionExecutable) {
+      const absoluteIndex = blocks.preconditionOpen + 1 + preconditionExecutable.index;
+      addIssue(lineNumberAt(text, absoluteIndex), "Precondition block may contain parameter declarations only; move execution logic into the feature body.", preconditionExecutable[0]);
+    }
+    const nestedFunction = blocks.bodyText.match(/\bfunction\s+[a-zA-Z_]\w*\s*\(/);
     if (nestedFunction) {
-      const before = text.slice(0, bodyOpen + 1 + nestedFunction.index);
+      const before = text.slice(0, blocks.bodyOpen + 1 + nestedFunction.index);
       addIssue(before.split(/\r?\n/).length, "Named function detected inside feature body; use a const lambda instead.", nestedFunction[0]);
+    }
+    const bodyLines = blocks.bodyText.split(/\n/);
+    let nestedDepth = 0;
+    for (const rawLine of bodyLines) {
+      const codeOnly = rawLine.replace(/\/\/.*$/, "");
+      const nestedConst = (nestedDepth > 0 && /^\s*const\s+[A-Za-z_]\w*\s*=/.test(codeOnly)) || /\{\s*const\s+[A-Za-z_]\w*\s*=/.test(codeOnly);
+      if (nestedConst) {
+        const absoluteIndex = text.indexOf(rawLine, blocks.bodyOpen);
+        addIssue(lineNumberAt(text, absoluteIndex), "const is only allowed at module top level or direct feature-body lambda assignments; use var inside nested blocks.", rawLine);
+      }
+      nestedDepth = Math.max(0, nestedDepth + (codeOnly.match(/\{/g) || []).length - (codeOnly.match(/\}/g) || []).length);
     }
   }
 
@@ -5945,6 +6032,33 @@ export function hasFatalFeatureScriptPatterns(code) {
   // 1) Missing precondition with isLength/isInteger/boolean
   if (!/precondition[\s\S]*?(isLength|isInteger|boolean)/.test(code)) {
     issues.push({ code: 'missing_precondition', message: 'Missing precondition block exposing parameters with isLength/isInteger/boolean.' });
+  }
+  const blocks = getFeatureBlockRanges(code);
+  if (blocks.featureStart !== -1) {
+    if (!blocks.preconditionText || blocks.bodyOpen === -1 || blocks.bodyClose === -1) {
+      issues.push({ code: 'invalid_feature_skeleton', message: 'defineFeature must include separate precondition and feature body blocks.' });
+    }
+    if (/\b(var|const|for|while|if|newSketch(?:OnPlane)?|sk[A-Z]\w*|op[A-Z]\w*|fCylinder|evPlane|qSketchRegion)\b/.test(blocks.preconditionText)) {
+      issues.push({ code: 'execution_in_precondition', message: 'Execution logic was found inside the precondition block.' });
+    }
+    let nestedDepth = 0;
+    for (const rawLine of blocks.bodyText.split(/\n/)) {
+      const codeOnly = rawLine.replace(/\/\/.*$/, "");
+      if ((nestedDepth > 0 && /^\s*const\s+[A-Za-z_]\w*\s*=/.test(codeOnly)) || /\{\s*const\s+[A-Za-z_]\w*\s*=/.test(codeOnly)) {
+        issues.push({ code: 'nested_const', message: 'const declarations inside loops or conditionals are invalid in FeatureScript.' });
+        break;
+      }
+      nestedDepth = Math.max(0, nestedDepth + (codeOnly.match(/\{/g) || []).length - (codeOnly.match(/\}/g) || []).length);
+    }
+  }
+  if (/annotation\s*\{[^}]*"Default"\s*:/.test(code)) {
+    issues.push({ code: 'numeric_default_annotation', message: 'Numeric precondition defaults must be in bounds triples, not annotation Default keys.' });
+  }
+  if (/\bisLength\s*\(\s*definition\.\w+\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/.test(code)) {
+    issues.push({ code: 'legacy_length_bounds', message: 'Use explicit LengthBoundSpec bounds instead of LENGTH_BOUNDS constants.' });
+  }
+  if (/\bisLength\s*\(\s*definition\.\w+\s*,\s*\{[^}]+\}\s*\)\s*;/.test(code)) {
+    issues.push({ code: 'missing_length_bound_spec', message: 'Custom isLength bounds must be typed as LengthBoundSpec.' });
   }
 
   // 2) Typed lambda or typed param annotations
