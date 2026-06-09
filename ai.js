@@ -2286,7 +2286,7 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   {
     const before = code;
     code = code.replace(
-      /\(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*\),\s*"Default"\s*:\s*"([0-9.]+)"\s*\*\s*inch\s*\}/g,
+      /(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*),\s*"Default"\s*:\s*"([0-9.]+)"\s*\*\s*inch\s*\}\s*\n\s*)isLength\(\s*definition\.(\w+)\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/g,
       (match, annotationStart, defaultInches, paramName) => {
         const def = Number(defaultInches);
         const min = def <= 0 ? 0 : Math.min(0.01, Math.max(0, def * 0.1));
@@ -2385,6 +2385,90 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   }
 
   return { code, changes };
+}
+
+// ─── Option 2 deterministic sanitizer (expanded + stricter ordering) ───────
+function sanitizeFeatureScriptOption2(rawCode, opts = {}) {
+  // Start with core + baseline deterministic rules
+  const base = sanitizeFeatureScript(rawCode, opts);
+  let code = base.code;
+  const changes = [...(base.changes || [])];
+
+  function record(rule, before, after) {
+    if (before === after) return;
+    changes.push({ rule, beforeSnippet: before.slice(0, 300), afterSnippet: after.slice(0, 300) });
+  }
+
+  // Normalize any remaining ++/-- and .length in a stricter pass
+  {
+    const before = code;
+    code = code
+      .replace(/\b([A-Za-z_]\w*)\s*\+\+\s*/g, "$1 += 1 ")
+      .replace(/\b([A-Za-z_]\w*)\s*--\s*/g, "$1 -= 1 ")
+      .replace(/\b([A-Za-z_]\w*)\.length\b/g, "size($1)");
+    record("option2_incdec_and_length_normalize", before, code);
+  }
+
+  // Strongly enforce unit math inside vector(...) for definition.*
+  // (LLMs often emit vector(def.len * inch, 0, 0) which fails type/unit expectations.)
+  {
+    const before = code;
+    code = code.replace(
+      /vector\s*\(\s*([^,)]*\bdefinition\.(\w+)\b[^,)]*)\s*\)\s*\*\s*inch/g,
+      (match, innerArgs /*, defKey */) => {
+        // Convert any `definition.x` followed by `* inch` inside vector args into `(definition.x / inch)`.
+        const fixedInner = String(innerArgs)
+          .replace(/\bdefinition\.(\w+)\b\s*\*\s*inch\b/g, "(definition.$1 / inch)")
+          .replace(/\bdefinition\.(\w+)\b(?!\s*\/\s*inch)\b/g, "(definition.$1 / inch)");
+        return `vector(${fixedInner}) * inch`;
+      }
+    );
+    record("option2_vector_unit_math_repair", before, code);
+  }
+
+  // Ensure sketch solve before downstream ops (extra conservative): if we detect opExtrude etc
+  // but there is no skSolve in the next ~4000 chars, inject after last sketch creation.
+  {
+    const before = code;
+    try {
+      const sketchCreateRegex = /(\bvar\s+([a-zA-Z0-9_$]+)\s*=\s*newSketch(?:OnPlane)?\s*\([^;]*\);?)/g;
+      const downstreamRegex = /(opExtrude|opRevolve|opLoft|opSweep)\s*\(/g;
+      if (downstreamRegex.test(code)) {
+        const sketches = [];
+        let m;
+        while ((m = sketchCreateRegex.exec(code)) !== null) {
+          sketches.push({ full: m[1], varName: m[2], index: m.index });
+        }
+        if (sketches.length) {
+          sketches.reverse();
+          for (const s of sketches) {
+            const afterSketch = code.slice(s.index + s.full.length);
+            const hasSkSolve = new RegExp("skSolve\\s*\\(\\s*" + s.varName + "\\s*\\)").test(afterSketch);
+            const hasDownstream = /(opExtrude|opRevolve|opLoft|opSweep)\s*\(/.test(afterSketch);
+            if (hasDownstream && !hasSkSolve) {
+              const insertion = "\nskSolve(" + s.varName + ");\n";
+              const insertPos = s.index + s.full.length;
+              code = code.slice(0, insertPos) + insertion + code.slice(insertPos);
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    record("option2_sketch_solve_enforcement", before, code);
+  }
+
+  // If file ending appears truncated, delegate to baseline fix by re-sanitizing once.
+  // This keeps deterministic behavior without heavy parsing.
+  {
+    const before = code;
+    const re = _coreFeatureScriptSanitize(code);
+    code = re.trim();
+    record("option2_core_recheck", before, code);
+  }
+
+  return { code: code.trim(), changes };
 }
 
 // ─── Dimension extractor ────────────────────────────────────────────────────── CHANGE THIS
@@ -4880,11 +4964,19 @@ function buildCompletedLocalResult(prompt, dims, learningContext, orchestration,
   const retrieval = localResult.retrieval || buildLocalRetrievalFallback(prompt, dims, learningContext);
   const warnings = uniqueStrings(localResult.warnings || []);
   const omissions = uniqueStrings(localResult.omissions || []);
+  const strict = validateFeatureScriptStrict((localResult.code || ""));
+  const blockingIssueCount = (strict?.blockingIssueCount ?? 0);
+  const fatalIssueCount = (strict?.fatalIssueCount ?? 0);
+  const strictGateStatus = strict.ok ? "pass" : "fail";
+
   const completedOrchestration = {
     ...(orchestration || {}),
     status: "completed",
-    completionLevel: omissions.length ? "partial" : "full",
+    completionLevel: omissions.length || fatalIssueCount || blockingIssueCount ? "partial" : "full",
     failedPass: null,
+    orchestration: {
+      ...(orchestration || {}),
+    },
     localRepair: {
       status: "completed",
       reason,
