@@ -28,6 +28,7 @@ data/**/*.npy
 !data/*.csv
 !data/*.json
 !data/*.jsonl
-
+old_and_docs/
+old_and_docs/docs
 logs/raw_generations/
 logs/generations_*.json
