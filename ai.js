@@ -5699,8 +5699,13 @@ export async function generateFeatureScript(prompt, options = {}) {
     }
 
     if (selectedCode && (!repairSummary.strict?.ok || repairSummary.fatalIssues.length || countBlockingValidationIssues(repairSummary.localIssues))) {
-      warnings.push("Recovery candidate still has blocking validator issues and will not be returned as final output.");
-      selectedCode = "";
+      warnings.push("Recovery candidate still has blocking validator issues; returning it as a partial result.");
+      // Keep the selected code so the user receives AI output even when local
+      // validation reports blocking or fatal issues. Mark the completion level
+      // as partial so the UI indicates limited confidence.
+      completionLevel = "partial";
+      generationModeLabel = generationModeLabel || "partial_recovery";
+      // Note: we intentionally do NOT clear `selectedCode` here.
     }
 
     if (!selectedCode) {
