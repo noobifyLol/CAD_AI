@@ -3,16 +3,23 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
 
-const TEXT_MODEL = process.env.GROQ_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
-const FAST_MODEL = process.env.GROQ_FAST_MODEL || TEXT_MODEL;
-const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || TEXT_MODEL;
+const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
+const DEFAULT_STRONG_TEXT_MODEL = "llama-3.3-70b-versatile";
+const DEFAULT_FAST_MODEL = "llama-3.1-8b-instant";
+
+const CODE_GENERATION_MODEL = process.env.GROQ_GENERATION_MODEL
+  || process.env.GROQ_CODE_MODEL
+  || DEFAULT_CODE_GENERATION_MODEL;
+const TEXT_MODEL = process.env.GROQ_MODEL || DEFAULT_STRONG_TEXT_MODEL;
+const FAST_MODEL = process.env.GROQ_FAST_MODEL || DEFAULT_FAST_MODEL;
+const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || CODE_GENERATION_MODEL;
 const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
-const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || TEXT_MODEL;
+const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || DEFAULT_STRONG_TEXT_MODEL;
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
-// The live generation path should prefer Groq reasoning plus FeatureScript docs.
-// Template injection and template fallback stay opt-in for emergency recovery only.
-const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "false").toLowerCase() === "true";
+// The live generation path uses a strict validated FeatureScript skeleton by default.
+// Set USE_VALIDATED_TEMPLATES=false only when intentionally testing free-form prompting.
+const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "true").toLowerCase() !== "false";
 const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
 const ENABLE_OPERATION_COMPILER_FALLBACK = String(process.env.CAD_ENABLE_OPERATION_COMPILER_FALLBACK || "false").toLowerCase() === "true";
 
@@ -20,7 +27,13 @@ const ENABLE_OPERATION_COMPILER_FALLBACK = String(process.env.CAD_ENABLE_OPERATI
 // Model configuration
 // ------------------------------
 const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS || 120000);
-const GROQ_MAX_COMPLETION_TOKENS = Number(process.env.GROQ_MAX_COMPLETION_TOKENS || 8192);
+const RAW_GROQ_MAX_COMPLETION_TOKENS = Number(process.env.GROQ_MAX_COMPLETION_TOKENS || 8192);
+const GROQ_MAX_COMPLETION_TOKENS = Number.isFinite(RAW_GROQ_MAX_COMPLETION_TOKENS) ? RAW_GROQ_MAX_COMPLETION_TOKENS : 8192;
+const RAW_GROQ_CODE_MAX_COMPLETION_TOKENS = Number(process.env.GROQ_CODE_MAX_COMPLETION_TOKENS || process.env.GROQ_GENERATION_MAX_COMPLETION_TOKENS || GROQ_MAX_COMPLETION_TOKENS || 8192);
+const GROQ_CODE_MAX_COMPLETION_TOKENS = Math.max(
+  4096,
+  Number.isFinite(RAW_GROQ_CODE_MAX_COMPLETION_TOKENS) ? RAW_GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS
+);
 const GROQ_MAX_PROMPT_CHARS = Number(process.env.GROQ_MAX_PROMPT_CHARS || 160000);
 const GROQ_TEMPERATURE = Number(process.env.GROQ_TEMPERATURE || 0.2);
 const VISION_TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS || 12000);
@@ -32,25 +45,66 @@ const MULTI_KEY_ENABLED = String(process.env.GROQ_MULTI_KEY_ENABLED || "true").t
 const MAX_RETRIEVED_SNIPPETS = Math.max(1, Math.min(6, Number(process.env.CAD_MAX_RETRIEVED_SNIPPETS || 6)));
 const MAX_RETRIEVED_SNIPPET_CHARS = Math.max(400, Math.min(4000, Number(process.env.CAD_MAX_RETRIEVED_SNIPPET_CHARS || 2200)));
 const MAX_OMNI_SUMMARY_CHARS = Math.max(400, Math.min(2400, Number(process.env.CAD_MAX_OMNI_SUMMARY_CHARS || 1100)));
+export const STRICT_FEATURESCRIPT_TEMPLATE = `FeatureScript 2931;
+import(path : "onshape/std/geometry.fs", version : "2931.0");
+
+annotation { "Feature Type Name" : "Template Driven Part" }
+export const templateDrivenPart = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
+        definition.location is Query;
+
+        annotation { "Name" : "Width" }
+        isLength(definition.width, { (inch) : [0.1, 2.0, 24.0] } as LengthBoundSpec);
+
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.1, 1.5, 24.0] } as LengthBoundSpec);
+
+        annotation { "Name" : "Depth" }
+        isLength(definition.depth, { (inch) : [0.05, 0.5, 12.0] } as LengthBoundSpec);
+    }
+    {
+        var skPlane = isQueryEmpty(context, definition.location)
+            ? plane(WORLD_ORIGIN, Z_DIRECTION)
+            : evPlane(context, { "face" : definition.location });
+
+        var halfWidth = definition.width / 2;
+        var halfHeight = definition.height / 2;
+        var profileSketch = newSketchOnPlane(context, id + "profileSketch", { "sketchPlane" : skPlane });
+        skRectangle(profileSketch, "profile", {
+            "firstCorner" : vector((-halfWidth) / inch, (-halfHeight) / inch) * inch,
+            "secondCorner" : vector(halfWidth / inch, halfHeight / inch) * inch
+        });
+        skSolve(profileSketch);
+
+        opExtrude(context, id + "body", {
+            "entities"  : qSketchRegion(id + "profileSketch"),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.depth
+        });
+    });`;
+
 export const FS_COMPILER_AGENT_CONTRACT = `FEATURESCRIPT 2931 COMPILER-AGENT CONTRACT
 Output policy:
 - Return JSON only with featureName, featureLabel, reasoning, and code.
 - The code field must be one complete FeatureScript 2931 file with exactly one exported defineFeature.
 - Preserve the app response contract outside the model, but candidates themselves use only the strict JSON schema.
+- Do not truncate the code. Output the COMPLETE FeatureScript from start to finish.
+- Never use placeholders or comments like "// rest of code here", "// TODO", "...", or omitted sections.
 
-Required file skeleton:
-FeatureScript 2931;
-import(path : "onshape/std/geometry.fs", version : "2931.0");
+Required structural template:
+You MUST follow this template's exact module structure: FeatureScript version, geometry import, annotation block, one export const defineFeature, precondition block, and feature body block.
+You may rename the feature, labels, parameters, and internal operation logic to match the user request, but do not invent a different top-level structure.
 
-annotation { "Feature Type Name" : "Readable Feature Name" }
-export const camelCaseFeature = defineFeature(function(context is Context, id is Id, definition is map)
-    precondition
-    {
-        // Parameter declarations only.
-    }
-    {
-        // Feature body execution.
-    });
+${STRICT_FEATURESCRIPT_TEMPLATE}
+
+Template discipline:
+- Keep the annotation { "Feature Type Name" : "..." } block directly above the exported feature.
+- Keep all user parameters in precondition. Put executable code only in the second body block.
+- Keep exactly one exported defineFeature.
+- Before responding, self-check that the file begins with FeatureScript 2931; and ends with the closing "});".
 
 Hard FeatureScript syntax rules:
 1. const is allowed only at module top level, or for helper lambda assignments at the direct top level of the feature body. Inside if/else/for/while blocks, use var.
@@ -112,6 +166,19 @@ function splitEnvList(rawValue) {
 
 function uniqueStrings(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function selectCodeGenerationModel() {
+  return CODE_GENERATION_MODEL;
+}
+
+function codeGenerationFallbackModels(primaryModel = CODE_GENERATION_MODEL) {
+  return uniqueStrings([
+    COMPLEX_MODEL,
+    DEFAULT_CODE_GENERATION_MODEL,
+    FALLBACK_MODEL,
+    TEXT_MODEL,
+  ]).filter(candidate => candidate && candidate !== primaryModel);
 }
 
 function loadStageKeys(stage) {
@@ -252,12 +319,15 @@ export function getModelConfig() {
     provider: "groq",
     text: TEXT_MODEL,
     fast: FAST_MODEL,
+    generation: CODE_GENERATION_MODEL,
     complex: COMPLEX_MODEL,
     dimensions: DIM_MODEL,
     fallback: FALLBACK_MODEL,
     validatedTemplates: USE_VALIDATED_TEMPLATES,
     allowTemplateFallback: ALLOW_TEMPLATE_FALLBACK,
     vision: VISION_MODEL,
+    maxCompletionTokens: GROQ_MAX_COMPLETION_TOKENS,
+    codeMaxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
     multiKeyEnabled: MULTI_KEY_ENABLED,
     candidateCount: CAD_CANDIDATE_COUNT,
     retrievalWorkers: CAD_RETRIEVAL_WORKERS,
@@ -376,10 +446,16 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL, options = {}) {
 async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {}) {
   const stage = options.stage || "generation";
   const credential = pickStageCredential(stage, options.affinity, options.keySlot);
-  const maxCompletionTokens = Math.max(256, Math.min(
-    Number(options.maxCompletionTokens || GROQ_MAX_COMPLETION_TOKENS),
-    GROQ_MAX_COMPLETION_TOKENS
-  ));
+  const defaultCompletionTokens = options.fullCode ? GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS;
+  const requestedCompletionTokens = Number(options.maxCompletionTokens || defaultCompletionTokens);
+  const hardCompletionCeiling = Math.max(GROQ_MAX_COMPLETION_TOKENS, defaultCompletionTokens);
+  const maxCompletionTokens = Math.max(
+    options.fullCode ? 4096 : 256,
+    Math.min(
+      Number.isFinite(requestedCompletionTokens) ? requestedCompletionTokens : defaultCompletionTokens,
+      hardCompletionCeiling
+    )
+  );
   const messages = Array.isArray(messagesOrPrompt)
     ? messagesOrPrompt
     : [{ role: "user", content: String(messagesOrPrompt) }];
@@ -387,6 +463,8 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
   const requestBody = {
     model,
     messages,
+    // Groq's current chat-completions field is max_completion_tokens.
+    // max_tokens is still accepted but deprecated in groq-sdk.
     max_completion_tokens: maxCompletionTokens,
     temperature: GROQ_TEMPERATURE,
   };
@@ -397,12 +475,7 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
   try {
     console.log(`[Groq Text] stage=${stage} model=${model} timeoutMs=${options.timeoutMs || GROQ_TIMEOUT_MS} slot=${credential.slotLabel}/${credential.poolSize}`);
     console.log(`[Groq Text] outgoing=${truncateForLog(requestBody, 800)}`);
-    const completion = await client.chat.completions.create({
-      model,
-      messages,
-      max_completion_tokens: maxCompletionTokens,
-      temperature: GROQ_TEMPERATURE,
-    });
+    const completion = await client.chat.completions.create(requestBody);
 
     const content = normalizeMessageContent(completion?.choices?.[0]?.message?.content);
     if (!content) {
@@ -1985,8 +2058,8 @@ function performGeometricReasoning(dims) {
 }
 
 
-// All known shapes that have a validated template — used for emergency fallback only.
-// Templates are NEVER the primary output; they are injected as reference examples for the AI.
+// All known shapes that have a shape-specific validated template.
+// The strict generic template is always available; these are extra operation baselines.
 const TEMPLATE_SHAPES = new Set(["GEAR_SPUR"]);
 
 function canUseTemplateFallback(dims) {
@@ -2007,6 +2080,40 @@ function buildTemplateExampleForDims(dims) {
   } catch {
     return null;
   }
+}
+
+function buildValidatedTemplateDirective(prompt = "", dims = {}) {
+  if (!USE_VALIDATED_TEMPLATES) {
+    return [
+      "VALIDATED_TEMPLATE_ENFORCEMENT: disabled by USE_VALIDATED_TEMPLATES=false.",
+      "Even with template enforcement disabled, the system FeatureScript skeleton remains mandatory.",
+    ].join("\n");
+  }
+
+  const lines = [
+    "VALIDATED_TEMPLATE_ENFORCEMENT: enabled and mandatory.",
+    "Use the validated structural template as the rigid baseline for this generation.",
+    "The final code must preserve the same outer file shape: FeatureScript version, geometry import, annotation block, exactly one export const defineFeature, precondition block, and feature body block.",
+    "Only change feature names, parameter names, bounds, and the internal feature-body operations needed to satisfy the user request.",
+    "Do not output a shortened snippet, alternate syntax, diagnostics, markdown, ellipses, or placeholder comments.",
+    "STANDARD_VALIDATED_TEMPLATE:",
+    STRICT_FEATURESCRIPT_TEMPLATE,
+  ];
+
+  const shapeTemplate = buildTemplateExampleForDims(dims);
+  if (shapeTemplate) {
+    lines.push(
+      `SHAPE_SPECIFIC_VALIDATED_TEMPLATE_FOR_${dims.shape}:`,
+      compactFeaturePattern(shapeTemplate, 5200),
+      "Use this shape-specific template only as a verified operation baseline. Adapt parameters and geometry to the user prompt without breaking the standard outer skeleton."
+    );
+  }
+
+  if (prompt) {
+    lines.push(`USER_REQUEST_TO_IMPLEMENT_INSIDE_TEMPLATE: ${normalizeText(prompt).slice(0, 600)}`);
+  }
+
+  return lines.join("\n");
 }
 
 function findMatchingBrace(text, openIndex) {
@@ -2286,7 +2393,7 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   {
     const before = code;
     code = code.replace(
-      /(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*),\s*"Default"\s*:\s*"([0-9.]+)"\s*\*\s*inch\s*\}\s*\n\s*)isLength\(\s*definition\.(\w+)\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/g,
+      /(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*),\s*"Default"\s*:\s*"([0-9.]+)"\s*\*\s*inch\s*\}\s*\n\s*isLength\(\s*definition\.(\w+)\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/g,
       (match, annotationStart, defaultInches, paramName) => {
         const def = Number(defaultInches);
         const min = def <= 0 ? 0 : Math.min(0.01, Math.max(0, def * 0.1));
@@ -2841,7 +2948,7 @@ Do NOT return "blocked" for ANY of the following — these are auto-fixed by san
 
 When in doubt, return "pass" with notes rather than "blocked".`;
 
-const CUSTOM_FEATURE_SYSTEM = `SYSTEM: You are a deterministic FeatureScript compiler agent.
+export const FEATURESCRIPT_STRICT_SYSTEM_PROMPT = `SYSTEM: You are a deterministic FeatureScript compiler agent.
 ${FS_COMPILER_AGENT_CONTRACT}
 
 Follow these additional modeling rules exactly:
@@ -3163,6 +3270,8 @@ Use a revolved spline profile for any organic tapered shape:
 - Prefer simple, robust geometry over clever but brittle geometry.
 - The code must compile and produce visible 3D geometry with zero errors.`;
 
+const CUSTOM_FEATURE_SYSTEM = FEATURESCRIPT_STRICT_SYSTEM_PROMPT;
+
 const MULTI_CANDIDATE_AUTHOR_SYSTEM = `SYSTEM: You are a strict FeatureScript 2931 authoring assistant used inside a multi-key, multi-model CAD orchestration pipeline.
 ${FS_COMPILER_AGENT_CONTRACT}
 
@@ -3210,6 +3319,7 @@ function buildCandidateUserPrompt({
   return [
     `USER REQUEST: ${prompt}`,
     `CONTEXT META: ${JSON.stringify(contextMeta)}`,
+    buildValidatedTemplateDirective(prompt, dims),
     `CANDIDATE ID: ${candidateId}`,
     `CANDIDATE STRATEGY: ${buildCandidateStrategy(candidateId, dims)}`,
     `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
@@ -3279,10 +3389,12 @@ async function generateStructuredCandidate({
     },
   ];
 
-  const authoringModel = promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL;
-  const raw = await chat(messages, authoringModel, [COMPLEX_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
+  const authoringModel = selectCodeGenerationModel();
+  const raw = await chat(messages, authoringModel, codeGenerationFallbackModels(authoringModel), {
     stage: "generation",
     affinity: `${requestId}:${candidateId}:generation`,
+    fullCode: true,
+    maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
   });
   const parsed = tryParseJson(raw, null);
   const featureName = String(parsed?.featureName || dims.featureName || candidateId).replace(/[^a-zA-Z0-9_]/g, "") || dims.featureName;
@@ -5037,6 +5149,8 @@ ${JSON.stringify({
   filletRadiusInches: dims.filletRadiusInches,
 }, null, 2)}
 
+${buildValidatedTemplateDirective(prompt, dims)}
+
 INSTRUCTIONS:
 - Generate complete, compile-safe FeatureScript 2931 code for the requested shape
 - Use deep thinking to analyze the request and determine the best approach
@@ -5050,13 +5164,14 @@ INSTRUCTIONS:
         { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
         { role: "user", content: recoveryPrompt }
       ],
-      COMPLEX_MODEL,
-      [TEXT_MODEL, FALLBACK_MODEL],
+      selectCodeGenerationModel(),
+      codeGenerationFallbackModels(selectCodeGenerationModel()),
       {
         stage: "generation",
         affinity: `${requestId}:ai_thinking_recovery`,
         keySlot: "k7",
-        maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 6000),
+        fullCode: true,
+        maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
       }
     );
 
@@ -5136,7 +5251,7 @@ function buildChatbotRetrievalBundle(prompt, dims, learningContext = {}) {
   };
 }
 
-function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple = false }) {
+function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple = false, priorIssues = null }) {
   const styleHints = {
     c1: "Prioritize rich geometry, editable parameters, and strong operation sequencing.",
     c2: "Prioritize compile-safe FeatureScript API usage and conservative query construction.",
@@ -5149,13 +5264,27 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     c9: "Prioritize final self-review: every definition parameter is used, every sketch is solved, every op is queried by id.",
     repair: "Rewrite the model more conservatively while preserving intent and editable dimensions.",
     simplify: "Return a simplified but compile-safe version of the requested part that still respects the main prompt.",
+    i1: "Prioritize rich geometry, editable parameters, and strong operation sequencing.",
+    i2: "Previous attempt had validation errors — prioritize compile-safe FeatureScript API usage and conservative query construction. Fix ALL errors listed below.",
+    i3: "Two previous attempts had errors — simplify the geometry but keep it compile-safe and editable. Every sketch must be solved, every param must be used.",
+    i4: "Final attempt — return the most conservative compile-safe version you can. Prefer simple geometry over complex geometry that fails validation.",
   };
+
+  const priorIssuesLines = (Array.isArray(priorIssues) && priorIssues.length > 0)
+    ? [
+        "PRIOR ATTEMPT ERRORS — you MUST fix ALL of these in this new generation:",
+        ...priorIssues.map(issue => `  - ${issue.message}`),
+        "CRITICAL: Do NOT repeat any of the above errors. Study each one and avoid the exact same mistake.",
+      ]
+    : [];
 
   return [
     `USER REQUEST: ${prompt}`,
     `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
+    buildValidatedTemplateDirective(prompt, dims),
     `CANDIDATE MODE: ${candidateId}`,
     `STYLE HINT: ${styleHints[candidateId] || styleHints.c1}`,
+    ...priorIssuesLines,
     `DOC_ROWS: ${JSON.stringify(retrieval.docRows.slice(0, 3))}`,
     `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 3))}`,
     `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 3))}`,
@@ -5163,11 +5292,13 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     preferSimple
       ? "OUTPUT POLICY: simplify the geometry if needed, but always keep the result editable, compile-oriented, and structurally faithful to the user intent."
       : "OUTPUT POLICY: aim for the most detailed compile-safe FeatureScript you can produce while keeping all major requested geometry editable.",
-    "AUTHORING POLICY: do not choose from a template catalog. Invent the operation sequence from the user request, docs, and your own modeling plan.",
+    "AUTHORING POLICY: use the validated structural template as the rigid baseline, then design the operation sequence from the user request, docs, and retrieved evidence.",
     "QUALITY TARGET: code should be substantial enough to create recognizable geometry, not a single placeholder primitive unless the prompt itself asks for a primitive.",
     "HARD RULES:",
     "- Return JSON only with featureName, featureLabel, reasoning, and code.",
     "- In reasoning, name the main components you will create and the documented FeatureScript operations used for each.",
+    "- Do not truncate. The code field must contain the complete FeatureScript file from FeatureScript 2931; through the final });.",
+    "- Never use placeholders, TODO comments, ellipses, or comments saying the rest of the code continues elsewhere.",
     "- Always expose editable parameters in precondition.",
     "- Use FeatureScript docs and retrieved rows as ground truth for API names and operation order.",
     "- Never return an empty code field.",
@@ -5264,75 +5395,91 @@ function keySlotsForStage(stage, count, affinity = "") {
   );
 }
 
-async function generateChatbotCandidates(prompt, dims, learningContext, retrieval, requestId) {
-  const slots = keySlotsForStage("generation", CAD_CANDIDATE_COUNT, `${requestId}:chatbot`);
-  const candidateIds = slots.map((_, index) => `c${index + 1}`);
-  const settled = [];
+// ─── Generate → Test → Fix loop ──────────────────────────────────────────────
+//
+// Each iteration generates one candidate, immediately validates it, and if it
+// has blocking issues feeds those exact errors back into the NEXT generation
+// prompt so the model can fix them rather than repeating them. The loop exits
+// early as soon as a clean candidate is found, or returns the best-scoring
+// candidate seen after all iterations.
+//
+async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
+  const MAX_ITERATIONS = Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
+  const slots = keySlotsForStage("generation", MAX_ITERATIONS, `${requestId}:gtf`);
 
-  for (let index = 0; index < candidateIds.length; index += 1) {
-    const candidateId = candidateIds[index];
+  let bestCandidate = null;
+  let priorIssues = null; // errors from the previous iteration, injected into next prompt
+
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
+    const candidateId = `i${iteration + 1}`;
+    const keySlot = slots[iteration % slots.length];
+    const preferSimple = iteration >= MAX_ITERATIONS - 1; // last pass: simplify to ensure cleanliness
+
     try {
-      const value = await chat([
+      const raw = await chat([
         { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
-        { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId }) },
-      ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+        { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }) },
+      ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
         stage: "generation",
-        affinity: `${requestId}:chatbot:${candidateId}`,
-        keySlot: slots[index],
-        maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2800),
+        affinity: `${requestId}:gtf:${candidateId}`,
+        keySlot,
+        fullCode: true,
+        maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
       });
-      settled.push({ status: "fulfilled", value });
+
+      const parsed = parseFeatureScriptJson(raw, dims);
+      if (!parsed?.code) {
+        priorIssues = [{ message: "Previous attempt returned invalid JSON or an empty code field. You MUST return only a JSON object with featureName, featureLabel, reasoning, and code." }];
+        console.warn(`[AI] GTF iteration ${iteration + 1}: invalid JSON, retrying with feedback`);
+        if (iteration < MAX_ITERATIONS - 1) await new Promise(resolve => setTimeout(resolve, 300));
+        continue;
+      }
+
+      // ── TEST ─────────────────────────────────────────────────────────────
+      const strict = validateFeatureScriptStrict(parsed.code);
+      const scored = scoreFeatureScriptCandidate(strict.code);
+      const candidate = {
+        candidateId,
+        ok: strict.ok,
+        featureName: parsed.featureName,
+        featureLabel: parsed.featureLabel,
+        reasoning: parsed.reasoning,
+        code: strict.code,
+        score: scored.score,
+        localIssues: strict.validationIssues,
+        fatalIssues: strict.fatalIssues,
+        strict,
+        iteration,
+      };
+
+      // Track the best candidate seen across all iterations
+      if (!bestCandidate || candidate.score > bestCandidate.score) {
+        bestCandidate = candidate;
+      }
+
+      // Early exit: this candidate is fully clean
+      if (strict.ok) {
+        console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}`);
+        break;
+      }
+
+      // ── FIX (build feedback for next iteration) ───────────────────────────
+      const blockingMessages = strict.blockingIssues.slice(0, 8).map(i => ({ message: i.message }));
+      const fatalMessages = strict.fatalIssues.slice(0, 4).map(i => ({ message: i.message }));
+      priorIssues = [...blockingMessages, ...fatalMessages];
+      console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: ${priorIssues.length} issue(s) fed back → next prompt`);
     } catch (reason) {
-      settled.push({ status: "rejected", reason });
+      const msg = reason?.message || String(reason);
+      console.warn(`[AI] GTF iteration ${iteration + 1} threw: ${msg}`);
+      priorIssues = [{ message: `Previous attempt threw an error: ${msg.slice(0, 200)}` }];
     }
-    if (index < candidateIds.length - 1) {
+
+    if (iteration < MAX_ITERATIONS - 1) {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
   }
 
-  return settled.map((item, index) => {
-    const candidateId = candidateIds[index];
-    if (item.status !== "fulfilled") {
-      return {
-        candidateId,
-        ok: false,
-        error: item.reason?.message || "candidate_failed",
-        score: -999,
-        code: "",
-        reasoning: "",
-        localIssues: [],
-        fatalIssues: [],
-      };
-    }
-
-    const parsed = parseFeatureScriptJson(item.value, dims);
-    if (!parsed?.code) {
-      return {
-        candidateId,
-        ok: false,
-        error: "candidate_invalid_json",
-        score: -999,
-        code: "",
-        reasoning: "",
-        localIssues: [],
-        fatalIssues: [],
-      };
-    }
-
-    const scored = scoreFeatureScriptCandidate(parsed.code);
-    return {
-      candidateId,
-      ok: true,
-      featureName: parsed.featureName,
-      featureLabel: parsed.featureLabel,
-      reasoning: parsed.reasoning,
-      code: scored.sanitized,
-      score: scored.score,
-      localIssues: scored.localIssues,
-      fatalIssues: scored.fatalIssues,
-      strict: scored.strict,
-    };
-  }).sort((a, b) => b.score - a.score);
+  return bestCandidate;
 }
 
 async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_ATTEMPTS) {
@@ -5371,11 +5518,12 @@ async function generateSimplifiedCandidate(prompt, dims, learningContext, retrie
   const raw = await chat([
     { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
     { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId: "simplify", preferSimple: true }) },
-  ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+  ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
     stage: "generation",
     affinity: `${requestId}:chatbot:simplify`,
     keySlot: slot,
-    maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2600),
+    fullCode: true,
+    maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
   });
   return parseFeatureScriptJson(raw, dims);
 }
@@ -5438,52 +5586,47 @@ export async function generateFeatureScript(prompt, options = {}) {
 
   try {
     const retrieval = buildChatbotRetrievalBundle(prompt, dims, learningContext);
-    const candidates = await generateChatbotCandidates(prompt, dims, learningContext, retrieval, requestId);
-    const bestStrictCandidate = candidates.find(candidate => candidate.strict?.ok) || null;
-    const bestCandidate = bestStrictCandidate || candidates[0] || null;
+
+    // ── Generate → Test → Fix loop ────────────────────────────────────────
+    // Each iteration generates one candidate, validates it immediately, and
+    // feeds any blocking errors back into the next generation prompt.
+    const bestCandidate = await runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId);
 
     let selectedCode = bestCandidate?.code || "";
     let selectedFeatureName = bestCandidate?.featureName || dims.featureName;
     let selectedFeatureLabel = bestCandidate?.featureLabel || dims.featureLabel;
-    let selectedReasoning = bestCandidate?.reasoning || "The chatbot generator assembled a FeatureScript candidate from retrieved docs, memory rows, and dataset hints.";
-    let generationModeLabel = "multi_key_detailed";
-    let completionLevel = "full";
+    let selectedReasoning = bestCandidate?.reasoning || "The generate-test-fix loop assembled a FeatureScript candidate from retrieved docs, memory rows, and dataset hints.";
+    let generationModeLabel = bestCandidate?.ok ? "gtf_clean" : "gtf_best_effort";
+    let completionLevel = bestCandidate?.ok ? "full" : "repaired";
     let warnings = [];
     let omissions = [];
+    // Normalise repairSummary shape so the rest of the function can read it unchanged
     let repairSummary = {
-      repaired: false,
-      explanation: [],
-      localIssues: bestCandidate?.strict?.validationIssues || [],
-      fatalIssues: bestCandidate?.strict?.fatalIssues || [],
+      repaired: Boolean(bestCandidate && !bestCandidate.ok && selectedCode),
+      explanation: bestCandidate?.ok ? [] : [`GTF loop exhausted ${Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT))} iteration(s); returning best-scoring candidate.`],
+      localIssues: bestCandidate?.localIssues || [],
+      fatalIssues: bestCandidate?.fatalIssues || [],
       strict: bestCandidate?.strict || null,
     };
     let fallbackUsed = "none";
     let localFallbackReason = "";
 
-    if (selectedCode) {
-      repairSummary = await runRepairCycle(selectedCode, learningContext);
-      selectedCode = repairSummary.code;
-      if (repairSummary.repaired) {
-        generationModeLabel = "multi_key_repaired";
-        completionLevel = "repaired";
-      }
-    }
-
-    if (!selectedCode || !repairSummary.strict?.ok) {
-      const simplified = await generateSimplifiedCandidate(prompt, dims, learningContext, retrieval, requestId)
-        .catch(() => null);
-      if (simplified?.code) {
-        const simplifiedRepair = await runRepairCycle(simplified.code, learningContext, 1);
-        if (simplifiedRepair.code) {
-          selectedCode = simplifiedRepair.code;
-          selectedFeatureName = simplified.featureName || selectedFeatureName;
-          selectedFeatureLabel = simplified.featureLabel || selectedFeatureLabel;
-          selectedReasoning = simplified.reasoning || selectedReasoning;
-          repairSummary = simplifiedRepair;
-          generationModeLabel = "multi_key_simplified";
-          completionLevel = "simplified";
-          fallbackUsed = "ai_simplification";
-          omissions.push("Secondary details may have been simplified to preserve compile safety and editability.");
+    if (selectedCode && (!repairSummary.strict?.ok || repairSummary.fatalIssues.length || countBlockingValidationIssues(repairSummary.localIssues) > 0)) {
+      const repairedCandidate = await runRepairCycle(selectedCode, learningContext, CAD_REPAIR_ATTEMPTS);
+      const repairedScore = scoreFeatureScriptCandidate(repairedCandidate.code || "").score;
+      const originalScore = bestCandidate?.score ?? -Infinity;
+      if (repairedCandidate?.code && (repairedCandidate.strict?.ok || repairedScore >= originalScore)) {
+        selectedCode = repairedCandidate.code;
+        repairSummary = {
+          ...repairedCandidate,
+          explanation: repairedCandidate.explanations || [],
+        };
+        if (repairedCandidate.strict?.ok) {
+          generationModeLabel = "gtf_repaired_clean";
+          completionLevel = "full";
+        }
+        if (repairedCandidate.repaired) {
+          warnings.push("Automatic repair was applied after local FeatureScript validation.");
         }
       }
     }
@@ -5594,22 +5737,24 @@ export async function generateFeatureScript(prompt, options = {}) {
         },
         generation: {
           selectedCandidateId: bestCandidate?.candidateId || "none",
-          candidateScores: candidates.map(candidate => ({
-            candidateId: candidate.candidateId,
-            score: candidate.score,
-            ok: candidate.ok,
-            issueCount: candidate.localIssues?.length || 0,
-            fatalCount: candidate.fatalIssues?.length || 0,
-            issues: (candidate.localIssues || []).map(issue => issue.message).slice(0, 4),
-            fatal: (candidate.fatalIssues || []).map(issue => issue.code).slice(0, 4),
-            strictOk: Boolean(candidate.strict?.ok),
-            sanitizerChanges: (candidate.strict?.sanitizerChanges || []).map(change => change.rule).slice(0, 6),
-            error: candidate.error || null,
-          })),
+          gtfIteration: bestCandidate?.iteration ?? null,
+          gtfClean: Boolean(bestCandidate?.ok),
+          candidateScores: bestCandidate ? [{
+            candidateId: bestCandidate.candidateId,
+            score: bestCandidate.score,
+            ok: bestCandidate.ok,
+            issueCount: bestCandidate.localIssues?.length || 0,
+            fatalCount: bestCandidate.fatalIssues?.length || 0,
+            issues: (bestCandidate.localIssues || []).map(issue => issue.message).slice(0, 4),
+            fatal: (bestCandidate.fatalIssues || []).map(issue => issue.message).slice(0, 4),
+            strictOk: Boolean(bestCandidate.strict?.ok),
+            sanitizerChanges: (bestCandidate.strict?.sanitizerChanges || []).map(change => change.rule).slice(0, 6),
+            error: bestCandidate.error || null,
+          }] : [],
         },
         repair: {
           repaired: repairSummary.repaired,
-          explanation: repairSummary.explanations || [],
+          explanation: repairSummary.explanation || repairSummary.explanations || [],
         },
         fallback: {
           used: fallbackUsed,
@@ -5664,9 +5809,10 @@ export async function generateFeatureScript(prompt, options = {}) {
 
     const aiRecovery = await generateWithAiThinking(prompt, dims, learningContext, requestId);
     const repaired = aiRecovery?.code ? await runRepairCycle(aiRecovery.code, learningContext, 1) : null;
-    const recoveryCode = repaired?.code || aiRecovery?.code || "";
+    const recoveryCode = repaired?.strict?.ok ? repaired.code : "";
     const warnings = [`Main chatbot generation failed: ${String(err?.message || "unknown").slice(0, 100)}`];
     if (repaired?.repaired) warnings.push("Recovery code was automatically repaired.");
+    if (repaired && !repaired.strict?.ok) warnings.push("Recovery code was withheld because local FeatureScript validation still found blocking issues.");
     if (!recoveryCode) warnings.push("All AI recovery paths failed.");
     const omissions = recoveryCode
       ? ["Returned the best available recovery candidate after a generation failure."]
@@ -5750,6 +5896,7 @@ For each issue:
 - qSketchRegion_variable: replace with qSketchRegion("<sketchId>") where <sketchId> matches the created sketch id; if sketch id cannot be inferred, add a TODO comment and return diagnostics.
 - missing_skSolve: insert skSolve(sketchVar) immediately after the sketch creation block.
 - missing_precondition: add or restore the precondition block with isLength/isInteger/boolean declarations for all definition.* parameters used in the body.
+- placeholder_or_truncated_code: rebuild the missing section and return a complete FeatureScript file from FeatureScript 2931; through the final });
 Always:
 - Preserve precondition parameter exposure; do not remove isLength/isInteger/boolean declarations.
 - Add a short comment above each automated fix explaining the change and why it was safe.
@@ -6187,6 +6334,9 @@ export function hasFatalFeatureScriptPatterns(code) {
   if (/\bdefineFeature\s*\(/.test(code) && !hasClosedDefineFeature(code)) {
     issues.push({ code: 'truncated_file', message: 'FeatureScript appears truncated or is missing a closed defineFeature(...); block.' });
   }
+  if (/\/\/\s*(rest of|remaining|continue|todo)|\/\*\s*(rest of|remaining|continue|todo)|\.\.\./i.test(code)) {
+    issues.push({ code: 'placeholder_or_truncated_code', message: 'FeatureScript contains placeholder/truncation text instead of complete code.' });
+  }
 
   // 5) qSketchRegion called with variable
   if (/qSketchRegion\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\)/.test(code)) {
@@ -6218,10 +6368,11 @@ export async function debugFeatureScript(code, errors, options = {}) {
     const raw = await chat([
       { role: "system", content: withLearningContext(DEBUG_SYSTEM, learningContext) },
       { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
-    ], COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+    ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
       stage: options.stage || "repair",
       affinity: options.affinity || `repair:${stableHash(sanitizedInput)}`,
-      maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2600),
+      fullCode: true,
+      maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
     });
     const parsed = tryParseJson(raw, null);
     const rawFeatureScript = /FeatureScript\s+\d+\s*;/.test(raw) ? raw : "";
