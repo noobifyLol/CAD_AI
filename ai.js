@@ -5175,9 +5175,9 @@ INSTRUCTIONS:
       }
     );
 
-    const parsed = tryParseJson(raw, null);
+    const parsed = parseFeatureScriptJson(raw, dims);
     if (!parsed || !parsed.code) {
-      console.warn(`[AI] AI thinking recovery produced invalid JSON; falling back to operation compiler`);
+      console.warn(`[AI] AI thinking recovery produced invalid JSON or raw FeatureScript; falling back to operation compiler`);
       return null;
     }
 
