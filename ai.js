@@ -5250,6 +5250,73 @@ function buildChatbotRetrievalBundle(prompt, dims, learningContext = {}) {
     },
   };
 }
+async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
+  const MAX_ITERATIONS = Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
+  const slots = keySlotsForStage("generation", MAX_ITERATIONS, `${requestId}:gtf`);
+
+  let bestCandidate = null;
+  let priorIssues = null;
+
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
+    const candidateId = `i${iteration + 1}`;
+    const keySlot = slots[iteration % slots.length];
+    const preferSimple = iteration >= MAX_ITERATIONS - 1;
+
+    try {
+      const raw = await chat([
+        { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+        { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }) },
+      ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
+        stage: "generation",
+        affinity: `${requestId}:gtf:${candidateId}`,
+        keySlot,
+        maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2800),
+      });
+
+      const parsed = parseFeatureScriptJson(raw, dims);
+      if (!parsed?.code) {
+        priorIssues = [{ message: "Previous attempt returned invalid JSON or an empty code field. You MUST return only a JSON object with featureName, featureLabel, reasoning, and code." }];
+        if (iteration < MAX_ITERATIONS - 1) await new Promise(resolve => setTimeout(resolve, 300));
+        continue;
+      }
+
+      const strict = validateFeatureScriptStrict(parsed.code);
+      const scored = scoreFeatureScriptCandidate(strict.code);
+      const candidate = {
+        candidateId,
+        ok: strict.ok,
+        featureName: parsed.featureName,
+        featureLabel: parsed.featureLabel,
+        reasoning: parsed.reasoning,
+        code: strict.code,
+        score: scored.score,
+        localIssues: strict.validationIssues,
+        fatalIssues: strict.fatalIssues,
+        strict,
+        iteration,
+      };
+
+      if (!bestCandidate || candidate.score > bestCandidate.score) bestCandidate = candidate;
+
+      if (strict.ok) {
+        console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}`);
+        break;
+      }
+
+      priorIssues = [
+        ...strict.blockingIssues.slice(0, 8).map(i => ({ message: i.message })),
+        ...strict.fatalIssues.slice(0, 4).map(i => ({ message: i.message })),
+      ];
+    } catch (reason) {
+      const msg = reason?.message || String(reason);
+      priorIssues = [{ message: `Previous attempt threw an error: ${msg.slice(0, 200)}` }];
+    }
+
+    if (iteration < MAX_ITERATIONS - 1) await new Promise(resolve => setTimeout(resolve, 300));
+  }
+
+  return bestCandidate;
+}
 
 function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple = false, priorIssues = null }) {
   const styleHints = {
@@ -5268,8 +5335,8 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     i2: "Previous attempt had validation errors — prioritize compile-safe FeatureScript API usage and conservative query construction. Fix ALL errors listed below.",
     i3: "Two previous attempts had errors — simplify the geometry but keep it compile-safe and editable. Every sketch must be solved, every param must be used.",
     i4: "Final attempt — return the most conservative compile-safe version you can. Prefer simple geometry over complex geometry that fails validation.",
+    ...priorIssuesLines,
   };
-
   const priorIssuesLines = (Array.isArray(priorIssues) && priorIssues.length > 0)
     ? [
         "PRIOR ATTEMPT ERRORS — you MUST fix ALL of these in this new generation:",
@@ -5277,6 +5344,7 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
         "CRITICAL: Do NOT repeat any of the above errors. Study each one and avoid the exact same mistake.",
       ]
     : [];
+
 
   return [
     `USER REQUEST: ${prompt}`,
@@ -5743,15 +5811,15 @@ export async function generateFeatureScript(prompt, options = {}) {
         generation: {
           selectedCandidateId: bestCandidate?.candidateId || "none",
           gtfIteration: bestCandidate?.iteration ?? null,
-          gtfClean: Boolean(bestCandidate?.ok),
-          candidateScores: bestCandidate ? [{
-            candidateId: bestCandidate.candidateId,
+gtfClean: Boolean(bestCandidate?.ok),
+candidateScores: bestCandidate ? [{
+  candidateId: bestCandidate.candidateId, 
             score: bestCandidate.score,
             ok: bestCandidate.ok,
             issueCount: bestCandidate.localIssues?.length || 0,
             fatalCount: bestCandidate.fatalIssues?.length || 0,
             issues: (bestCandidate.localIssues || []).map(issue => issue.message).slice(0, 4),
-            fatal: (bestCandidate.fatalIssues || []).map(issue => issue.message).slice(0, 4),
+             fatal: (bestCandidate.fatalIssues || []).map(issue => issue.message).slice(0, 4),
             strictOk: Boolean(bestCandidate.strict?.ok),
             sanitizerChanges: (bestCandidate.strict?.sanitizerChanges || []).map(change => change.rule).slice(0, 6),
             error: bestCandidate.error || null,
@@ -5759,7 +5827,7 @@ export async function generateFeatureScript(prompt, options = {}) {
         },
         repair: {
           repaired: repairSummary.repaired,
-          explanation: repairSummary.explanation || repairSummary.explanations || [],
+          explanation: repairSummary.explanation || [],
         },
         fallback: {
           used: fallbackUsed,
