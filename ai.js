@@ -5030,6 +5030,64 @@ ${fsRect("baseSketch", "boxProfile", "-halfW", "-halfH", "halfW", "halfH")}
   };
 }
 
+export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {}, retrieval = null, decomposition = null) {
+  const robustResult = buildLocalRobustFeatureScript(prompt, dims, decomposition, retrieval, learningContext);
+  if (robustResult?.code) {
+    const strict = validateFeatureScriptStrict(robustResult.code);
+    return {
+      code: robustResult.code,
+      featureName: robustResult.featureName || dims.featureName || "guaranteedFeature",
+      featureLabel: robustResult.featureLabel || dims.featureLabel || "Guaranteed Feature",
+      reasoning: robustResult.strategy || "Generated a deterministic FeatureScript because the AI path was uncertain.",
+      dims,
+      generationMode: "guaranteed_operation_compiler",
+      completionLevel: strict.ok ? "full" : "partial",
+      warnings: ["Generated a deterministic FeatureScript so the pipeline never returns an empty or omitted result."],
+      omissions: [],
+      orchestration: {
+        status: "completed",
+        completionLevel: strict.ok ? "full" : "partial",
+        failedPass: null,
+        passes: {
+          generation: {
+            selectedCandidateId: "guaranteed_fallback",
+            fallbackUsed: "deterministic",
+          },
+        },
+        warnings: ["Generated a deterministic FeatureScript so the pipeline never returns an empty or omitted result."],
+        omissions: [],
+      },
+    };
+  }
+
+  const fallback = buildLocalSimpleBox(prompt, dims);
+  const strict = validateFeatureScriptStrict(fallback.code || "");
+  return {
+    code: fallback.code || "",
+    featureName: fallback.featureName || dims.featureName || "guaranteedFeature",
+    featureLabel: fallback.featureLabel || dims.featureLabel || "Guaranteed Feature",
+    reasoning: fallback.strategy || "Generated a minimal guaranteed FeatureScript fallback because no richer candidate could be validated.",
+    dims,
+    generationMode: "guaranteed_fallback",
+    completionLevel: strict.ok ? "full" : "partial",
+    warnings: ["Generated a deterministic FeatureScript so the pipeline never returns an empty or omitted result."],
+    omissions: ["The guaranteed fallback uses a conservative parametric box structure when the prompt is uncertain or the AI path fails."],
+    orchestration: {
+      status: "completed",
+      completionLevel: strict.ok ? "full" : "partial",
+      failedPass: null,
+      passes: {
+        generation: {
+          selectedCandidateId: "guaranteed_fallback",
+          fallbackUsed: "deterministic",
+        },
+      },
+      warnings: ["Generated a deterministic FeatureScript so the pipeline never returns an empty or omitted result."],
+      omissions: ["The guaranteed fallback uses a conservative parametric box structure when the prompt is uncertain or the AI path fails."],
+    },
+  };
+}
+
 function buildLocalRobustFeatureScript(prompt, dims, decomposition = null, retrieval = null, learningContext = {}) {
   const operationPlan = buildDeterministicOperationPlan(prompt, dims, decomposition, retrieval);
   const result = compileOperationPlanToFeatureScript(operationPlan, prompt, dims, retrieval);
@@ -5249,73 +5307,6 @@ function buildChatbotRetrievalBundle(prompt, dims, learningContext = {}) {
       docs: docRows.map(row => row.title).join(" | "),
     },
   };
-}
-async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
-  const MAX_ITERATIONS = Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
-  const slots = keySlotsForStage("generation", MAX_ITERATIONS, `${requestId}:gtf`);
-
-  let bestCandidate = null;
-  let priorIssues = null;
-
-  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
-    const candidateId = `i${iteration + 1}`;
-    const keySlot = slots[iteration % slots.length];
-    const preferSimple = iteration >= MAX_ITERATIONS - 1;
-
-    try {
-      const raw = await chat([
-        { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
-        { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }) },
-      ], promptNeedsHighFidelityModel(prompt) ? COMPLEX_MODEL : TEXT_MODEL, [TEXT_MODEL, FALLBACK_MODEL], {
-        stage: "generation",
-        affinity: `${requestId}:gtf:${candidateId}`,
-        keySlot,
-        maxCompletionTokens: Math.min(GROQ_MAX_COMPLETION_TOKENS, 2800),
-      });
-
-      const parsed = parseFeatureScriptJson(raw, dims);
-      if (!parsed?.code) {
-        priorIssues = [{ message: "Previous attempt returned invalid JSON or an empty code field. You MUST return only a JSON object with featureName, featureLabel, reasoning, and code." }];
-        if (iteration < MAX_ITERATIONS - 1) await new Promise(resolve => setTimeout(resolve, 300));
-        continue;
-      }
-
-      const strict = validateFeatureScriptStrict(parsed.code);
-      const scored = scoreFeatureScriptCandidate(strict.code);
-      const candidate = {
-        candidateId,
-        ok: strict.ok,
-        featureName: parsed.featureName,
-        featureLabel: parsed.featureLabel,
-        reasoning: parsed.reasoning,
-        code: strict.code,
-        score: scored.score,
-        localIssues: strict.validationIssues,
-        fatalIssues: strict.fatalIssues,
-        strict,
-        iteration,
-      };
-
-      if (!bestCandidate || candidate.score > bestCandidate.score) bestCandidate = candidate;
-
-      if (strict.ok) {
-        console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}`);
-        break;
-      }
-
-      priorIssues = [
-        ...strict.blockingIssues.slice(0, 8).map(i => ({ message: i.message })),
-        ...strict.fatalIssues.slice(0, 4).map(i => ({ message: i.message })),
-      ];
-    } catch (reason) {
-      const msg = reason?.message || String(reason);
-      priorIssues = [{ message: `Previous attempt threw an error: ${msg.slice(0, 200)}` }];
-    }
-
-    if (iteration < MAX_ITERATIONS - 1) await new Promise(resolve => setTimeout(resolve, 300));
-  }
-
-  return bestCandidate;
 }
 
 function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple = false, priorIssues = null }) {
@@ -5791,6 +5782,29 @@ export async function generateFeatureScript(prompt, options = {}) {
     }
     if (repairSummary.repaired) {
       warnings.push("Automatic repair was applied to improve FeatureScript correctness.");
+    }
+
+    const shouldForceGuaranteedResult = !selectedCode || !repairSummary.strict?.ok || repairSummary.fatalIssues.length > 0 || countBlockingValidationIssues(repairSummary.localIssues) > 0;
+    if (shouldForceGuaranteedResult) {
+      const guaranteedResult = buildGuaranteedFeatureScript(prompt, dims, learningContext, retrieval);
+      if (guaranteedResult?.code) {
+        selectedCode = guaranteedResult.code;
+        selectedFeatureName = guaranteedResult.featureName || selectedFeatureName;
+        selectedFeatureLabel = guaranteedResult.featureLabel || selectedFeatureLabel;
+        selectedReasoning = guaranteedResult.reasoning || selectedReasoning;
+        generationModeLabel = guaranteedResult.generationMode || "guaranteed_fallback";
+        completionLevel = guaranteedResult.completionLevel || "full";
+        warnings = uniqueStrings([...warnings, ...(guaranteedResult.warnings || [])]);
+        omissions = uniqueStrings([...omissions, ...(guaranteedResult.omissions || [])]);
+        fallbackUsed = "guaranteed_fallback";
+        repairSummary = {
+          repaired: false,
+          explanation: guaranteedResult.warnings || [],
+          localIssues: [],
+          fatalIssues: [],
+          strict: validateFeatureScriptStrict(selectedCode),
+        };
+      }
     }
 
     const orchestration = {
