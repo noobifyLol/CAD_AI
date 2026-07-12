@@ -396,5 +396,274 @@
       "0000/00008571_00009",
       "0000/00009996_00001"
     ]
+  },
+  {
+    "title": "Omni-CAD Plates And Holes Captions",
+    "summary": "136568 Omni-CAD captions describe plates and holes. Example: Generate a CAD model with a rectangular block featuring a series of circular holes. The block has a consistent, smooth surface with four visible circular holes: one on each corner and one in the center of each of the lon",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "hole_plate"
+    ],
+    "keywords": [
+      "plate",
+      "hole",
+      "holes",
+      "mount",
+      "bracket",
+      "bore",
+      "drill"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Cut holes with same-sketch inner circles (qSketchRegion filterInnerLoops) or opBoolean SUBTRACTION of an extruded hole tool.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Cylinders And Shafts Captions",
+    "summary": "197458 Omni-CAD captions describe cylinders and shafts. Example: Generate a CAD model with a cylindrical shape featuring a hollow center. The cylinder has a smooth, uniform surface and is depicted in a grayscale color scheme. The model is shown from four different perspectives, each h",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "cylinder"
+    ],
+    "keywords": [
+      "cylinder",
+      "shaft",
+      "rod",
+      "tube",
+      "round",
+      "circular"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Sketch circle + opExtrude is the robust cylinder path; stack sections on offset planes and union for stepped shafts.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Hollow And Shelled Parts Captions",
+    "summary": "84643 Omni-CAD captions describe hollow and shelled parts. Example: Generate a CAD model with a three-dimensional rectangular prism featuring a hollowed-out section on one side. The prism has a uniform gray color and a smooth surface, with the hollowed-out section creating an open space ",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "hollow_shell"
+    ],
+    "keywords": [
+      "hollow",
+      "shell",
+      "container",
+      "box",
+      "cavity",
+      "wall"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Make the solid first, then opShell with negative thickness; pass the cap face to open a side.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Rings And Washers Captions",
+    "summary": "18962 Omni-CAD captions describe rings and washers. Example: Generate a CAD model with a long, slender, cylindrical shaft that tapers slightly towards the top. The shaft is connected to a circular base with a hollow center, resembling a washer or a flange. The overall design is si",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "ring_washer"
+    ],
+    "keywords": [
+      "ring",
+      "washer",
+      "spacer",
+      "annular",
+      "concentric",
+      "bore"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Two concentric circles in ONE sketch extrude directly into a ring; no boolean needed.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Frames And Beams Captions",
+    "summary": "64194 Omni-CAD captions describe frames and beams. Example: Generate a CAD model with a simple, angular design featuring a combination of rectangular and triangular shapes. The primary elements include a long, horizontal rectangular bar intersected by a shorter, vertical rectangu",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "frame_beam"
+    ],
+    "keywords": [
+      "frame",
+      "beam",
+      "bar",
+      "rail",
+      "structure",
+      "elongated"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Closed polyline profiles extruded per member; union members with opBoolean.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Curved And Organic Forms Captions",
+    "summary": "274282 Omni-CAD captions describe curved and organic forms. Example: Generate a CAD model with a three-dimensional rectangular prism featuring a hollowed-out section on one side. The prism has a uniform gray color and a smooth surface, with the hollowed-out section creating an open space ",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "curved_organic"
+    ],
+    "keywords": [
+      "curved",
+      "rounded",
+      "smooth",
+      "taper",
+      "cone",
+      "organic",
+      "arc"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Tapered/organic bodies revolve a closed spline profile (axis line + skFitSpline + closing lines) around a Line axis.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Gears And Teeth Captions",
+    "summary": "4458 Omni-CAD captions describe gears and teeth. Example: Generate a CAD model with a complex, multi-faceted gear-like component featuring a central hub with multiple evenly spaced, angular protrusions radiating outward. The design includes a combination of cylindrical and coni",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "gear_tooth"
+    ],
+    "keywords": [
+      "gear",
+      "teeth",
+      "tooth",
+      "sprocket",
+      "cog"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Real gears need involute flank splines with root/tip arcs and a circular pattern, never bare concentric circles.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Brackets And Mounts Captions",
+    "summary": "33881 Omni-CAD captions describe brackets and mounts. Example: Generate a CAD model with a long, slender, cylindrical shaft that tapers slightly towards the top. The shaft is connected to a circular base with a hollow center, resembling a washer or a flange. The overall design is si",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "bracket_mount"
+    ],
+    "keywords": [
+      "bracket",
+      "mount",
+      "flange",
+      "support",
+      "base"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "L/U profiles as closed polylines, one extrude, holes cut after; fillet edges via qEdgeTopologyFilter.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Patterned And Symmetric Features Captions",
+    "summary": "116083 Omni-CAD captions describe patterned and symmetric features. Example: Generate a CAD model with a rectangular box featuring a series of evenly spaced, parallel slits on its sides, and two protruding handles on opposite sides.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "pattern_symmetric"
+    ],
+    "keywords": [
+      "pattern",
+      "symmetric",
+      "spaced",
+      "array",
+      "repeated",
+      "circular"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Place repeated features with a for-loop over trig positions in ONE sketch; string ids use the ~ operator.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Boxes And Prisms Captions",
+    "summary": "181496 Omni-CAD captions describe boxes and prisms. Example: Generate a CAD model with a three-dimensional rectangular prism featuring a hollowed-out section on one side. The prism has a uniform gray color and a smooth surface, with the hollowed-out section creating an open space ",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "box_prism"
+    ],
+    "keywords": [
+      "box",
+      "cube",
+      "block",
+      "prism",
+      "rectangular",
+      "slab"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "skRectangle + opExtrude; hollow variants shell afterwards.",
+      "Derived from the full Omni-CAD caption corpus before archive removal."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "DeepCAD Operation Frequency Profile",
+    "summary": "Sampled 3000 DeepCAD models: 5458 sketches, 5091 extrudes, 0 revolves, 705 cut operations; curves — 65090 lines, 15484 arcs, 12308 circles, 0 splines. 1477 models used multiple sketches.",
+    "tags": [
+      "dataset",
+      "deepcad",
+      "operations"
+    ],
+    "keywords": [
+      "extrude",
+      "sketch",
+      "cut",
+      "profile",
+      "prismatic",
+      "plate",
+      "bracket"
+    ],
+    "parameter_hints": [
+      "sketchCount",
+      "extrudeCount",
+      "cutRatio"
+    ],
+    "modeling_notes": [
+      "Most real CAD models are 1-3 solved sketches each consumed by an extrude; cuts are common, so plan opBoolean SUBTRACTION for holes and pockets.",
+      "Lines and circles dominate profiles; arcs and splines appear in curved/organic minorities."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
   }
 ]

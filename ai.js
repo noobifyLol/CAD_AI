@@ -122,6 +122,7 @@ const PROJECT_ROOT = fileURLToPath(new URL(".", import.meta.url));
 const FS_EXAMPLES_DIR = join(PROJECT_ROOT, "data", "fs_examples");
 const SOURCE_KNOWLEDGE_PATH = join(PROJECT_ROOT, "data", "sourceKnowledge.new.json");
 const DATASET_SUMMARY_PATH = join(PROJECT_ROOT, "data", "cadDatasetSummaries.json");
+const CAPTION_PAIRS_PATH = join(PROJECT_ROOT, "data", "captionGeometryPairs.json");
 const LOCAL_OMNI_SUMMARY_PATHS = [
   join(PROJECT_ROOT, "docs", "research_summaries", "cad_mllm_and_omni_cad.md"),
   join(PROJECT_ROOT, "docs", "research_summaries", "local_omni_cad_dataset.md"),
@@ -156,6 +157,7 @@ let cachedFsExampleLibrary = null;
 let cachedOmniSummaryText = null;
 let cachedSourceKnowledgeRows = null;
 let cachedDatasetSummaryRows = null;
+let cachedCaptionPairRows = null;
 
 function splitEnvList(rawValue) {
   return String(rawValue || "")
@@ -255,18 +257,70 @@ function loadFsExampleLibrary() {
     return cachedFsExampleLibrary;
   }
 
+  const manifest = {};
+  const manifestPath = join(FS_EXAMPLES_DIR, "manifest.json");
+  if (existsSync(manifestPath)) {
+    try {
+      for (const entry of JSON.parse(readFileSync(manifestPath, "utf8")).examples || []) {
+        if (entry?.file) manifest[entry.file] = entry;
+      }
+    } catch (err) {
+      console.warn(`[AI] Could not parse fs_examples manifest: ${err.message}`);
+    }
+  }
+
   cachedFsExampleLibrary = readdirSync(FS_EXAMPLES_DIR)
     .filter(fileName => fileName.endsWith(".fs"))
     .map(fileName => {
       const fullPath = join(FS_EXAMPLES_DIR, fileName);
+      const meta = manifest[fileName] || {};
       return {
         id: basename(fileName, ".fs"),
         fileName,
+        title: meta.title || basename(fileName, ".fs"),
+        keywords: Array.isArray(meta.keywords) && meta.keywords.length
+          ? meta.keywords.map(keyword => String(keyword).toLowerCase())
+          : basename(fileName, ".fs").split(/[_-]+/),
+        lesson: meta.lesson || "",
         content: readFileSync(fullPath, "utf8"),
       };
     });
 
   return cachedFsExampleLibrary;
+}
+
+// Pick the compile-verified example(s) whose keywords best match the prompt.
+// These are injected as few-shot grounding so the model sees real, validated
+// FeatureScript for the requested kind of geometry, not just prose rules.
+function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1) {
+  const text = `${String(prompt || "").toLowerCase()} ${String(dims.shape || "").toLowerCase().replace(/_/g, " ")}`;
+  const scored = loadFsExampleLibrary()
+    .map(example => {
+      let score = 0;
+      for (const keyword of example.keywords) {
+        if (!keyword) continue;
+        if (keyword.includes(" ")) {
+          if (text.includes(keyword)) score += 3;
+        } else if (new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)) {
+          score += 1;
+        }
+      }
+      return { example, score };
+    })
+    .filter(entry => entry.score >= 1)
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, Math.max(1, limit)).map(entry => entry.example);
+}
+
+function buildFsExamplePromptBlock(prompt, dims, { limit = 1, maxChars = 2800 } = {}) {
+  if (dims?.shape === "GEAR_SPUR") return ""; // gears carry their own validated template
+  const examples = selectFsExamplesForPrompt(prompt, dims, limit);
+  if (!examples.length) return "";
+  return examples.map(example => [
+    `COMPILE_VERIFIED_EXAMPLE (${example.title})${example.lesson ? ` — ${example.lesson}` : ""}:`,
+    compactFeaturePattern(example.content, maxChars),
+    "Adapt this example's structure, API usage, and operation order to the user request. Do not copy it verbatim — rename the feature, adjust parameters, and build the geometry the user asked for.",
+  ].join("\n")).join("\n\n");
 }
 
 function loadLocalOmniSummaryText() {
@@ -281,11 +335,14 @@ function loadLocalOmniSummaryText() {
 function loadJsonRows(filePath, cacheKey) {
   if (cacheKey === "source" && cachedSourceKnowledgeRows) return cachedSourceKnowledgeRows;
   if (cacheKey === "dataset" && cachedDatasetSummaryRows) return cachedDatasetSummaryRows;
-  if (!existsSync(filePath)) {
-    if (cacheKey === "source") cachedSourceKnowledgeRows = [];
-    if (cacheKey === "dataset") cachedDatasetSummaryRows = [];
-    return [];
-  }
+  if (cacheKey === "captionPairs" && cachedCaptionPairRows) return cachedCaptionPairRows;
+  const setCache = rows => {
+    if (cacheKey === "source") cachedSourceKnowledgeRows = rows;
+    if (cacheKey === "dataset") cachedDatasetSummaryRows = rows;
+    if (cacheKey === "captionPairs") cachedCaptionPairRows = rows;
+    return rows;
+  };
+  if (!existsSync(filePath)) return setCache([]);
 
   try {
     const parsed = JSON.parse(readFileSync(filePath, "utf8"));
@@ -294,14 +351,10 @@ function loadJsonRows(filePath, cacheKey) {
       : Array.isArray(parsed?.rows)
         ? parsed.rows
         : [];
-    if (cacheKey === "source") cachedSourceKnowledgeRows = rows;
-    if (cacheKey === "dataset") cachedDatasetSummaryRows = rows;
-    return rows;
+    return setCache(rows);
   } catch (err) {
     console.warn(`[AI] Could not read ${cacheKey} rows from ${filePath}: ${err.message}`);
-    if (cacheKey === "source") cachedSourceKnowledgeRows = [];
-    if (cacheKey === "dataset") cachedDatasetSummaryRows = [];
-    return [];
+    return setCache([]);
   }
 }
 
@@ -311,6 +364,10 @@ function loadSourceKnowledgeRows() {
 
 function loadDatasetSummaryRows() {
   return loadJsonRows(DATASET_SUMMARY_PATH, "dataset");
+}
+
+function loadCaptionPairRows() {
+  return loadJsonRows(CAPTION_PAIRS_PATH, "captionPairs");
 }
 
 export function getModelConfig() {
@@ -449,8 +506,13 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
   const defaultCompletionTokens = options.fullCode ? GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS;
   const requestedCompletionTokens = Number(options.maxCompletionTokens || defaultCompletionTokens);
   const hardCompletionCeiling = Math.max(GROQ_MAX_COMPLETION_TOKENS, defaultCompletionTokens);
+  // Respect an explicitly smaller request (used when shrinking to fit a TPM limit),
+  // but never go below 1024 for full-code calls.
+  const completionFloor = options.fullCode
+    ? Math.max(1024, Math.min(4096, Number.isFinite(requestedCompletionTokens) ? requestedCompletionTokens : 4096))
+    : 256;
   const maxCompletionTokens = Math.max(
-    options.fullCode ? 4096 : 256,
+    completionFloor,
     Math.min(
       Number.isFinite(requestedCompletionTokens) ? requestedCompletionTokens : defaultCompletionTokens,
       hardCompletionCeiling
@@ -613,26 +675,67 @@ function messagesToPrompt(messages = []) {
   }).join("\n\n");
 }
 
+function nextKeySlot(slot) {
+  const match = /^k(\d+)$/i.exec(String(slot || ""));
+  if (!match) return null;
+  const index = Number(match[1]);
+  return `k${(index % FIXED_KEY_SLOT_SEQUENCE.length) + 1}`;
+}
+
 async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
   const fallbackList = Array.isArray(fallbackModels)
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
   const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
+  const ATTEMPTS_PER_MODEL = 2;
 
   let lastError = null;
   for (const candidate of modelsToTry) {
-    try {
-      const text = await callLLM(messages, candidate, options);
-      if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate} for stage=${options.stage || "generation"}`);
-      return text;
-    } catch (err) {
-      lastError = err;
-      const message = String(err?.message || "");
-      if (/rate limit|tokens per minute|tpm|429/i.test(message) && options.retryOnRateLimit !== false) {
-        const retrySeconds = Number(message.match(/try again in\s+([\d.]+)s/i)?.[1] || 0);
-        const waitMs = Number(options.rateLimitBackoffMs || Math.max(1200, Math.ceil(retrySeconds * 1000) + 500));
-        console.warn(`[AI] Rate limit on stage=${options.stage || "generation"} model=${candidate}; retrying after ${waitMs}ms with next fallback when available.`);
-        await new Promise(resolve => setTimeout(resolve, waitMs));
+    let attemptOptions = { ...options };
+    for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt += 1) {
+      try {
+        const text = await callLLM(messages, candidate, attemptOptions);
+        if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate} for stage=${options.stage || "generation"}`);
+        return text;
+      } catch (err) {
+        lastError = err;
+        const message = String(err?.message || "");
+        const tooLarge = /request too large|reduce your message size/i.test(message);
+        const rateLimited = /rate limit|tokens per minute|tpm|429|rate_limit_exceeded/i.test(message);
+
+        if (tooLarge) {
+          // Groq counts prompt + max_completion_tokens against the TPM limit.
+          // Shrink the completion budget so the request fits instead of abandoning the model.
+          const limit = Number(message.match(/Limit\s+(\d+)/i)?.[1] || 0);
+          const requested = Number(message.match(/Requested\s+(\d+)/i)?.[1] || 0);
+          const currentCompletion = Number(attemptOptions.maxCompletionTokens
+            || (attemptOptions.fullCode ? GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS));
+          const promptTokens = Math.max(0, requested - currentCompletion);
+          const shrunkCompletion = limit - promptTokens - 256;
+          if (limit && requested && shrunkCompletion >= 1024 && shrunkCompletion < currentCompletion) {
+            console.warn(`[AI] Request too large for ${candidate}; shrinking completion tokens ${currentCompletion} -> ${shrunkCompletion} and retrying.`);
+            attemptOptions = { ...attemptOptions, maxCompletionTokens: shrunkCompletion };
+            continue;
+          }
+          console.warn(`[AI] Request cannot fit ${candidate} TPM limit even after shrinking; trying next fallback model.`);
+          break;
+        }
+
+        if (rateLimited && options.retryOnRateLimit !== false) {
+          const retrySeconds = Number(message.match(/try again in\s+([\d.]+)s/i)?.[1] || 0);
+          const waitMs = Number(options.rateLimitBackoffMs || Math.max(1200, Math.ceil(retrySeconds * 1000) + 500));
+          const rotatedSlot = nextKeySlot(attemptOptions.keySlot);
+          if (rotatedSlot) {
+            console.warn(`[AI] Rate limit on stage=${options.stage || "generation"} model=${candidate}; rotating key ${attemptOptions.keySlot} -> ${rotatedSlot}, retrying after ${waitMs}ms.`);
+            attemptOptions = { ...attemptOptions, keySlot: rotatedSlot };
+          } else {
+            console.warn(`[AI] Rate limit on stage=${options.stage || "generation"} model=${candidate}; retrying after ${waitMs}ms.`);
+          }
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+          continue;
+        }
+
+        break;
       }
     }
   }
@@ -1422,10 +1525,10 @@ function buildLearningContextText(learningContext = {}) {
   const notes = Array.isArray(learningContext.notes) ? learningContext.notes : [];
   const knowledge = Array.isArray(learningContext.knowledge) ? learningContext.knowledge : [];
   const featureScriptDocs = Array.isArray(learningContext.featureScriptDocs) ? learningContext.featureScriptDocs : [];
-  const gearReference = USE_VALIDATED_TEMPLATES
-    ? knowledge.find(entry => normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase().includes("fs_example")
-      && /gear/i.test(String(entry.title || "")))
-    : null;
+  // Note: raw fs_example rows from the legacy CSV are excluded below — their code
+  // uses patterns the validator forbids (Default annotations, LENGTH_BOUNDS).
+  // Compile-verified grounding now comes from data/fs_examples via
+  // buildFsExamplePromptBlock, and gears use the validated gear template.
 
   if (notes.length) {
     lines.push("Project-specific guidance from prior runs:");
@@ -1463,11 +1566,7 @@ function buildLearningContextText(learningContext = {}) {
   if (knowledge.length) {
     lines.push("CAD modeling knowledge to apply:");
     const visibleKnowledge = knowledge
-      .filter(entry => {
-        const memoryType = normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase();
-        if (!memoryType.includes("fs_example")) return true;
-        return /gear/i.test(String(entry.title || "")) && /gear/i.test(String(learningContext.prompt || ""));
-      })
+      .filter(entry => !normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase().includes("fs_example"))
       .slice(0, 6);
     visibleKnowledge.forEach((entry, index) => {
       const title = normalizeText(entry.title || `Knowledge ${index + 1}`);
@@ -1479,8 +1578,7 @@ function buildLearningContextText(learningContext = {}) {
       const validationRules = Array.isArray(entry.validation_rules || entry.validationRules) ? (entry.validation_rules || entry.validationRules) : [];
       const memoryType = normalizeText(entry.memory_type || entry.memoryType || "");
       const quality = Number.isFinite(Number(entry.quality_score)) ? Number(entry.quality_score).toFixed(2) : "";
-      const allowPattern = /gear/i.test(String(entry.title || "")) || !normalizeText(entry.memory_type || entry.memoryType || "").toLowerCase().includes("fs_example");
-      const featurePattern = allowPattern ? normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 420) : "";
+      const featurePattern = normalizeText(entry.feature_pattern || entry.featurePattern || "").slice(0, 420);
 
       lines.push(`${index + 1}. ${title}${summary ? ` — ${summary}` : ""}${memoryType || quality ? ` (${[memoryType, quality && `q=${quality}`].filter(Boolean).join(", ")})` : ""}`);
       if (keywords.length) lines.push(`   keywords=${keywords.slice(0, 6).join(", ")}`);
@@ -1490,14 +1588,6 @@ function buildLearningContextText(learningContext = {}) {
       if (failureModes.length) lines.push(`   avoid=${failureModes.slice(0, 2).map(normalizeText).join(" | ")}`);
       if (validationRules.length) lines.push(`   validate=${validationRules.slice(0, 2).map(normalizeText).join(" | ")}`);
     });
-  }
-
-  if (gearReference) {
-    const featurePattern = normalizeText(gearReference.feature_pattern || gearReference.featurePattern || "").slice(0, 520);
-    if (featurePattern) {
-      lines.push("Gear reference pattern:");
-      lines.push(`Use this only as a gear-specific structural reference, not as a generic template: ${featurePattern}`);
-    }
   }
 
   return lines.join("\n").trim();
@@ -1824,6 +1914,88 @@ function hasCompileSanity(code = "") {
     && /export const\s+[A-Za-z_]\w*\s*=/.test(text);
 }
 
+function stripStringsAndLineComments(text = "") {
+  return String(text || "")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/\/\/[^\n]*/g, "");
+}
+
+// ── Truncation recovery ──────────────────────────────────────────────────────
+// Free-tier completions get shrunk to fit TPM limits, so the model sometimes
+// stops mid-file ("half generation"). Instead of discarding those candidates,
+// recover them: pull the code string out of the unterminated JSON, drop the
+// incomplete trailing statement(s), and close every open brace/paren so the
+// file parses. The strict validator still decides whether the result is usable.
+
+function extractCodeFieldFromPartialJson(raw = "") {
+  const source = String(raw || "");
+  const keyMatch = source.match(/"code"\s*:\s*"/);
+  if (!keyMatch) return "";
+  let out = "";
+  let index = keyMatch.index + keyMatch[0].length;
+  while (index < source.length) {
+    const ch = source[index];
+    if (ch === "\\") {
+      const next = source[index + 1];
+      if (next === "n") out += "\n";
+      else if (next === "t") out += "\t";
+      else if (next === "r") out += "";
+      else if (next === '"') out += '"';
+      else if (next === "\\") out += "\\";
+      else if (next === "u") {
+        const hex = source.slice(index + 2, index + 6);
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16));
+          index += 4;
+        }
+      } else if (next !== undefined) {
+        out += next;
+      }
+      index += 2;
+      continue;
+    }
+    if (ch === '"') break; // string closed properly — not truncated after all
+    out += ch;
+    index += 1;
+  }
+  return out.trim();
+}
+
+function autoCloseTruncatedFeatureScript(code = "") {
+  let text = String(code || "").replace(/\r/g, "").trim();
+  if (!/FeatureScript\s+\d+\s*;/.test(text) || !/defineFeature\s*\(/.test(text)) return "";
+  if (hasClosedDefineFeature(text) && hasBalancedTokens(stripStringsAndLineComments(text))) return text;
+
+  // Drop trailing lines until the file ends on a complete statement or block
+  // boundary, so a half-written operation call is removed instead of closed
+  // into a nonsense empty call.
+  const lines = text.split("\n");
+  let dropped = 0;
+  while (lines.length > 5 && dropped < 40) {
+    const last = lines[lines.length - 1].trim();
+    if (last !== "" && /[;}]$/.test(last)) break;
+    lines.pop();
+    dropped += 1;
+  }
+  text = lines.join("\n");
+
+  // Close whatever is still open, innermost first.
+  const stack = [];
+  for (const ch of stripStringsAndLineComments(text)) {
+    if (ch === "{" || ch === "(" || ch === "[") stack.push(ch);
+    else if (ch === "}" && stack[stack.length - 1] === "{") stack.pop();
+    else if (ch === ")" && stack[stack.length - 1] === "(") stack.pop();
+    else if (ch === "]" && stack[stack.length - 1] === "[") stack.pop();
+  }
+  const closers = { "{": "}", "(": ")", "[": "]" };
+  let suffix = "";
+  while (stack.length) suffix += closers[stack.pop()];
+
+  let completed = suffix ? `${text}\n${suffix}` : text;
+  if (!/;\s*$/.test(completed)) completed += ";";
+  return hasClosedDefineFeature(completed) ? completed : "";
+}
+
 function hasPreconditionExposure(code = "") {
   return /precondition/.test(code) && /(isLength|isInteger|\sboolean;|\sis Query;)/.test(code);
 }
@@ -2092,12 +2264,10 @@ function buildValidatedTemplateDirective(prompt = "", dims = {}) {
 
   const lines = [
     "VALIDATED_TEMPLATE_ENFORCEMENT: enabled and mandatory.",
-    "Use the validated structural template as the rigid baseline for this generation.",
+    "Use the validated structural template from the system contract as the rigid baseline for this generation.",
     "The final code must preserve the same outer file shape: FeatureScript version, geometry import, annotation block, exactly one export const defineFeature, precondition block, and feature body block.",
     "Only change feature names, parameter names, bounds, and the internal feature-body operations needed to satisfy the user request.",
     "Do not output a shortened snippet, alternate syntax, diagnostics, markdown, ellipses, or placeholder comments.",
-    "STANDARD_VALIDATED_TEMPLATE:",
-    STRICT_FEATURESCRIPT_TEMPLATE,
   ];
 
   const shapeTemplate = buildTemplateExampleForDims(dims);
@@ -2217,7 +2387,11 @@ function _coreFeatureScriptSanitize(code) {
     .replace(/\bskSpline\s*\(/g, "skFitSpline(")
     .replace(/\bskPolygon\s*\(/g, "skRegularPolygon(")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, { (inch) : [0.01, 1.0, 100.0] } as LengthBoundSpec);')
-    .replace(/isLength\((definition\.\w+),\s*(\{[\s\S]*?\})\s*\);/g, 'isLength($1, $2 as LengthBoundSpec);')
+    // Add the LengthBoundSpec cast only to a single-line bounds map that lacks it.
+    // The map must not contain nested braces or newlines — a multiline wildcard here
+    // previously sprawled across the file and stamped "as LengthBoundSpec" onto
+    // unrelated evPlane/newSketchOnPlane/sketch calls, breaking compilation.
+    .replace(/isLength\((definition\.\w+),\s*(\{[^{}\n]*\})\s*\);/g, 'isLength($1, $2 as LengthBoundSpec);')
     // Quantity defaults belong in the bound spec for numeric quantity parameters.
     .replace(/(annotation\s*\{\s*"Name"\s*:\s*"[^"]+"\s*),\s*"Default"\s*:\s*"[-0-9.]+"\s*\}(\s*\n\s*isInteger\()/g, '$1 }$2')
     .replace(/isInteger\((definition\.\w+),\s*\{\s*\(unitless\)\s*:\s*\[([^\]]+)\]\s*\}\s*\);/g, 'isInteger($1, { (unitless) : [$2] } as IntegerBoundSpec);')
@@ -5209,6 +5383,8 @@ ${JSON.stringify({
 
 ${buildValidatedTemplateDirective(prompt, dims)}
 
+${buildFsExamplePromptBlock(prompt, dims)}
+
 INSTRUCTIONS:
 - Generate complete, compile-safe FeatureScript 2931 code for the requested shape
 - Use deep thinking to analyze the request and determine the best approach
@@ -5269,6 +5445,7 @@ function buildChatbotRetrievalBundle(prompt, dims, learningContext = {}) {
     [
       ...knowledgeRows.filter(row => String(row.memory_type || "").includes("dataset")),
       ...loadDatasetSummaryRows(),
+      ...loadCaptionPairRows(),
     ],
     promptKeywords,
     promptKeywords,
@@ -5326,7 +5503,6 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     i2: "Previous attempt had validation errors — prioritize compile-safe FeatureScript API usage and conservative query construction. Fix ALL errors listed below.",
     i3: "Two previous attempts had errors — simplify the geometry but keep it compile-safe and editable. Every sketch must be solved, every param must be used.",
     i4: "Final attempt — return the most conservative compile-safe version you can. Prefer simple geometry over complex geometry that fails validation.",
-    ...priorIssuesLines,
   };
   const priorIssuesLines = (Array.isArray(priorIssues) && priorIssues.length > 0)
     ? [
@@ -5337,10 +5513,13 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     : [];
 
 
+  const fsExampleBlock = buildFsExamplePromptBlock(prompt, dims);
+
   return [
     `USER REQUEST: ${prompt}`,
     `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
     buildValidatedTemplateDirective(prompt, dims),
+    ...(fsExampleBlock ? [fsExampleBlock] : []),
     `CANDIDATE MODE: ${candidateId}`,
     `STYLE HINT: ${styleHints[candidateId] || styleHints.c1}`,
     ...priorIssuesLines,
@@ -5371,12 +5550,33 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
 function parseFeatureScriptJson(raw, dims) {
   const parsed = tryParseJson(raw, null);
   if (parsed?.code) {
+    // Even valid JSON can carry a truncated code string — auto-close it too.
+    const code = hasClosedDefineFeature(parsed.code) ? parsed.code : (autoCloseTruncatedFeatureScript(parsed.code) || parsed.code);
     return {
       featureName: parsed.featureName || dims.featureName,
       featureLabel: parsed.featureLabel || dims.featureLabel,
       reasoning: parsed.reasoning || "",
-      code: parsed.code,
+      code,
+      recoveredFromTruncation: code !== parsed.code,
     };
+  }
+
+  // JSON parse failed — usually a completion cut off mid-string. Pull the code
+  // field out of the partial JSON and close the file instead of returning null.
+  const partialCode = extractCodeFieldFromPartialJson(raw);
+  if (partialCode) {
+    const completed = autoCloseTruncatedFeatureScript(partialCode);
+    if (completed) {
+      const nameMatch = String(raw || "").match(/"featureName"\s*:\s*"([^"]+)"/);
+      const labelMatch = String(raw || "").match(/"featureLabel"\s*:\s*"([^"]+)"/);
+      return {
+        featureName: nameMatch?.[1] || dims.featureName,
+        featureLabel: labelMatch?.[1] || dims.featureLabel,
+        reasoning: "Recovered from a truncated model response: incomplete trailing statements were dropped and the file was auto-closed.",
+        code: completed,
+        recoveredFromTruncation: true,
+      };
+    }
   }
 
   const stripped = String(raw || "")
@@ -5384,12 +5584,16 @@ function parseFeatureScriptJson(raw, dims) {
     .replace(/```/g, "")
     .trim();
   if (/FeatureScript\s+2931\s*;/.test(stripped)) {
-    return {
-      featureName: dims.featureName,
-      featureLabel: dims.featureLabel,
-      reasoning: "The model returned raw FeatureScript instead of JSON, so it was recovered directly.",
-      code: stripped,
-    };
+    const code = hasClosedDefineFeature(stripped) ? stripped : autoCloseTruncatedFeatureScript(stripped);
+    if (code) {
+      return {
+        featureName: dims.featureName,
+        featureLabel: dims.featureLabel,
+        reasoning: "The model returned raw FeatureScript instead of JSON, so it was recovered directly.",
+        code,
+        recoveredFromTruncation: code !== stripped,
+      };
+    }
   }
 
   return null;
@@ -5526,6 +5730,10 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
       const blockingMessages = strict.blockingIssues.slice(0, 8).map(i => ({ message: i.message }));
       const fatalMessages = strict.fatalIssues.slice(0, 4).map(i => ({ message: i.message }));
       priorIssues = [...blockingMessages, ...fatalMessages];
+      if (parsed.recoveredFromTruncation) {
+        console.warn(`[AI] GTF iteration ${iteration + 1}: response was truncated; auto-closed the file before validation.`);
+        priorIssues.push({ message: "Previous response was cut off by the completion token limit. Produce a more COMPACT file: reasoning under 2 sentences, fewer sketch entities, no redundant comments — while still building the requested geometry." });
+      }
       console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: ${priorIssues.length} issue(s) fed back → next prompt`);
     } catch (reason) {
       const msg = reason?.message || String(reason);
@@ -6202,8 +6410,19 @@ function validateFeatureScript(code) {
     if (/\bqSketchRegion\s*\(\s*(sk|sketch\w*)\s*[),]/.test(line)) {
       addIssue(lineNo, "qSketchRegion expects the sketch id expression like id + \"sketch1\", not the sketch variable.", line);
     }
-    if (/\bqSketchEntity\s*\(|\bqCreatedBy\s*\([^)]*(sk|sketch\w*)/.test(line)) {
-      addIssue(lineNo, "Sketch queries are not valid opRevolve axes; construct a Line value instead.", line);
+    if (/"axis"\s*:\s*(qCreatedBy|qSketchEntity|qSketchRegion)\s*\(/.test(line)) {
+      addIssue(lineNo, "Queries are not valid opRevolve axes; construct a Line value such as line(skPlane.origin, cross(skPlane.normal, skPlane.x)).", line);
+    }
+    if (/\bas\s+(LengthBoundSpec|IntegerBoundSpec|AngleBoundSpec|RealBoundSpec)\b/.test(line)
+        && !/\b(isLength|isInteger|isAngle|isReal)\s*\(/.test(line)) {
+      addIssue(lineNo, "BoundSpec casts belong only on isLength/isInteger precondition bounds; remove this 'as ...BoundSpec' cast.", line);
+    }
+    if (/"(radius|endDepth|depth|thickness|width|height|distance|offset|wallThickness)"\s*:\s*[^,\n]*\/\s*(inch|millimeter|centimeter|meter)\b/.test(line)
+        && !/\bvector\s*\(/.test(line)) {
+      addIssue(lineNo, "Dividing by inch strips units, but this map key expects a Length value — pass the definition parameter directly.", line);
+    }
+    if (/"(center|start|end|firstCorner|secondCorner)"\s*:\s*vector\s*\(\s*[-\d.,\s]+\)\s*[,}]/.test(line)) {
+      addIssue(lineNo, "Numeric sketch point vectors need units: write vector(x, y) * inch.", line);
     }
     if (/\bopCylinder\s*\(/.test(line)) {
       addIssue(lineNo, "Unsupported opCylinder call — replace with fCylinder(...) or sketch + opExtrude.", line);
@@ -6234,6 +6453,16 @@ function validateFeatureScript(code) {
   const geometryImportMatches = text.match(/^\s*import\s*\(\s*path\s*:\s*"onshape\/std\/geometry\.fs"\s*,\s*version\s*:\s*"2931\.0"\s*\)\s*;/gm) || [];
   if (geometryImportMatches.length > 1) {
     addIssue(0, "Duplicate geometry.fs imports detected. Keep exactly one top-level import.", "(global)");
+  }
+
+  const strippedForBalance = text.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/\/\/[^\n]*/g, "");
+  if (!hasBalancedTokens(strippedForBalance)) {
+    addIssue(0, "Unbalanced braces, parentheses, or brackets detected — the file will not parse in Onshape.", "(global)");
+  }
+
+  const holeExtrudeIds = [...text.matchAll(/opExtrude\s*\(\s*context\s*,\s*id\s*\+\s*"([^"]*(?:hole|bore|slot|pocket|cutout)[^"]*)"/gi)].map(match => match[1]);
+  if (holeExtrudeIds.length && !/BooleanOperationType\.SUBTRACTION/.test(text)) {
+    addIssue(0, `Extrude id(s) ${holeExtrudeIds.join(", ")} look like holes/cuts, but there is no opBoolean SUBTRACTION. Extruding a hole profile creates a new solid — subtract it from the body with opBoolean, or put the hole circle in the same sketch as the outer profile.`, "(global)");
   }
 
   if (/\bopFillet\s*\([\s\S]*?"entities"\s*:\s*qSketchRegion\s*\(/.test(text)) {
@@ -6316,6 +6545,15 @@ function validateFeatureScript(code) {
   if (blocks.featureStart !== -1) {
     if (!blocks.preconditionText || blocks.bodyOpen === -1 || blocks.bodyClose === -1) {
       addIssue(0, "FeatureScript defineFeature must have both precondition and feature body blocks.", "(global)");
+    }
+    if (blocks.preconditionText && blocks.bodyText) {
+      const declaredParams = new Set([...blocks.preconditionText.matchAll(/definition\.(\w+)/g)].map(match => match[1]));
+      const usedParams = new Set([...blocks.bodyText.matchAll(/definition\.(\w+)/g)].map(match => match[1]));
+      for (const param of usedParams) {
+        if (!declaredParams.has(param)) {
+          addIssue(0, `definition.${param} is used in the feature body but never declared in the precondition — declare it with isLength/isInteger/boolean/Query.`, "(global)");
+        }
+      }
     }
     const preconditionExecutable = blocks.preconditionText.match(/\b(var|const|for|while|if|newSketch(?:OnPlane)?|sk[A-Z]\w*|op[A-Z]\w*|fCylinder|evPlane|qSketchRegion)\b/);
     if (preconditionExecutable) {

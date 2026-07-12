@@ -1,0 +1,81 @@
+{
+  "examples": [
+    {
+      "file": "plate_with_holes.fs",
+      "title": "Plate With Mounting Holes",
+      "keywords": ["plate", "bracket", "mount", "mounting", "hole", "holes", "bolt", "drill", "panel", "base", "rectangular", "screw", "tab"],
+      "operations": ["opExtrude", "opBoolean SUBTRACTION"],
+      "lesson": "Holes are cut by extruding the hole profile and boolean-subtracting it from the body."
+    },
+    {
+      "file": "cylinder_with_bore.fs",
+      "title": "Cylinder With Bore",
+      "keywords": ["cylinder", "tube", "bushing", "washer", "spacer", "ring", "bore", "sleeve", "standoff", "pipe", "hollow", "shaft", "collar", "magnet"],
+      "operations": ["opExtrude"],
+      "lesson": "Concentric circles in one sketch extrude directly into a tube, no boolean needed."
+    },
+    {
+      "file": "open_box_shell.fs",
+      "title": "Open Top Box",
+      "keywords": ["box", "container", "tray", "bin", "enclosure", "case", "hollow", "shell", "open", "storage", "tub"],
+      "operations": ["opExtrude", "opShell"],
+      "lesson": "Shell a solid with a negative thickness and the end cap face to open the top."
+    },
+    {
+      "file": "cup_with_handle.fs",
+      "title": "Cup With Handle",
+      "keywords": ["cup", "mug", "vessel", "glass", "tumbler", "handle", "drink", "coffee", "tea", "bowl"],
+      "operations": ["opExtrude", "opShell", "opBoolean UNION"],
+      "lesson": "Shell the cup from its top cap, build the handle as a ring on a perpendicular plane, union it on."
+    },
+    {
+      "file": "revolved_vase.fs",
+      "title": "Revolved Vase",
+      "keywords": ["vase", "bottle", "revolve", "revolved", "organic", "carrot", "taper", "tapered", "cone", "urn", "curved", "profile", "spline"],
+      "operations": ["opRevolve"],
+      "lesson": "Closed profile = axis line + spline + closing lines; the revolve axis is a Line value, never a query."
+    },
+    {
+      "file": "lofted_transition.fs",
+      "title": "Square To Round Transition",
+      "keywords": ["loft", "lofted", "funnel", "hopper", "transition", "duct", "adapter", "taper", "square to round", "reducer"],
+      "operations": ["opLoft"],
+      "lesson": "Each loft profile is its own solved sketch on its own plane; opLoft takes profileSubqueries."
+    },
+    {
+      "file": "swept_tube.fs",
+      "title": "Swept Curved Tube",
+      "keywords": ["sweep", "swept", "pipe", "hose", "wire", "curved", "bend", "bent", "conduit", "snake", "path", "hook"],
+      "operations": ["opSweep"],
+      "lesson": "Sweep needs an open path wire and a profile sketch on a plane perpendicular to the path start."
+    },
+    {
+      "file": "l_bracket_fillet_chamfer.fs",
+      "title": "L Bracket With Fillet",
+      "keywords": ["bracket", "angle", "corner", "l-bracket", "l bracket", "fillet", "filleted", "rounded", "shelf", "support", "gusset"],
+      "operations": ["opExtrude", "opFillet"],
+      "lesson": "Closed polyline profile + one extrude; fillet edges via qEdgeTopologyFilter over the body edges."
+    },
+    {
+      "file": "bolt_circle_flange.fs",
+      "title": "Bolt Circle Flange",
+      "keywords": ["flange", "bolt circle", "hub", "coupling", "disc", "disk", "wheel", "pattern", "circular", "holes", "gasket", "pulley"],
+      "operations": ["opExtrude", "for loop"],
+      "lesson": "Loop with var + trig places bolt holes in the SAME sketch; string ids use the ~ operator."
+    },
+    {
+      "file": "multi_body_union.fs",
+      "title": "Base With Corner Posts",
+      "keywords": ["assembly", "posts", "standoff", "boss", "robot", "body", "multi", "union", "combined", "frame", "legs", "table", "chair", "mech"],
+      "operations": ["opExtrude", "opBoolean UNION"],
+      "lesson": "Build each component as its own extrude, position via offset planes, union into one body."
+    },
+    {
+      "file": "chamfered_shaft.fs",
+      "title": "Stepped Shaft With Chamfer",
+      "keywords": ["shaft", "axle", "stepped", "pin", "rod", "spindle", "chamfer", "chamfered", "dowel", "peg", "stud"],
+      "operations": ["opExtrude", "opBoolean UNION", "opChamfer"],
+      "lesson": "Stack sections on offset planes, union them, then chamfer the body edges."
+    }
+  ]
+}
