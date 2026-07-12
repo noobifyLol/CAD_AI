@@ -293,17 +293,23 @@ function loadFsExampleLibrary() {
 // These are injected as few-shot grounding so the model sees real, validated
 // FeatureScript for the requested kind of geometry, not just prose rules.
 function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1) {
-  const text = `${String(prompt || "").toLowerCase()} ${String(dims.shape || "").toLowerCase().replace(/_/g, " ")}`;
+  // Words the user actually typed outweigh words derived from the inferred
+  // shape, so "create a pen" picks the pen example over a generic cylinder.
+  const promptText = String(prompt || "").toLowerCase();
+  const shapeText = String(dims.shape || "").toLowerCase().replace(/_/g, " ");
   const scored = loadFsExampleLibrary()
     .map(example => {
       let score = 0;
       for (const keyword of example.keywords) {
         if (!keyword) continue;
         if (keyword.includes(" ")) {
-          if (text.includes(keyword)) score += 3;
-        } else if (new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)) {
-          score += 1;
+          if (promptText.includes(keyword)) score += 4;
+          else if (shapeText.includes(keyword)) score += 1;
+          continue;
         }
+        const wordPattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+        if (wordPattern.test(promptText)) score += 2;
+        else if (wordPattern.test(shapeText)) score += 1;
       }
       return { example, score };
     })
@@ -645,7 +651,7 @@ function inferShapeFromPrompt(prompt = "") {
     ["FLANGE", /\b(flange|bolt circle|bolt hole|hub|mount|coupling flange)\b/],
     ["LINKAGE", /\b(linkage|linkage arm|connecting rod|coupler|arm|lever|clevis|tie rod|rod end)\b/],
     ["WASHER", /\b(washer|ring magnet|ring|shim|spacer disk)\b/],
-    ["CYLINDER", /\b(wheel|roller|cylinder|rod|shaft|pipe|tube|dowel|pin|post|standoff|magnet)\b/],
+    ["CYLINDER", /\b(wheel|roller|cylinder|rod|shaft|pipe|tube|dowel|pin|post|standoff|magnet|pen|pencil|marker|stylus)\b/],
     ["BOX", /\b(box|block|cube|rectangular|bar magnet)\b/],
     ["CONE", /\b(carrot|cone|frustum|tapered|nozzle|funnel)\b/],
     ["POLYGON", /\b(hex|hexagon|triangle|polygon|octagon|pentagon|n-sided)\b/],
@@ -2935,7 +2941,7 @@ function buildThinkingTrace(prompt, d, meta = {}) {
   lines.push(`  Teeth: ${d.numTeeth}  Pitch radius: ${d.radiusInches.toFixed(4)} in  Module: ${m.toFixed(4)} in`);
   lines.push(`  Tip radius: ${(d.radiusInches + m).toFixed(4)} in  Root radius: ${Math.max(d.radiusInches - 1.35*m, d.radiusInches*0.5).toFixed(4)} in`);
   lines.push(`  Pressure angle: 20deg standard  |  ${d.numTeeth * 4} sketch entities`);
-  lines.push(`  MANDATORY GEAR BUILD: Use involute flank sampling (skFitSpline with involute points computed from base circle), root arc (skArc), tip arc (skArc), circular pattern for all teeth (opPatternCircular), boolean union of tooth + hub bodies, and bore cut.`);
+  lines.push(`  MANDATORY GEAR BUILD: Use involute flank sampling (skFitSpline with involute points computed from base circle), root arc (skArc), tip arc (skArc), circular pattern for all teeth via opPattern with rotationAround transforms (opPatternCircular does NOT exist), boolean union of tooth + hub bodies, and bore cut.`);
   lines.push(`  NEVER use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.`);
   } else if (d.shape === "HITCH_PEG") {
     lines.push(`Compound shape: cylindrical shaft + hemispherical dome`);
@@ -3372,11 +3378,33 @@ opChamfer — bevels selected edges:
       "width"     : definition.chamferWidth
   });
 
+opPattern — circular or linear arrays of bodies/faces. There is NO opPatternCircular, opPatternLinear,
+opCircularPattern, or opLinearPattern — those functions DO NOT EXIST. Build parallel arrays of
+transforms and instanceNames. The ORIGINAL body is preserved, so loop from 1 to count-1:
+  // CIRCULAR pattern around the sketch normal:
+  var patternAxis = line(skPlane.origin, skPlane.normal);
+  var transforms = [];
+  var instanceNames = [];
+  for (var i = 1; i < definition.instanceCount; i += 1)
+  {
+      transforms = append(transforms, rotationAround(patternAxis, (i * 2 * PI / definition.instanceCount) * radian));
+      instanceNames = append(instanceNames, "inst" ~ i);
+  }
+  opPattern(context, id + "pattern1", {
+      "entities" : qCreatedBy(id + "boss1", EntityType.BODY),
+      "transforms" : transforms,
+      "instanceNames" : instanceNames
+  });
+  // LINEAR pattern: replace the transform line with a translation along a direction:
+  //   transforms = append(transforms, transform(skPlane.x * (definition.spacing * i)));
+  // Instance names may use only letters, numbers, +, -, /, _ — build them with the ~ operator.
+  // After patterning, union everything: "tools" : qUnion([qCreatedBy(id + "boss1", EntityType.BODY), qCreatedBy(id + "pattern1", EntityType.BODY)]).
+
 Intermediate plane construction — how to make a plane at an offset or angle:
   var offsetPlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal);
   var sidePlane   = plane(skPlane.origin, skPlane.x);  // perpendicular to sketch plane
 
-═══ GEAR GENERATION RULES (MUST USE INVOLUTE PROFILE) ═══\r\n-- For GEAR_SPUR shapes, you MUST use the full involute flank sampling approach:\r\n-- 1. Compute base circle, pitch circle, root circle, and tip circle radii from:\r\n--    - pitchRadius, pressureAngle, module (module = 2*pitchRadius / numTeeth)\r\n--    - tipRadius = pitchRadius + module\r\n--    - rootRadius = max(pitchRadius - 1.35*module, pitchRadius*0.5)\r\n--    - baseRadius = pitchRadius * cos(pressureAngle)\r\n-- 2. Draw the tooth profile using skArc for root arc, skArc for tip arc, and skFitSpline for involute flank\r\n-- 3. Create ONE tooth profile sketch, then use opPatternCircular with the body as target and axis for pattern\r\n-- 4. Create the hub/body as a cylinder (skCircle + opExtrude) with bore hole\r\n-- 5. UNION the tooth body with the hub body using opBoolean\r\n-- DO NOT use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.\r\n-- DO NOT use skCircle alone for root/tip without involute spline in between.\r\n-- Every gear must have: involute flank spline, root arc, tip arc, circular pattern, boolean union, bore cut.\r\n\r\n═══ MECH / MULTI-BODY STRATEGY ═══
+═══ GEAR GENERATION RULES (MUST USE INVOLUTE PROFILE) ═══\r\n-- For GEAR_SPUR shapes, you MUST use the full involute flank sampling approach:\r\n-- 1. Compute base circle, pitch circle, root circle, and tip circle radii from:\r\n--    - pitchRadius, pressureAngle, module (module = 2*pitchRadius / numTeeth)\r\n--    - tipRadius = pitchRadius + module\r\n--    - rootRadius = max(pitchRadius - 1.35*module, pitchRadius*0.5)\r\n--    - baseRadius = pitchRadius * cos(pressureAngle)\r\n-- 2. Draw the tooth profile using skArc for root arc, skArc for tip arc, and skFitSpline for involute flank\r\n-- 3. Create ONE tooth profile sketch, then pattern the tooth body with opPattern using rotationAround transforms and instanceNames (opPatternCircular does NOT exist)\r\n-- 4. Create the hub/body as a cylinder (skCircle + opExtrude) with bore hole\r\n-- 5. UNION the tooth body with the hub body using opBoolean\r\n-- DO NOT use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.\r\n-- DO NOT use skCircle alone for root/tip without involute spline in between.\r\n-- Every gear must have: involute flank spline, root arc, tip arc, circular pattern, boolean union, bore cut.\r\n\r\n═══ MECH / MULTI-BODY STRATEGY ═══
 Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
 Build each section as its own opExtrude call or fCylinder primitive
 for cylindrical parts), then union adjacent bodies:
@@ -3434,10 +3462,23 @@ Use a revolved spline profile for any organic tapered shape:
 -- When shape is GEAR_SPUR, you MUST produce a complete involute spur gear with:
    1. Base circle, pitch circle, root circle, tip circle radii from pressure angle + module
    2. One tooth profile: skArc (root) + skFitSpline involute flank + skArc (tip)
-   3. Circular pattern of the tooth body (opPatternCircular)
+   3. Circular pattern of the tooth body via opPattern + rotationAround transforms (opPatternCircular does NOT exist)
    4. Hub/cylinder body with bore — UNIONed with tooth body
    5. Every dimension exposed in precondition for user editing
 -- DO NOT use concentric circles alone — they produce a non-compiled placeholder.
+═══ EVERYDAY OBJECT DECOMPOSITION (HARD RULE) ═══
+A named real-world object must NEVER be modeled as one stretched primitive.
+Decompose it into its recognizable components and build each one:
+- pen/marker = barrel cylinder + lofted tapered tip + thin pocket clip (3 features minimum)
+- mug/cup = shelled cylinder wall + ring handle unioned on
+- bottle/vase = revolved profile with belly and neck, not a plain cylinder
+- screw/bolt = shaft + hex or round head + chamfered end
+- table/chair = top slab + patterned or positioned legs
+- wheel = rim ring + hub + patterned spokes
+Ask yourself: "would a person recognize this object from its silhouette?"
+If the answer is no, add the missing components. A box or bare cylinder is only
+acceptable when the prompt itself asks for a box, block, plate, or plain cylinder.
+
 ═══ GOAL ═══
 - Build exactly what the user asked for, with sensible parametric defaults.
 - Every parameter must be editable in the Onshape feature dialog.
@@ -6430,6 +6471,9 @@ function validateFeatureScript(code) {
     if (/\b(opCut|opBore|opPlateHoles)\s*\(/.test(line)) {
       addIssue(lineNo, "Unsupported helper operation detected. Use standard FeatureScript sketch, extrude, boolean, or query APIs instead.", line);
     }
+    if (/\bop(PatternCircular|PatternLinear|CircularPattern|LinearPattern|Mirror)\s*\(/.test(line)) {
+      addIssue(lineNo, "This pattern function does not exist in FeatureScript. Use opPattern with parallel transforms (rotationAround for circular, transform(vector) for linear) and instanceNames arrays.", line);
+    }
     if (/\b(qEdges|qEdgeAll|qBodyFaces|qAllEdges)\s*\(/.test(line)) {
       addIssue(lineNo, "Unsupported edge/body helper detected. Use qOwnedByBody(...) and qEdgeTopologyFilter(...) patterns instead.", line);
     }
@@ -6463,6 +6507,15 @@ function validateFeatureScript(code) {
   const holeExtrudeIds = [...text.matchAll(/opExtrude\s*\(\s*context\s*,\s*id\s*\+\s*"([^"]*(?:hole|bore|slot|pocket|cutout)[^"]*)"/gi)].map(match => match[1]);
   if (holeExtrudeIds.length && !/BooleanOperationType\.SUBTRACTION/.test(text)) {
     addIssue(0, `Extrude id(s) ${holeExtrudeIds.join(", ")} look like holes/cuts, but there is no opBoolean SUBTRACTION. Extruding a hole profile creates a new solid — subtract it from the body with opBoolean, or put the hole circle in the same sketch as the outer profile.`, "(global)");
+  }
+
+  if (/\bopPattern\s*\(/.test(text)) {
+    if (!/"transforms"\s*:/.test(text)) {
+      addIssue(0, "opPattern requires a \"transforms\" array (use rotationAround(axisLine, angle) for circular patterns or transform(directionVector) for linear patterns).", "(global)");
+    }
+    if (!/"instanceNames"\s*:/.test(text)) {
+      addIssue(0, "opPattern requires an \"instanceNames\" array of distinct strings the same length as transforms (build with \"inst\" ~ i).", "(global)");
+    }
   }
 
   if (/\bopFillet\s*\([\s\S]*?"entities"\s*:\s*qSketchRegion\s*\(/.test(text)) {
@@ -6646,6 +6699,10 @@ export function hasFatalFeatureScriptPatterns(code) {
 
   if (/\b(opCut|opBore|opPlateHoles)\s*\(/.test(code)) {
     issues.push({ code: 'unsupported_helper_operation', message: 'Unsupported helper operation detected; rewrite it using standard FeatureScript operations.' });
+  }
+
+  if (/\bop(PatternCircular|PatternLinear|CircularPattern|LinearPattern|Mirror)\s*\(/.test(code)) {
+    issues.push({ code: 'nonexistent_pattern_function', message: 'opPatternCircular/opPatternLinear/opMirror do not exist. Use opPattern with rotationAround or transform(vector) transforms plus instanceNames.' });
   }
 
   if (/\b(qEdges|qEdgeAll|qBodyFaces|qAllEdges)\s*\(/.test(code)) {
