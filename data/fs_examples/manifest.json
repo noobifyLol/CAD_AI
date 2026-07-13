@@ -87,16 +87,16 @@
     {
       "file": "linear_pattern_fins.fs",
       "title": "Heatsink With Linear Patterned Fins",
-      "keywords": ["linear pattern", "pattern", "fins", "row", "rack", "heatsink", "ribs", "repeated", "spaced", "series", "grille"],
+      "keywords": ["linear pattern", "pattern", "fins", "row", "rack", "heatsink", "ribs", "repeated", "spaced", "series", "teeth row", "grille"],
       "operations": ["opExtrude", "opPattern", "transform", "opBoolean UNION"],
       "lesson": "Linear patterns use opPattern with transform(direction * spacing * i) translations and instanceNames (opPatternLinear does NOT exist)."
     },
     {
       "file": "pen_with_tip_and_clip.fs",
       "title": "Pen With Tip And Clip",
-      "keywords": ["pen", "pencil", "marker", "stylus", "crayon", "pointer", "writing", "barrel", "clip", "wand", "stick"],
+      "keywords": ["pen", "pencil", "marker", "stylus", "crayon", "pointer", "writing", "barrel", "clip", "tip", "wand", "handle", "stick"],
       "operations": ["opExtrude", "opLoft", "opBoolean UNION"],
-      "lesson": "Everyday objects decompose into recognizable components: a pen is a barrel cylinder + lofted tapered tip + pocket clip, never one stretched primitive."
+      "lesson": "Everyday objects decompose into recognizable components — a pen is a barrel cylinder + lofted tapered tip + pocket clip, never one stretched primitive."
     },
     {
       "file": "bottle_with_neck.fs",
