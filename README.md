@@ -1,74 +1,99 @@
 # CAD_AI
 
-CAD_AI is an experimental FeatureScript generation system for Onshape-style CAD workflows. It combines prompt parsing, retrieval context, local heuristics, and a deterministic fallback path so the pipeline can still produce a usable FeatureScript file even when the AI path is uncertain or partially fails.
+CAD_AI turns natural-language prompts ("create a wheel with 6 spokes") into
+[Onshape FeatureScript](https://cad.onshape.com/FsDoc/) that compiles and
+produces editable parametric geometry. It uses Groq-hosted models with
+retrieval grounding, a generate → test → fix loop, and deterministic fallbacks
+so a request always returns usable FeatureScript.
 
-> Status: this project is still a work in progress. It is not complete, it has known rough edges, and it should be treated as a research and prototyping codebase rather than a production-ready CAD platform.
-
-## What this project tries to do
-
-- Turn a natural-language CAD request into an editable FeatureScript file.
-- Use retrieved knowledge, examples, and local rules to guide generation.
-- Preserve a strong default path that never returns an empty or omitted result.
-- Provide a contributor-friendly starting point for further work on validation, repair, and model orchestration.
-
-## Current guarantees
-
-The current implementation is designed to avoid the worst failure mode: returning no usable FeatureScript.
-
-- The generator now uses a deterministic guaranteed fallback when the main AI path is weak, invalid, or incomplete.
-- That fallback always produces a FeatureScript payload with a valid header, a defineFeature block, and editable parameters.
-- The system is intentionally conservative in that mode so it can always deliver something usable instead of silently omitting output.
-
-## Repository layout
-
-- [ai.js](ai.js) — core generation, validation, repair, and deterministic fallback logic.
-- [server.js](server.js) — HTTP API entry point for generation and debugging.
-- [Auth.js](Auth.js) — authentication and Supabase-related helpers.
-- [learning.js](learning.js) — learning and memory orchestration helpers.
-- [scripts/](scripts/) — data import, training, pruning, and smoke-test utilities.
-- [data/](data/) — knowledge, memory, and dataset assets.
-- [docs/](docs/) — architecture notes and research summaries.
-
-## Getting started
+## Quickstart
 
 1. Install dependencies:
    ```bash
    npm install
    ```
-2. Create a local environment file if needed with your Groq API keys.
+2. Create `.env` with at least one Groq API key (`GROQ_API_KEY`, optionally
+   `GROQ_API_KEY2`..`9` for rotation). Supabase keys are optional — without
+   them the app runs on local knowledge files only.
 3. Start the server:
    ```bash
    npm start
    ```
-4. Send a request to the generation endpoint or run the built-in smoke test:
+4. Or test generation directly from the command line (no server needed):
    ```bash
-   npm run test:guaranteed
+   npm run test:e2e -- "Create a coffee mug with a handle"
    ```
 
-## Important notes for contributors
+## How a generation works
 
-- The project is still incomplete and there are many open issues.
-- Some parts are experimental and may change frequently.
-- The generator has been intentionally biased toward producing a usable FeatureScript rather than failing silently.
-- If you change generation behavior, keep that guarantee in mind and test it carefully.
+1. **Dimension extraction** — a fast model parses the prompt into shape +
+   dimensions (`extractDims` in [ai.js](ai.js)).
+2. **Retrieval** — the prompt is matched against local knowledge rows,
+   Omni-CAD caption summaries ([data/cadDatasetSummaries.json](data/cadDatasetSummaries.json),
+   [data/captionGeometryPairs.json](data/captionGeometryPairs.json)), indexed
+   FeatureScript docs ([docs/fs_reference/](docs/fs_reference/)), and one
+   compile-verified code example from [data/fs_examples/](data/fs_examples/).
+3. **Generate → Test → Fix loop** — up to 3 candidates; each is sanitized and
+   validated locally, and any blocking errors are fed back into the next
+   attempt (`runGenerateTestFixLoop`). Truncated responses are auto-closed and
+   recovered instead of discarded.
+4. **Repair / recovery / fallback** — failing candidates go through an AI
+   repair pass; if everything fails, `buildGuaranteedFeatureScript` returns a
+   deterministic parametric part so the user never gets nothing.
 
-## Known areas that still need work
+## Repository layout
 
-- Better shape-specific FeatureScript generation for more CAD forms.
-- Stronger validation and repair quality.
-- More robust prompt interpretation and dimension extraction.
-- Cleaner separation of runtime logic, knowledge handling, and UI/API concerns.
-- More thorough testing and regression coverage.
+| Path | Purpose |
+| --- | --- |
+| [ai.js](ai.js) | Core pipeline: prompts, generation loop, sanitizer, validator, fallbacks |
+| [server.js](server.js) | Express API entry point (`npm start`) |
+| [learning.js](learning.js) | Retrieval, FS-doc indexing, Supabase memory, adaptive reranker |
+| [adaptiveNetwork.js](adaptiveNetwork.js) | Small neural reranker used by learning.js |
+| [Auth.js](Auth.js) | Auth middleware + Supabase auth routes |
+| [data/fs_examples/](data/fs_examples/) | **Compile-verified FeatureScript examples** injected into prompts; [manifest.json](data/fs_examples/manifest.json) maps keywords → example |
+| [data/](data/) | Knowledge rows, dataset summaries, caption pairs, failure corpus |
+| [docs/fs_reference/](docs/fs_reference/) | FeatureScript documentation indexed at server start |
+| [docs/research_summaries/](docs/research_summaries/) | Research-note context loaded into prompts |
+| [scripts/](scripts/) | Test, import, and extraction utilities |
+| [public/](public/) | Web UI served by the Express server |
+| [supabase/](supabase/) | Database migrations |
 
-## Development guidance
+## Tests
 
-If you want to help improve this project:
+| Command | What it does |
+| --- | --- |
+| `npm run test:validator` | Offline regression: templates/examples must validate clean; known-bad code must be flagged. **Run after touching the sanitizer, validator, or examples.** |
+| `npm run test:e2e -- "prompt"` | Full pipeline against real Groq keys; prints generation mode, validation status, and the code |
+| `npm run test:guaranteed` | Checks the deterministic fallback produces valid FeatureScript |
 
-- Keep the core generation path understandable and modular.
-- Prefer small, testable changes over broad rewrites.
-- Preserve the guarantee that a FeatureScript result is always emitted when possible.
-- Document new behavior, assumptions, and limitations clearly.
+## Adding knowledge (the main way to improve output quality)
 
-## Summary
+1. Write a new example in `data/fs_examples/<name>.fs` — complete FeatureScript
+   2931 file, one exported `defineFeature`, editable `precondition` parameters.
+2. Add an entry to `data/fs_examples/manifest.json` with the keywords a user
+   prompt would contain.
+3. Run `npm run test:validator` — the example must validate clean with zero
+   sanitizer changes before it ships.
 
-This system is a promising starting point for AI-assisted CAD generation, but it is still rough and evolving. The main design principle now is simple: do not fail silently. When the model is uncertain, the system should still return a concrete FeatureScript rather than omitting the result.
+Good sources for new examples: your own generations that compiled correctly in
+Onshape, and the official [FeatureScript library reference](https://cad.onshape.com/FsDoc/library.html).
+
+## Key FeatureScript gotchas encoded in this project
+
+- Patterns use `opPattern` + `rotationAround`/`transform` arrays —
+  `opPatternCircular`/`opPatternLinear` **do not exist**.
+- String concatenation is `~`, not `+`. Arrays grow with `append()`, have no `.length`.
+- `isLength` parameters already carry units — never multiply by `* inch` in the body.
+- Holes = same-sketch inner circles (`qSketchRegion(id, true)`) or extrude +
+  `opBoolean` SUBTRACTION.
+- Named everyday objects must be decomposed into components (pen = barrel +
+  tip + clip), never one stretched primitive.
+
+## Environment knobs (.env)
+
+- `GROQ_GENERATION_MODEL` / `GROQ_MODEL` / `GROQ_FALLBACK_MODEL` — model routing;
+  free-tier TPM limits are handled by automatic completion-budget shrinking and
+  key rotation in `chat()`.
+- `USE_VALIDATED_TEMPLATES=true` — keep enabled; injects the validated
+  structural template directive.
+- `CAD_CANDIDATE_COUNT`, `CAD_REPAIR_ATTEMPTS` — loop sizing.

@@ -1581,7 +1581,7 @@ export function createLearningService({
       featureScriptDocs: {
         enabled: featureScriptDocIndex.chunks.length > 0,
         chunks: featureScriptDocIndex.chunks.length,
-        source: featureScriptDocIndex.rootPath ? "old_and_docs/docs/FS doc" : null,
+        source: featureScriptDocIndex.rootPath ? "docs/fs_reference" : null,
       },
       adaptiveNetwork: {
         key: ADAPTIVE_NETWORK_KEY,

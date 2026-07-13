@@ -665,5 +665,240 @@
     ],
     "source_table": "dataset_summaries",
     "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Pens And Writing Tools",
+    "summary": "29 Omni-CAD captions describe pens and writing tools. Example: Generate a CAD model with a long, slender, and pointed object, resembling a needle or a stylus. The object is uniformly cylindrical with a sharp, tapered tip, designed for precision tasks.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "pen_writing"
+    ],
+    "keywords": [
+      "pen",
+      "pencil",
+      "marker",
+      "stylus",
+      "writing"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Barrel cylinder + lofted tapered tip + thin pocket clip, unioned (see pen_with_tip_and_clip example)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Bottles And Vessels",
+    "summary": "14 Omni-CAD captions describe bottles and vessels. Example: Generate a CAD model with a stylized, geometric representation of a spray bottle. The model features a blocky, angular design with sharp edges and clean lines, emphasizing a modern, minimalist aesthet",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "bottle_vessel"
+    ],
+    "keywords": [
+      "bottle",
+      "jar",
+      "flask",
+      "vase",
+      "container",
+      "neck"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Revolve a belly-shoulder-neck profile around an axis line, then opShell hollow through the neck (see bottle_with_neck example)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Cups And Mugs",
+    "summary": "104 Omni-CAD captions describe cups and mugs. Example: Generate a CAD model with a cylindrical shape featuring a rectangular protrusion on one side, resembling a simplified cup or mug design.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "cup_mug"
+    ],
+    "keywords": [
+      "cup",
+      "mug",
+      "bowl",
+      "handle",
+      "drink"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Shelled cylinder wall + ring handle on a perpendicular plane, unioned (see cup_with_handle example)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Wheels And Rotary Parts",
+    "summary": "6294 Omni-CAD captions describe wheels and rotary parts. Example: Generate a CAD model with a symmetrical, four-lobed structure featuring cylindrical protrusions and a central cylindrical hub.",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "wheel_rotary"
+    ],
+    "keywords": [
+      "wheel",
+      "pulley",
+      "hub",
+      "axle",
+      "spokes",
+      "rim"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Rim ring + hub ring with axle bore + one spoke patterned with opPattern rotationAround transforms (see wheel_with_spokes example)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Fasteners And Hardware",
+    "summary": "8813 Omni-CAD captions describe fasteners and hardware. Example: Generate a CAD model with a long, slender, cylindrical shaft that tapers slightly towards the top. The shaft is connected to a circular base with a hollow center, resembling a washer or a flange. The ",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "fastener"
+    ],
+    "keywords": [
+      "bolt",
+      "screw",
+      "nut",
+      "washer",
+      "fastener",
+      "hex"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Hex head via skRegularPolygon + shaft cylinder + union + tip chamfer (see hex_bolt example); washers are concentric-circle rings."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Furniture Shapes",
+    "summary": "1879 Omni-CAD captions describe furniture shapes. Example: Generate a CAD model with a minimalist, modern chair design featuring a tall, vertical backrest and a simple, rectangular seat. The chair's structure is characterized by clean lines and geometric shap",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "furniture"
+    ],
+    "keywords": [
+      "table",
+      "chair",
+      "desk",
+      "legs",
+      "shelf",
+      "furniture"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Top slab extrude + legs positioned in one sketch or patterned, unioned (see multi_body_union example)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Handles Knobs And Grips",
+    "summary": "3185 Omni-CAD captions describe handles knobs and grips. Example: Generate a CAD model with a sleek, elongated shape featuring a pronounced, curved handle on one end and a flat, rectangular base on the other. The handle is smoothly contoured, with a circular indenta",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "handle_grip"
+    ],
+    "keywords": [
+      "handle",
+      "knob",
+      "grip",
+      "lever",
+      "crank"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Swept or revolved profile for grips; knobs are revolves with filleted edges (see swept_tube and revolved_vase examples)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Frames And Borders",
+    "summary": "24159 Omni-CAD captions describe frames and borders. Example: Generate a CAD model with a square frame featuring a central circular cutout, flanked by two protruding rectangular sections on opposite sides, each with a circular hole near the edge. The design incl",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "frame_border"
+    ],
+    "keywords": [
+      "frame",
+      "border",
+      "bezel",
+      "window",
+      "outline"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Outer and inner rectangles in the SAME sketch extrude into a rectangular ring (see picture_frame example)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Hooks And Hangers",
+    "summary": "348 Omni-CAD captions describe hooks and hangers. Example: Generate a CAD model with a rectangular base and a curved hook on one end. The base features two circular holes near the center, and the hook is smoothly integrated into the design. The overall shape ",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "hook_hanger"
+    ],
+    "keywords": [
+      "hook",
+      "hanger",
+      "peg",
+      "coat",
+      "curved"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Sweep a circular profile along an open J-shaped spline path (see swept_tube example)."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
+  },
+  {
+    "title": "Omni-CAD Everyday Tools And Utensils",
+    "summary": "1004 Omni-CAD captions describe tools and utensils. Example: Generate a CAD model with a gear-like component featuring a central hexagonal bore and a surrounding gear with evenly spaced teeth. The gear's teeth are designed to interlock with a corresponding gear",
+    "tags": [
+      "dataset",
+      "omni-cad",
+      "everyday",
+      "tool_utensil"
+    ],
+    "keywords": [
+      "tool",
+      "spoon",
+      "hammer",
+      "wrench",
+      "utensil",
+      "handle"
+    ],
+    "parameter_hints": [],
+    "modeling_notes": [
+      "Handle (cylinder or swept profile) + working end as its own body, unioned; keep both editable."
+    ],
+    "source_table": "dataset_summaries",
+    "memory_type": "dataset_summary"
   }
 ]

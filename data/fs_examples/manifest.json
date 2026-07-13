@@ -76,6 +76,55 @@
       "keywords": ["shaft", "axle", "stepped", "pin", "rod", "spindle", "chamfer", "chamfered", "dowel", "peg", "stud"],
       "operations": ["opExtrude", "opBoolean UNION", "opChamfer"],
       "lesson": "Stack sections on offset planes, union them, then chamfer the body edges."
+    },
+    {
+      "file": "circular_pattern_bosses.fs",
+      "title": "Disc With Circular Patterned Bosses",
+      "keywords": ["circular pattern", "pattern", "radial", "spokes", "bosses", "pegs", "array", "evenly spaced", "around", "rotary", "polar", "patterned"],
+      "operations": ["opExtrude", "opPattern", "rotationAround", "opBoolean UNION"],
+      "lesson": "Circular patterns use opPattern with rotationAround transforms and instanceNames (opPatternCircular does NOT exist); the original body is preserved so loop from 1."
+    },
+    {
+      "file": "linear_pattern_fins.fs",
+      "title": "Heatsink With Linear Patterned Fins",
+      "keywords": ["linear pattern", "pattern", "fins", "row", "rack", "heatsink", "ribs", "repeated", "spaced", "series", "grille"],
+      "operations": ["opExtrude", "opPattern", "transform", "opBoolean UNION"],
+      "lesson": "Linear patterns use opPattern with transform(direction * spacing * i) translations and instanceNames (opPatternLinear does NOT exist)."
+    },
+    {
+      "file": "pen_with_tip_and_clip.fs",
+      "title": "Pen With Tip And Clip",
+      "keywords": ["pen", "pencil", "marker", "stylus", "crayon", "pointer", "writing", "barrel", "clip", "wand", "stick"],
+      "operations": ["opExtrude", "opLoft", "opBoolean UNION"],
+      "lesson": "Everyday objects decompose into recognizable components: a pen is a barrel cylinder + lofted tapered tip + pocket clip, never one stretched primitive."
+    },
+    {
+      "file": "bottle_with_neck.fs",
+      "title": "Bottle With Neck",
+      "keywords": ["bottle", "jar", "flask", "jug", "container", "neck", "water bottle", "beverage", "drink", "vial", "carafe"],
+      "operations": ["opRevolve", "opShell"],
+      "lesson": "A bottle is a revolved profile with belly, shoulder, and narrower neck, then shelled hollow through the neck opening; never a plain cylinder."
+    },
+    {
+      "file": "hex_bolt.fs",
+      "title": "Hex Bolt",
+      "keywords": ["bolt", "screw", "fastener", "hex", "hexagon", "hardware", "nut", "threaded", "machine screw", "cap screw"],
+      "operations": ["skRegularPolygon", "opExtrude", "opBoolean UNION", "opChamfer"],
+      "lesson": "A bolt = hex polygon head + cylindrical shaft on an offset plane + union + tip chamfer."
+    },
+    {
+      "file": "wheel_with_spokes.fs",
+      "title": "Wheel With Spokes",
+      "keywords": ["wheel", "rim", "spokes", "spoke", "pulley", "hub", "axle", "tire", "caster", "roller", "steering"],
+      "operations": ["opExtrude", "opPattern", "rotationAround", "opBoolean UNION"],
+      "lesson": "A wheel = rim ring + hub ring with axle bore + one spoke circular-patterned via opPattern, all unioned."
+    },
+    {
+      "file": "picture_frame.fs",
+      "title": "Picture Frame",
+      "keywords": ["frame", "picture", "photo", "border", "window", "bezel", "outline", "rectangular ring", "gasket", "trim"],
+      "operations": ["opExtrude"],
+      "lesson": "A frame is a rectangular ring: outer and inner rectangles in the SAME sketch extrude into the border with the middle open."
     }
   ]
 }
