@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
@@ -16,7 +16,14 @@ const FAST_MODEL = process.env.GROQ_FAST_MODEL || DEFAULT_FAST_MODEL;
 const COMPLEX_MODEL = process.env.GROQ_COMPLEX_MODEL || CODE_GENERATION_MODEL;
 const DIM_MODEL = process.env.GROQ_DIM_MODEL || COMPLEX_MODEL;
 const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || DEFAULT_STRONG_TEXT_MODEL;
-const VISION_MODEL = process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+// llama-4-scout was decommissioned by Groq and no vision-capable replacement exists
+// on this account (verified against GET /openai/v1/models on 2026-07-23). Kept as the
+// default only so an explicit GROQ_VISION_MODEL override still works; callGroqVisionLLM
+// refuses the dead default with a clear message instead of a cryptic 404.
+const DEAD_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+const VISION_MODEL = process.env.GROQ_VISION_MODEL || DEAD_VISION_MODEL;
+// Extra last-resort code model: separate per-model TPM bucket from llama/gpt-oss.
+const EXTRA_CODE_FALLBACK_MODEL = process.env.GROQ_EXTRA_FALLBACK_MODEL || "qwen/qwen3.6-27b";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // The live generation path uses a strict validated FeatureScript skeleton by default.
 // Set USE_VALIDATED_TEMPLATES=false only when intentionally testing free-form prompting.
@@ -181,6 +188,7 @@ function codeGenerationFallbackModels(primaryModel = CODE_GENERATION_MODEL) {
     DEFAULT_CODE_GENERATION_MODEL,
     FALLBACK_MODEL,
     TEXT_MODEL,
+    EXTRA_CODE_FALLBACK_MODEL,
   ]).filter(candidate => candidate && candidate !== primaryModel);
 }
 
@@ -319,7 +327,7 @@ function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1) {
   return scored.slice(0, Math.max(1, limit)).map(entry => entry.example);
 }
 
-function buildFsExamplePromptBlock(prompt, dims, { limit = 1, maxChars = 2800 } = {}) {
+function buildFsExamplePromptBlock(prompt, dims, { limit = 1, maxChars = 2400 } = {}) {
   if (dims?.shape === "GEAR_SPUR") return ""; // gears carry their own validated template
   const examples = selectFsExamplesForPrompt(prompt, dims, limit);
   if (!examples.length) return "";
@@ -471,6 +479,13 @@ function normalizeMessageContent(content) {
 }
 
 async function callGroqVisionLLM(messages, model = VISION_MODEL, options = {}) {
+  if (model === DEAD_VISION_MODEL) {
+    throw new Error(
+      "Image analysis is unavailable: this Groq account has no vision-capable model "
+      + "(meta-llama/llama-4-scout was decommissioned and nothing replaced it). "
+      + "Set GROQ_VISION_MODEL in .env when a vision model becomes available. Text prompts still work."
+    );
+  }
   const credential = pickStageCredential("vision", options.affinity, options.keySlot);
   const client = getGroqClient(credential.apiKey, VISION_TIMEOUT_MS);
 
@@ -749,6 +764,23 @@ function messagesToPrompt(messages = []) {
 // DIFFERENT org gets a genuinely independent TPM/TPD budget and is worth trying
 // immediately (no backoff wait needed, since that bucket was never touched).
 const keySlotOrgCache = new Map(); // slot label ("k3") -> last observed org id
+const modelTpmLimitCache = new Map(); // model id -> TPM limit observed from 413/429 error text
+const orgDailyExhaustedUntil = new Map(); // `${model}:${orgId}` -> epoch ms when the daily (TPD) bucket relieves
+
+// Parses Groq's "try again in 1h8m2.4s" / "43m21.5s" / "42.42s" / "251.66ms" hints.
+function parseRetryAfterMs(message) {
+  const match = String(message || "").match(/try again in\s+([0-9hms.]+)/i);
+  if (!match) return 0;
+  let totalMs = 0;
+  for (const part of match[1].matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g)) {
+    const value = Number(part[1]);
+    if (part[2] === "h") totalMs += value * 3600000;
+    else if (part[2] === "m") totalMs += value * 60000;
+    else if (part[2] === "ms") totalMs += value;
+    else totalMs += value * 1000;
+  }
+  return Math.ceil(totalMs);
+}
 
 function extractOrgId(message) {
   const match = /organization `([^`]+)`/.exec(String(message || ""));
@@ -789,15 +821,41 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
   const MAX_ATTEMPTS_PER_MODEL = poolSize + 2;
 
   let lastError = null;
+  let knownPromptTokens = null; // learned from 413 error text; same prompt across all candidate models
   for (const candidate of modelsToTry) {
+    // A 413 "Request too large" is a static comparison against the model's TPM limit —
+    // identical in every org. If we already know the prompt alone can't fit this model,
+    // skip it without spending a single request.
+    const cachedLimit = modelTpmLimitCache.get(candidate);
+    if (knownPromptTokens && cachedLimit && knownPromptTokens + 1024 + 256 > cachedLimit) {
+      console.warn(`[AI] Skipping ${candidate}: prompt (~${knownPromptTokens} tokens) cannot fit its ${cachedLimit} TPM limit on any org.`);
+      continue;
+    }
+
     let attemptOptions = {
       ...options,
       keySlot: options.keySlot || computeInitialKeySlot(stage, options.affinity, poolSize),
     };
     const triedSlots = new Set();
     const triedOrgs = new Set();
+    let waitedForModel = false;
 
-    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL + 2; attempt += 1) {
+      // Skip slots whose org is known to be daily-exhausted (TPD) for this model —
+      // that bucket won't relieve for minutes to hours, so probing it is pure waste.
+      const slotOrg = keySlotOrgCache.get(attemptOptions.keySlot);
+      if (slotOrg && (orgDailyExhaustedUntil.get(`${candidate}:${slotOrg}`) || 0) > Date.now()) {
+        triedSlots.add(attemptOptions.keySlot);
+        triedOrgs.add(slotOrg);
+        const freshSlot = pickUntriedOrgSlot(poolSize, triedSlots, triedOrgs);
+        if (!freshSlot) {
+          console.warn(`[AI] ${candidate}: every known org is daily-exhausted (TPD); trying next fallback model.`);
+          break;
+        }
+        attemptOptions = { ...attemptOptions, keySlot: freshSlot };
+        continue;
+      }
+
       triedSlots.add(attemptOptions.keySlot);
       try {
         const text = await callLLM(messages, candidate, attemptOptions);
@@ -813,28 +871,32 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
           keySlotOrgCache.set(attemptOptions.keySlot, orgId);
           triedOrgs.add(orgId);
         }
+        const reportedLimit = Number(message.match(/Limit\s+(\d+)/i)?.[1] || 0);
+        const isDailyLimit = /tokens per day|\(TPD\)/i.test(message);
+        if (reportedLimit && !isDailyLimit) modelTpmLimitCache.set(candidate, reportedLimit);
+        if (isDailyLimit && orgId) {
+          const reliefMs = parseRetryAfterMs(message) || 3600000;
+          orgDailyExhaustedUntil.set(`${candidate}:${orgId}`, Date.now() + reliefMs);
+          console.warn(`[AI] ${candidate} daily budget exhausted for org ${orgId} (relief in ~${Math.round(reliefMs / 60000)} min).`);
+        }
 
         if (tooLarge) {
           // Groq counts prompt + max_completion_tokens against the TPM limit.
           // Shrink the completion budget so the request fits instead of abandoning the model.
-          const limit = Number(message.match(/Limit\s+(\d+)/i)?.[1] || 0);
           const requested = Number(message.match(/Requested\s+(\d+)/i)?.[1] || 0);
           const currentCompletion = Number(attemptOptions.maxCompletionTokens
             || (attemptOptions.fullCode ? GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS));
           const promptTokens = Math.max(0, requested - currentCompletion);
-          const shrunkCompletion = limit - promptTokens - 256;
-          if (limit && requested && shrunkCompletion >= 1024 && shrunkCompletion < currentCompletion) {
+          if (promptTokens) knownPromptTokens = promptTokens;
+          const shrunkCompletion = reportedLimit - promptTokens - 256;
+          if (reportedLimit && requested && shrunkCompletion >= 1024 && shrunkCompletion < currentCompletion) {
             console.warn(`[AI] Request too large for ${candidate}; shrinking completion tokens ${currentCompletion} -> ${shrunkCompletion} and retrying.`);
             attemptOptions = { ...attemptOptions, maxCompletionTokens: shrunkCompletion };
             continue;
           }
-          const rotatedSlot = pickUntriedOrgSlot(poolSize, triedSlots, triedOrgs);
-          if (rotatedSlot) {
-            console.warn(`[AI] ${candidate} too large for key ${attemptOptions.keySlot}'s org even after shrinking; trying a different org via key ${rotatedSlot}.`);
-            attemptOptions = { ...options, keySlot: rotatedSlot };
-            continue;
-          }
-          console.warn(`[AI] Request cannot fit ${candidate} on any available org; trying next fallback model.`);
+          // 413 is deterministic per model (limit is org-independent) — rotating orgs
+          // is pure waste. Move straight to the next fallback model.
+          console.warn(`[AI] Request cannot fit ${candidate} (prompt ~${promptTokens} tokens vs ${reportedLimit} TPM limit); trying next fallback model.`);
           break;
         }
 
@@ -843,6 +905,18 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
           if (rotatedSlot) {
             console.warn(`[AI] Rate limit on stage=${stage} model=${candidate} (key ${attemptOptions.keySlot}'s org); trying a different org via key ${rotatedSlot}.`);
             attemptOptions = { ...attemptOptions, keySlot: rotatedSlot };
+            continue;
+          }
+          // Every org's bucket is drained. If Groq says relief is close, wait it out
+          // once (bounded) instead of abandoning the model — per-minute buckets refill
+          // fast. Daily (TPD) limits relieve in minutes-to-hours, so never wait on those.
+          const retryAfterMs = parseRetryAfterMs(message);
+          const maxWaitMs = Number(process.env.GROQ_RATE_LIMIT_MAX_WAIT_MS || 20000);
+          if (!waitedForModel && !isDailyLimit && retryAfterMs > 0 && retryAfterMs <= maxWaitMs) {
+            waitedForModel = true;
+            const waitMs = retryAfterMs + 500;
+            console.warn(`[AI] All orgs rate-limited for ${candidate}; waiting ${waitMs}ms once for the bucket to refill.`);
+            await new Promise(resolve => setTimeout(resolve, waitMs));
             continue;
           }
           console.warn(`[AI] Rate limit on stage=${stage} model=${candidate}; every known org already tried, trying next fallback model.`);
@@ -2976,7 +3050,9 @@ async function extractDims(prompt, learningContext = {}, history = [], options =
     const raw = await chat(messages, extractorModel, [DIM_MODEL, TEXT_MODEL, FALLBACK_MODEL], {
       stage: "dimensions",
       affinity: options.affinity || options.requestId || makeRequestId(prompt),
-      keySlot: "k1",
+      // Dims extraction returns a ~300-token JSON — a small completion budget keeps
+      // the request well under every model's TPM limit (requested = prompt + budget).
+      maxCompletionTokens: 1024,
     });
     const parsed = JSON.parse(stripJson(raw));
     const d = normalizeDims({
@@ -3583,6 +3659,22 @@ acceptable when the prompt itself asks for a box, block, plate, or plain cylinde
 - The code must compile and produce visible 3D geometry with zero errors.`;
 
 const CUSTOM_FEATURE_SYSTEM = FEATURESCRIPT_STRICT_SYSTEM_PROMPT;
+
+// Drops system-prompt sections that are irrelevant to this request, reclaiming
+// TPM budget (requested tokens = prompt + completion on Groq's free tier).
+function buildSystemPromptForRequest(prompt = "") {
+  let system = CUSTOM_FEATURE_SYSTEM;
+  const stripSection = header => {
+    const start = system.indexOf(header);
+    if (start === -1) return;
+    const next = system.indexOf("═══", start + header.length);
+    system = next === -1 ? system.slice(0, start) : system.slice(0, start) + system.slice(next);
+  };
+  if (!/\b(robot|mech|assembly|vehicle|android|humanoid|multi[- ]?body|legs?|arms?)\b/i.test(prompt)) {
+    stripSection("═══ MECH / MULTI-BODY STRATEGY ═══");
+  }
+  return system;
+}
 
 const MULTI_CANDIDATE_AUTHOR_SYSTEM = `SYSTEM: You are a strict FeatureScript 2931 authoring assistant used inside a multi-key, multi-model CAD orchestration pipeline.
 ${FS_COMPILER_AGENT_CONTRACT}
@@ -5533,7 +5625,7 @@ INSTRUCTIONS:
 
     const raw = await chat(
       [
-        { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+        { role: "system", content: withLearningContext(buildSystemPromptForRequest(prompt), learningContext) },
         { role: "user", content: recoveryPrompt }
       ],
       selectCodeGenerationModel(),
@@ -5661,10 +5753,10 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
     `CANDIDATE MODE: ${candidateId}`,
     `STYLE HINT: ${styleHints[candidateId] || styleHints.c1}`,
     ...priorIssuesLines,
-    `DOC_ROWS: ${JSON.stringify(retrieval.docRows.slice(0, 3))}`,
-    `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 3))}`,
-    `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 3))}`,
-    `SOURCE_ROWS: ${JSON.stringify(compactPromptRows(retrieval.sourceRows, 3))}`,
+    `DOC_ROWS: ${JSON.stringify(retrieval.docRows.slice(0, 2))}`,
+    `DB_ROWS: ${JSON.stringify(compactPromptRows(retrieval.dbRows, 2))}`,
+    `DATASET_ROWS: ${JSON.stringify(compactPromptRows(retrieval.datasetRows, 2))}`,
+    `SOURCE_ROWS: ${JSON.stringify(compactPromptRows(retrieval.sourceRows, 2))}`,
     preferSimple
       ? "OUTPUT POLICY: simplify the geometry if needed, but always keep the result editable, compile-oriented, and structurally faithful to the user intent."
       : "OUTPUT POLICY: aim for the most detailed compile-safe FeatureScript you can produce while keeping all major requested geometry editable.",
@@ -5686,6 +5778,9 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
 }
 
 function parseFeatureScriptJson(raw, dims) {
+  // Qwen-style models may prepend a <think>...</think> reasoning block whose text
+  // can contain braces that confuse first-JSON-object extraction — strip it first.
+  raw = String(raw || "").replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   const parsed = tryParseJson(raw, null);
   if (parsed?.code) {
     // Even valid JSON can carry a truncated code string — auto-close it too.
@@ -5699,20 +5794,24 @@ function parseFeatureScriptJson(raw, dims) {
     };
   }
 
-  // JSON parse failed — usually a completion cut off mid-string. Pull the code
-  // field out of the partial JSON and close the file instead of returning null.
+  // JSON parse failed — often invalid JSON (e.g. raw newlines in the code string)
+  // rather than true truncation. Pull the code field out and only report truncation
+  // when auto-close actually had to modify the code.
   const partialCode = extractCodeFieldFromPartialJson(raw);
   if (partialCode) {
     const completed = autoCloseTruncatedFeatureScript(partialCode);
     if (completed) {
+      const wasModified = completed !== partialCode.replace(/\r/g, "").trim();
       const nameMatch = String(raw || "").match(/"featureName"\s*:\s*"([^"]+)"/);
       const labelMatch = String(raw || "").match(/"featureLabel"\s*:\s*"([^"]+)"/);
       return {
         featureName: nameMatch?.[1] || dims.featureName,
         featureLabel: labelMatch?.[1] || dims.featureLabel,
-        reasoning: "Recovered from a truncated model response: incomplete trailing statements were dropped and the file was auto-closed.",
+        reasoning: wasModified
+          ? "Recovered from a truncated model response: incomplete trailing statements were dropped and the file was auto-closed."
+          : "The model returned malformed JSON; the complete code field was recovered directly.",
         code: completed,
-        recoveredFromTruncation: true,
+        recoveredFromTruncation: wasModified,
       };
     }
   }
@@ -5800,6 +5899,19 @@ async function applyOnshapeCompileCheck(strict) {
   }
 
   const extraFatal = onshapeCheck.errors.map(e => ({ message: `Onshape compiler: ${e.message}`, source: "onshape" }));
+
+  // Diagnostic dump: set ONSHAPE_DEBUG_DUMP=1 to capture every candidate the real
+  // compiler rejects, together with the exact harness script that was executed.
+  if (process.env.ONSHAPE_DEBUG_DUMP === "1") {
+    try {
+      mkdirSync("logs/onshape_failures", { recursive: true });
+      writeFileSync(
+        `logs/onshape_failures/fail_${Date.now()}.txt`,
+        `ERRORS:\n${onshapeCheck.errors.map(e => e.message).join("\n")}\n\nCANDIDATE CODE:\n${strict.code}\n\nHARNESS SCRIPT:\n${onshapeCheck.script || "(none)"}`
+      );
+    } catch { /* diagnostics only — never block generation */ }
+  }
+
   return {
     ...strict,
     ok: false,
@@ -5843,7 +5955,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
 
     try {
       const raw = await chat([
-        { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+        { role: "system", content: withLearningContext(buildSystemPromptForRequest(prompt), learningContext) },
         { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }) },
       ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
         stage: "generation",
@@ -5900,6 +6012,9 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         priorIssues.push({ message: "Previous response was cut off by the completion token limit. Produce a more COMPACT file: reasoning under 2 sentences, fewer sketch entities, no redundant comments — while still building the requested geometry." });
       }
       console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: ${priorIssues.length} issue(s) fed back → next prompt`);
+      for (const issue of priorIssues.slice(0, 3)) {
+        console.log(`[AI]   issue: ${String(issue.message || "").slice(0, 180)}`);
+      }
     } catch (reason) {
       const msg = reason?.message || String(reason);
       console.warn(`[AI] GTF iteration ${iteration + 1} threw: ${msg}`);
@@ -5948,7 +6063,7 @@ async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_AT
 async function generateSimplifiedCandidate(prompt, dims, learningContext, retrieval, requestId) {
   const [slot] = keySlotsForStage("generation", 1, `${requestId}:chatbot:simplify`);
   const raw = await chat([
-    { role: "system", content: withLearningContext(CUSTOM_FEATURE_SYSTEM, learningContext) },
+    { role: "system", content: withLearningContext(buildSystemPromptForRequest(prompt), learningContext) },
     { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId: "simplify", preferSimple: true }) },
   ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
     stage: "generation",
@@ -6712,6 +6827,21 @@ function validateFeatureScript(code) {
     }
     if (!/"instanceNames"\s*:/.test(text)) {
       addIssue(0, "opPattern requires an \"instanceNames\" array of distinct strings the same length as transforms (build with \"inst\" ~ i).", "(global)");
+    }
+  }
+
+  // Id consistency: a query that references an id nothing created resolves to nothing
+  // at regeneration time — the real compiler fails with CANNOT_RESOLVE_ENTITIES.
+  const createdSketchIds = new Set([...text.matchAll(/newSketch(?:OnPlane)?\s*\(\s*context\s*,\s*id\s*\+\s*"([^"]+)"/g)].map(match => match[1]));
+  const createdOpIds = new Set([...text.matchAll(/\b(?:op[A-Z]\w*|fCylinder|fSphere)\s*\(\s*context\s*,\s*id\s*\+\s*"([^"]+)"/g)].map(match => match[1]));
+  for (const match of text.matchAll(/qSketchRegion\s*\(\s*id\s*\+\s*"([^"]+)"/g)) {
+    if (!createdSketchIds.has(match[1])) {
+      addIssue(lineNumberAt(text, match.index), `qSketchRegion references sketch id "${match[1]}" but no sketch was created with that exact id. Created sketch ids: ${[...createdSketchIds].join(", ") || "(none)"}. The id strings must match exactly.`, match[0]);
+    }
+  }
+  for (const match of text.matchAll(/qCreatedBy\s*\(\s*id\s*\+\s*"([^"]+)"/g)) {
+    if (!createdOpIds.has(match[1]) && !createdSketchIds.has(match[1])) {
+      addIssue(lineNumberAt(text, match.index), `qCreatedBy references id "${match[1]}" but no operation or sketch created that exact id. Created ids: ${[...createdOpIds, ...createdSketchIds].join(", ") || "(none)"}.`, match[0]);
     }
   }
 
