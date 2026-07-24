@@ -59,6 +59,14 @@ for (const [name, dims] of shapes) {
   await expectOk(`guaranteed:${name}`, result.code);
 }
 
+// 2b) Every curated example must actually compile AND regenerate in real Onshape —
+// these are injected into prompts and served as guaranteed fallbacks, so a broken
+// example poisons everything downstream (this is how the UNION+targets bug hid).
+import { readFileSync, readdirSync } from 'node:fs';
+for (const fileName of readdirSync('data/fs_examples').filter((name) => name.endsWith('.fs'))) {
+  await expectOk(`example:${fileName}`, readFileSync(`data/fs_examples/${fileName}`, 'utf8'));
+}
+
 // 3) A call to a nonexistent function must be caught by the real compiler.
 const undefinedFunctionCode = `FeatureScript 2931;
 import(path : "onshape/std/geometry.fs", version : "2931.0");

@@ -77,9 +77,9 @@ export const penWithTipAndClip = defineFeature(function(context is Context, id i
         opBoolean(context, id + "unionPen", {
             "tools" : qUnion([
                 qCreatedBy(id + "tipBody", EntityType.BODY),
-                qCreatedBy(id + "clipBody", EntityType.BODY)
+                qCreatedBy(id + "clipBody", EntityType.BODY),
+                qCreatedBy(id + "barrelBody", EntityType.BODY)
             ]),
-            "targets" : qCreatedBy(id + "barrelBody", EntityType.BODY),
             "operationType" : BooleanOperationType.UNION
         });
     });

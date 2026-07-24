@@ -69,8 +69,10 @@ export const cupWithHandle = defineFeature(function(context is Context, id is Id
             "endDepth"  : definition.handleThickness
         });
         opBoolean(context, id + "joinHandle", {
-            "tools" : qCreatedBy(id + "handleBody", EntityType.BODY),
-            "targets" : qCreatedBy(id + "cupBody", EntityType.BODY),
+            "tools" : qUnion([
+                qCreatedBy(id + "handleBody", EntityType.BODY),
+                qCreatedBy(id + "cupBody", EntityType.BODY)
+            ]),
             "operationType" : BooleanOperationType.UNION
         });
     });

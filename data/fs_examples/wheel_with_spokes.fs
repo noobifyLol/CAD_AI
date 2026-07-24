@@ -98,9 +98,9 @@ export const wheelWithSpokes = defineFeature(function(context is Context, id is 
             "tools" : qUnion([
                 qCreatedBy(id + "hubBody", EntityType.BODY),
                 qCreatedBy(id + "spokeBody", EntityType.BODY),
-                qCreatedBy(id + "spokePattern", EntityType.BODY)
+                qCreatedBy(id + "spokePattern", EntityType.BODY),
+                qCreatedBy(id + "rimBody", EntityType.BODY)
             ]),
-            "targets" : qCreatedBy(id + "rimBody", EntityType.BODY),
             "operationType" : BooleanOperationType.UNION
         });
     });

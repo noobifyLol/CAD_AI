@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
+import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
 const DEFAULT_STRONG_TEXT_MODEL = "llama-3.3-70b-versatile";
@@ -30,6 +31,9 @@ const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first"
 const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "true").toLowerCase() !== "false";
 const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
 const ENABLE_OPERATION_COMPILER_FALLBACK = String(process.env.CAD_ENABLE_OPERATION_COMPILER_FALLBACK || "false").toLowerCase() === "true";
+// Tier 2: for prompts with no strong curated-example match, ask the model for a typed
+// JSON build plan and compile it deterministically instead of asking for raw code.
+const ENABLE_PLAN_COMPILER = String(process.env.CAD_ENABLE_PLAN_COMPILER || "true").toLowerCase() !== "false";
 
 // ------------------------------
 // Model configuration
@@ -301,7 +305,7 @@ function loadFsExampleLibrary() {
 // Pick the compile-verified example(s) whose keywords best match the prompt.
 // These are injected as few-shot grounding so the model sees real, validated
 // FeatureScript for the requested kind of geometry, not just prose rules.
-function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1) {
+function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1, minScore = 1) {
   // Words the user actually typed outweigh words derived from the inferred
   // shape, so "create a pen" picks the pen example over a generic cylinder.
   const promptText = String(prompt || "").toLowerCase();
@@ -322,7 +326,7 @@ function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1) {
       }
       return { example, score };
     })
-    .filter(entry => entry.score >= 1)
+    .filter(entry => entry.score >= Math.max(1, minScore))
     .sort((a, b) => b.score - a.score);
   return scored.slice(0, Math.max(1, limit)).map(entry => entry.example);
 }
@@ -1396,8 +1400,10 @@ function tHitchPeg(d) {
             "angleForward" : 2 * PI * radian
         });
         opBoolean(context, id + "merge", {
-            "tools"         : qCreatedBy(id + "dome", EntityType.BODY),
-            "targets"       : qCreatedBy(id + "shaft", EntityType.BODY),
+            "tools" : qUnion([
+                qCreatedBy(id + "dome", EntityType.BODY),
+                qCreatedBy(id + "shaft", EntityType.BODY)
+            ]),
             "operationType" : BooleanOperationType.UNION
         });`,
   };
@@ -1461,8 +1467,10 @@ function tSteppedShaft(d) {
             "radius"        : definition.radius2
         });
         opBoolean(context, id + "join", {
-            "tools"         : qCreatedBy(id + "seg2", EntityType.BODY),
-            "targets"       : qCreatedBy(id + "seg1", EntityType.BODY),
+            "tools" : qUnion([
+                qCreatedBy(id + "seg2", EntityType.BODY),
+                qCreatedBy(id + "seg1", EntityType.BODY)
+            ]),
             "operationType" : BooleanOperationType.UNION
         });`,
   };
@@ -1553,37 +1561,80 @@ ${segStr}${boreStr}
         });`;
 }
 
+// Shared procedural spur-gear body: the tooth outline is computed AT REGENERATION
+// TIME inside FeatureScript, so every dialog parameter (teeth count, pitch radius,
+// bore, face width) actually drives the geometry. The old template baked tooth
+// coordinates into the file at build time, which made Number of Teeth and Pitch
+// Radius dead controls in the Onshape dialog.
+function proceduralGearBody() {
+  return `${planeVar()}
+        var teeth = definition.numTeeth;
+        var pitchR = definition.pitchRadius / inch;
+        var toothModule = 2 * pitchR / teeth;
+        var tipR = pitchR + toothModule;
+        var rootR = max(toothModule * 0.5, pitchR - 1.25 * toothModule);
+        var frac = 0.38;
+
+        var sketch1 = newSketchOnPlane(context, id + "sketch1", { "sketchPlane" : skPlane });
+
+        // Simplified trapezoidal tooth profile: 4 outline points per tooth,
+        // consecutive points connect flank-to-root-land around the full circle.
+        var outline = [];
+        for (var i = 0; i < teeth; i += 1)
+        {
+            var ta = 2 * PI / teeth;
+            var center = i * ta;
+            var aGapEnd = center - ta * frac;
+            var aTipLeft = center - ta * frac * 0.5;
+            var aTipRight = center + ta * frac * 0.5;
+            var aFlankRight = center + ta * frac;
+            outline = append(outline, vector(cos(aGapEnd * radian) * rootR, sin(aGapEnd * radian) * rootR));
+            outline = append(outline, vector(cos(aTipLeft * radian) * tipR, sin(aTipLeft * radian) * tipR));
+            outline = append(outline, vector(cos(aTipRight * radian) * tipR, sin(aTipRight * radian) * tipR));
+            outline = append(outline, vector(cos(aFlankRight * radian) * rootR, sin(aFlankRight * radian) * rootR));
+        }
+        var pointCount = size(outline);
+        for (var j = 0; j < pointCount; j += 1)
+        {
+            var nextIndex = j + 1 == pointCount ? 0 : j + 1;
+            skLineSegment(sketch1, "g" ~ j, {
+                "start" : outline[j] * inch,
+                "end" : outline[nextIndex] * inch
+            });
+        }
+
+        if (definition.boreRadius > 0 * inch)
+        {
+            skCircle(sketch1, "bore", { "center" : vector(0, 0) * inch, "radius" : definition.boreRadius });
+        }
+        skSolve(sketch1);
+
+        opExtrude(context, id + "extrude1", {
+            "entities"  : qSketchRegion(id + "sketch1", true),
+            "direction" : skPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.faceWidth
+        });`;
+}
+
+function gearPrecondition(defaultTeeth, defaultPitchRadius, defaultBoreRadius, defaultFaceWidth) {
+  return [
+    preconditionPlane(),
+    preconditionInteger("numTeeth", "Number of Teeth", 6, defaultTeeth, 200),
+    preconditionLength("pitchRadius", "Pitch Radius", 0.1, defaultPitchRadius, 24),
+    preconditionLength("boreRadius", "Bore Radius", 0, defaultBoreRadius, 12),
+    preconditionLength("faceWidth", "Face Width", 0.05, defaultFaceWidth, 24),
+  ].join("\n");
+}
+
 function tGear(d) {
   const defaultTeeth = Math.max(8, Math.round(d.numTeeth || 20));
   const defaultPitchRadius = d.pitchRadius || d.radiusInches || ((d.moduleInches || 0.0787402) * defaultTeeth / 2);
   const defaultBoreRadius = d.boreRadius || d.holeRadiusInches || 0.2;
   const defaultFaceWidth = d.faceWidth || d.depthInches || 0.5;
-  const gearBody = templateSpurGearFixed({
-    ...d,
-    numTeeth: defaultTeeth,
-    depthInches: defaultFaceWidth,
-    holeRadiusInches: defaultBoreRadius,
-    moduleInches: d.moduleInches || 0.0787402,
-  });
-
   return {
-    precondition: [
-      preconditionPlane(),
-      preconditionInteger("numTeeth", "Number of Teeth", 6, defaultTeeth, 200),
-      preconditionLength("pitchRadius", "Pitch Radius", 0.1, defaultPitchRadius, 24),
-      preconditionLength("boreRadius", "Bore Radius", 0, defaultBoreRadius, 12),
-      preconditionLength("faceWidth", "Face Width", 0.05, defaultFaceWidth, 24),
-    ].join("\n"),
-    body: `${planeVar()}
-        var pitchRadius = definition.pitchRadius;
-        var faceWidth = definition.faceWidth;
-        var boreRadius = definition.boreRadius;
-${gearBody
-  .replace(`${planeVar()}\n`, "")
-  .replace(/\bmod\s*=\s*d\.moduleInches > 0 \? d\.moduleInches : 0\.0787402;/, 'mod = (2 * (pitchRadius / inch)) / max(1, definition.numTeeth);')
-  .replace(new RegExp(`${n(defaultPitchRadius)} \\* inch`, "g"), "pitchRadius")
-  .replace(new RegExp(`${n(defaultBoreRadius)} \\* inch`, "g"), "boreRadius")
-  .replace(new RegExp(`${n(defaultFaceWidth)} \\* inch`, "g"), "faceWidth")}`,
+    precondition: gearPrecondition(defaultTeeth, defaultPitchRadius, defaultBoreRadius, defaultFaceWidth),
+    body: proceduralGearBody(),
   };
 }
 
@@ -1746,7 +1797,13 @@ function buildLearningContextText(learningContext = {}) {
     lines.push(`7. Vector coords: vector(x, y) * inch where x and y are unitless numbers (divide a Length by inch to get a number: definition.width / inch).`);
     lines.push(`8. opExtrude: opExtrude(context, id + "ext1", { "entities": qSketchRegion(id + "sk1"), "direction": skPlane.normal, "endBound": BoundingType.BLIND, "endDepth": definition.depth });`);
     lines.push(`9. fCylinder(context, id + "cyl1", { "bottomCenter": skPlane.origin, "topCenter": skPlane.origin + skPlane.normal * definition.height, "radius": r });`);
-    lines.push(`10. opBoolean: opBoolean(context, id + "bool1", { "tools": qCreatedBy(id+"body1", EntityType.BODY), "targets": qCreatedBy(id+"body2", EntityType.BODY), "operationType": BooleanOperationType.UNION });`);
+    lines.push(`10. opBoolean: opBoolean(context, id + "bool1", {
+            "tools" : qUnion([
+                qCreatedBy(id+"body1", EntityType.BODY),
+                qCreatedBy(id+"body2", EntityType.BODY)
+            ]),
+            "operationType" : BooleanOperationType.UNION
+        });`);
     lines.push(`11. Remove helper variables that are computed but never used if they do not affect the final geometry.`);
     lines.push(`12. Lambdas inside feature body MUST use untyped const assignments: const fn = function(x) { return x * 2; }; — named typed functions (function foo(...) { }) are ONLY legal at module top-level.`);
   }
@@ -3440,7 +3497,8 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
 - The revolve axis must be a Line value, not a query. For a profile drawn with radius on sketch X and height on sketch Y, use line(skPlane.origin, cross(skPlane.normal, skPlane.x)).
 - Organic tapered shapes like carrots should use a revolved spline profile with at least 4 profile points.
   A 2-point skFitSpline is not enough for a realistic tapered organic shape.
-- opBoolean: { "tools": Query, "targets": Query, "operationType": BooleanOperationType.UNION }
+- opBoolean UNION: { "tools": qUnion([ALL bodies to merge]), "operationType": BooleanOperationType.UNION } — NO "targets" key (targets is only for SUBTRACTION; UNION with targets fails with BOOLEAN_BAD_INPUT).
+- opBoolean SUBTRACTION: { "tools": cutting bodies, "targets": body to cut, "operationType": BooleanOperationType.SUBTRACTION }
 
 ═══ FUNCTION SCOPE AND EDITING RULES ═══
 1. EDIT MODE: If history is provided, you are EDITING existing code. Do not rewrite everything from scratch. 
@@ -3592,10 +3650,12 @@ for cylindrical parts), then union adjacent bodies:
   });
   opExtrude(context, id + "foot1", { "entities": qSketchRegion(id + "footSk"), ... });
   opBoolean(context, id + "joinLeg1", {
-      "tools": qCreatedBy(id + "foot1", EntityType.BODY),
-      "targets": qCreatedBy(id + "leg1", EntityType.BODY),
-      "operationType": BooleanOperationType.UNION
-  });
+            "tools" : qUnion([
+                qCreatedBy(id + "foot1", EntityType.BODY),
+                qCreatedBy(id + "leg1", EntityType.BODY)
+            ]),
+            "operationType" : BooleanOperationType.UNION
+        });
 
 For robot/mech shapes:
 - Build the torso first as a BOX (opExtrude of a rectangle)
@@ -4992,8 +5052,10 @@ function buildLocalMushroom(prompt, dims) {
             "angleForward" : 2 * PI * radian
         });
         opBoolean(context, id + "joinCapToStem", {
-            "tools" : qCreatedBy(id + "capBody", EntityType.BODY),
-            "targets" : qCreatedBy(id + "stemBody", EntityType.BODY),
+            "tools" : qUnion([
+                qCreatedBy(id + "capBody", EntityType.BODY),
+                qCreatedBy(id + "stemBody", EntityType.BODY)
+            ]),
             "operationType" : BooleanOperationType.UNION
         });`;
   return {
@@ -5008,36 +5070,12 @@ function buildLocalSpurGear(prompt, dims) {
   const teeth = Math.max(8, Math.round(dims.numTeeth || 20));
   const ratioMatch = String(prompt || "").match(/(\d+)\s*:\s*(\d+)/);
   const defaultTeeth = ratioMatch ? Math.max(8, Number(ratioMatch[1]) * 10) : teeth;
-  const precondition = [
-    preconditionPlane(),
-    preconditionInteger("numTeeth", "Number of Teeth", 6, defaultTeeth, 200),
-    preconditionLength("pitchRadius", "Pitch Radius", 0.1, dims.radiusInches || 1, 24),
-    preconditionLength("boreRadius", "Bore Radius", 0, dims.holeRadiusInches || 0.2, 12),
-    preconditionLength("faceWidth", "Face Width", 0.05, dims.depthInches || 0.5, 24),
-  ].join("\n");
-
-  const gearDims = {
-    numTeeth: defaultTeeth,
-    moduleInches: 0.0787402,
-    depthInches: dims.depthInches || 0.5,
-    holeRadiusInches: dims.holeRadiusInches || 0.2,
-  };
-  const gearBody = templateSpurGearFixed(gearDims);
-  const body = `${planeVar()}
-        var pitchRadius = definition.pitchRadius;
-        var faceWidth = definition.faceWidth;
-        var boreRadius = definition.boreRadius;
-${gearBody
-  .replace(`${planeVar()}\n`, "")
-  .replace(/definition\.radius/g, "pitchRadius")
-  .replace(/definition\.faceWidth/g, "faceWidth")
-  .replace(/definition\.holeRadius/g, "boreRadius")
-  .replace(/definition\.numTeeth/g, "definition.numTeeth")}`;
+  const precondition = gearPrecondition(defaultTeeth, dims.radiusInches || 1, dims.holeRadiusInches || 0.2, dims.depthInches || 0.5);
   return {
     featureName: "spurGear",
     featureLabel: "Spur Gear",
-    code: buildLocalFeatureScriptFile({ featureName: "spurGear", featureLabel: "Spur Gear", precondition, body }),
-    strategy: "Deterministic operation compiler generated a closed-profile spur gear from a source-backed tooth construction and extruded it to face width.",
+    code: buildLocalFeatureScriptFile({ featureName: "spurGear", featureLabel: "Spur Gear", precondition, body: proceduralGearBody() }),
+    strategy: "Deterministic operation compiler generated a fully parametric spur gear whose tooth outline is computed at regeneration time, so teeth count and pitch radius edits change the geometry.",
   };
 }
 
@@ -5435,6 +5473,45 @@ ${fsRect("baseSketch", "boxProfile", "-halfW", "-halfH", "halfW", "halfH")}
 }
 
 export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {}, retrieval = null, decomposition = null) {
+  // Best worst-case first: if a compile-verified curated example matches the prompt,
+  // return THAT instead of a generic primitive. A quota-starved "create a pen" then
+  // still yields the detailed pen (barrel + lofted tip + clip), never a bar named
+  // "Pen" — every example in data/fs_examples has passed the real Onshape compiler.
+  // minScore 2 = at least one word the user actually typed must match the example;
+  // an inferred-shape-only match (score 1) is too weak to substitute a whole design.
+  const matchedExamples = dims?.shape === "GEAR_SPUR" ? [] : selectFsExamplesForPrompt(prompt, dims, 1, 2);
+  if (matchedExamples.length) {
+    const example = matchedExamples[0];
+    const strictExample = validateFeatureScriptStrict(example.content);
+    if (strictExample.ok) {
+      const warning = `AI generation was unavailable, so the compile-verified "${example.title}" example was returned; edit its dialog parameters to fit your dimensions.`;
+      return {
+        code: example.content,
+        featureName: example.id.replace(/[^a-zA-Z0-9_]/g, ""),
+        featureLabel: example.title,
+        reasoning: `Returned the curated ${example.title} example as the guaranteed result. ${example.lesson || ""}`.trim(),
+        dims,
+        generationMode: "guaranteed_curated_example",
+        completionLevel: "full",
+        warnings: [warning],
+        omissions: [],
+        orchestration: {
+          status: "completed",
+          completionLevel: "full",
+          failedPass: null,
+          passes: {
+            generation: {
+              selectedCandidateId: "guaranteed_curated_example",
+              fallbackUsed: `curated_example:${example.id}`,
+            },
+          },
+          warnings: [warning],
+          omissions: [],
+        },
+      };
+    }
+  }
+
   const robustResult = buildLocalRobustFeatureScript(prompt, dims, decomposition, retrieval, learningContext);
   if (robustResult?.code) {
     const strict = validateFeatureScriptStrict(robustResult.code);
@@ -5933,6 +6010,74 @@ function keySlotsForStage(stage, count, affinity = "") {
   );
 }
 
+// ─── Tier 2: plan-based generation ───────────────────────────────────────────
+// The model outputs a typed JSON build plan; planCompiler.js validates it at the
+// plan level and deterministically emits FeatureScript. The model never writes
+// FS syntax, so syntax errors are structurally impossible, prompts are ~5x
+// smaller (gpt-oss-120b fits its TPM limit again), and plan-level errors are
+// precise enough for a single feedback retry to usually converge.
+async function generateViaPlanCompiler(prompt, dims, learningContext, requestId) {
+  const MAX_PLAN_ATTEMPTS = 2;
+  let feedback = null;
+  for (let attempt = 0; attempt < MAX_PLAN_ATTEMPTS; attempt += 1) {
+    try {
+      const userLines = [
+        `USER REQUEST: ${prompt}`,
+        `DIMENSIONS (use as parameter defaults where relevant): ${summarizeDimsForPrompt(dims)}`,
+      ];
+      if (feedback?.length) {
+        userLines.push("PREVIOUS PLAN ERRORS — fix ALL of these in the new plan:");
+        for (const issue of feedback.slice(0, 10)) userLines.push(`- ${issue.message}`);
+      }
+      const raw = await chat([
+        { role: "system", content: buildPlanSystemPrompt() },
+        { role: "user", content: userLines.join("\n") },
+      ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
+        stage: "generation",
+        affinity: `${requestId}:plan:${attempt}`,
+        maxCompletionTokens: 2560,
+        jsonSchema: FEATURESCRIPT_PLAN_JSON_SCHEMA,
+      });
+
+      const plan = tryParseJson(String(raw || "").replace(/<think>[\s\S]*?<\/think>/gi, ""), null);
+      const planErrors = validatePlan(plan);
+      if (planErrors.length) {
+        console.warn(`[AI] Plan attempt ${attempt + 1}: ${planErrors.length} plan-level error(s); feeding back.`);
+        for (const issue of planErrors.slice(0, 3)) console.warn(`[AI]   plan issue: ${issue.message.slice(0, 160)}`);
+        feedback = planErrors;
+        continue;
+      }
+      const compiled = compilePlanToFeatureScript(plan);
+      if (!compiled.ok) {
+        feedback = compiled.errors;
+        continue;
+      }
+      const strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(compiled.code));
+      if (strict.ok) {
+        console.log(`[AI] Plan compiler: verified candidate on attempt ${attempt + 1} (${plan.steps.length} steps${strict.onshapeCheck?.ok ? ", Onshape-verified" : ""}).`);
+        return {
+          candidateId: "plan_compiler",
+          ok: true,
+          featureName: compiled.featureName,
+          featureLabel: compiled.featureLabel,
+          reasoning: compiled.reasoning || "Compiled deterministically from a typed build plan.",
+          code: strict.code,
+          score: scoreFeatureScriptCandidate(strict.code).score,
+          localIssues: strict.validationIssues,
+          fatalIssues: strict.fatalIssues,
+          strict,
+          iteration: attempt,
+        };
+      }
+      feedback = [...strict.blockingIssues, ...strict.fatalIssues].map(issue => ({ message: issue.message }));
+      console.warn(`[AI] Plan attempt ${attempt + 1}: compiled code failed validation (${feedback.length} issue(s)).`);
+    } catch (err) {
+      console.warn(`[AI] Plan attempt ${attempt + 1} threw: ${String(err?.message || err).slice(0, 160)}`);
+    }
+  }
+  return null;
+}
+
 // ─── Generate → Test → Fix loop ──────────────────────────────────────────────
 //
 // Each iteration generates one candidate, immediately validates it, and if it
@@ -6135,10 +6280,18 @@ export async function generateFeatureScript(prompt, options = {}) {
   try {
     const retrieval = buildChatbotRetrievalBundle(prompt, dims, learningContext);
 
-    // ── Generate → Test → Fix loop ────────────────────────────────────────
-    // Each iteration generates one candidate, validates it immediately, and
-    // feeds any blocking errors back into the next generation prompt.
-    const bestCandidate = await runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId);
+    // ── Tier routing ─────────────────────────────────────────────────────
+    // Strong curated-example match → the example-grounded GTF loop (Tier 1).
+    // No strong match (novel/complex shape) → typed-plan generation first
+    // (Tier 2), with the GTF loop as fallback.
+    let bestCandidate = null;
+    const strongExampleMatch = selectFsExamplesForPrompt(prompt, dims, 1, 2);
+    if (ENABLE_PLAN_COMPILER && dims.shape !== "GEAR_SPUR" && strongExampleMatch.length === 0) {
+      bestCandidate = await generateViaPlanCompiler(prompt, dims, learningContext, requestId);
+    }
+    if (!bestCandidate) {
+      bestCandidate = await runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId);
+    }
 
     let selectedCode = bestCandidate?.code || "";
     let selectedFeatureName = bestCandidate?.featureName || dims.featureName;
@@ -6827,6 +6980,15 @@ function validateFeatureScript(code) {
     }
     if (!/"instanceNames"\s*:/.test(text)) {
       addIssue(0, "opPattern requires an \"instanceNames\" array of distinct strings the same length as transforms (build with \"inst\" ~ i).", "(global)");
+    }
+  }
+
+  // opBoolean UNION must not carry a "targets" key — verified against the real
+  // Onshape compiler (BOOLEAN_BAD_INPUT): targets is only for SUBTRACTION/grouping.
+  for (const booleanMatch of text.matchAll(/\bopBoolean\s*\(([\s\S]*?)\}\s*\)\s*;/g)) {
+    const block = booleanMatch[1];
+    if (/BooleanOperationType\.UNION/.test(block) && /"targets"\s*:/.test(block)) {
+      addIssue(lineNumberAt(text, booleanMatch.index), "opBoolean UNION must not have a \"targets\" key — put ALL bodies to merge in \"tools\" via qUnion([...]). targets is only valid for SUBTRACTION.", "(opBoolean UNION)");
     }
   }
 

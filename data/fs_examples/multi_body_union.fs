@@ -64,8 +64,10 @@ export const baseWithCornerPosts = defineFeature(function(context is Context, id
         });
 
         opBoolean(context, id + "unionAll", {
-            "tools" : qCreatedBy(id + "postBodies", EntityType.BODY),
-            "targets" : qCreatedBy(id + "baseBody", EntityType.BODY),
+            "tools" : qUnion([
+                qCreatedBy(id + "postBodies", EntityType.BODY),
+                qCreatedBy(id + "baseBody", EntityType.BODY)
+            ]),
             "operationType" : BooleanOperationType.UNION
         });
     });

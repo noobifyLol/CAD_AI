@@ -66,9 +66,40 @@ export const bottleWithNeck = defineFeature(function(context is Context, id is I
             "angleForward" : 2 * PI * radian
         });
 
-        // Hollow the bottle through the neck opening.
-        opShell(context, id + "bottleShell", {
-            "entities"  : qCapEntity(id + "bottleBody", CapType.END, EntityType.FACE),
-            "thickness" : -definition.wallThickness
+        // Hollow the bottle by subtracting an inner revolve inset by the wall
+        // thickness. (qCapEntity/opShell only work on extruded bodies, not revolves —
+        // the tool profile extends past the top so the neck mouth opens cleanly.)
+        var wt = definition.wallThickness / inch;
+        var innerSketch = newSketchOnPlane(context, id + "innerSketch", { "sketchPlane" : skPlane });
+        skLineSegment(innerSketch, "innerAxis", {
+            "start" : vector(0, wt) * inch,
+            "end"   : vector(0, totalH + wt) * inch
+        });
+        skFitSpline(innerSketch, "innerProfile", { "points" : [
+            vector(bodyR - wt, wt) * inch,
+            vector(bodyR - wt, bodyH * 0.55) * inch,
+            vector(bodyR * 0.92 - wt, bodyH * 0.8) * inch,
+            vector(neckR * 1.4 - wt, bodyH) * inch,
+            vector(neckR - wt, bodyH + neckH * 0.35) * inch,
+            vector(neckR - wt, totalH + wt) * inch
+        ] });
+        skLineSegment(innerSketch, "innerTopClose", {
+            "start" : vector(neckR - wt, totalH + wt) * inch,
+            "end"   : vector(0, totalH + wt) * inch
+        });
+        skLineSegment(innerSketch, "innerBaseClose", {
+            "start" : vector(0, wt) * inch,
+            "end"   : vector(bodyR - wt, wt) * inch
+        });
+        skSolve(innerSketch);
+        opRevolve(context, id + "innerBody", {
+            "entities"     : qSketchRegion(id + "innerSketch"),
+            "axis"         : revolveAxis,
+            "angleForward" : 2 * PI * radian
+        });
+        opBoolean(context, id + "hollowBottle", {
+            "tools" : qCreatedBy(id + "innerBody", EntityType.BODY),
+            "targets" : qCreatedBy(id + "bottleBody", EntityType.BODY),
+            "operationType" : BooleanOperationType.SUBTRACTION
         });
     });

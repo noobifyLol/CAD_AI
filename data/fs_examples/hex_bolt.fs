@@ -58,17 +58,19 @@ export const hexBolt = defineFeature(function(context is Context, id is Id, defi
             "endDepth"  : definition.shaftLength
         });
 
-        // 3. Union head and shaft into one bolt body.
-        opBoolean(context, id + "unionBolt", {
-            "tools" : qCreatedBy(id + "shaftBody", EntityType.BODY),
-            "targets" : qCreatedBy(id + "headBody", EntityType.BODY),
-            "operationType" : BooleanOperationType.UNION
-        });
-
-        // 4. Chamfer the shaft end so threads could start cleanly.
+        // 3. Chamfer the shaft end so threads could start cleanly.
         opChamfer(context, id + "tipChamfer", {
-            "entities"    : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "headBody", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+            "entities"    : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "shaftBody", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
             "chamferType" : ChamferType.EQUAL_OFFSETS,
             "width"       : definition.chamferWidth
         });
+        // 4. Union head and shaft into one bolt body.
+        opBoolean(context, id + "unionBolt", {
+            "tools" : qUnion([
+                qCreatedBy(id + "shaftBody", EntityType.BODY),
+                qCreatedBy(id + "headBody", EntityType.BODY)
+            ]),
+            "operationType" : BooleanOperationType.UNION
+        });
+
     });

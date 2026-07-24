@@ -77,9 +77,9 @@ export const discWithPatternedBosses = defineFeature(function(context is Context
         opBoolean(context, id + "unionAll", {
             "tools" : qUnion([
                 qCreatedBy(id + "bossBody", EntityType.BODY),
-                qCreatedBy(id + "bossPattern", EntityType.BODY)
+                qCreatedBy(id + "bossPattern", EntityType.BODY),
+                qCreatedBy(id + "discBody", EntityType.BODY)
             ]),
-            "targets" : qCreatedBy(id + "discBody", EntityType.BODY),
             "operationType" : BooleanOperationType.UNION
         });
     });

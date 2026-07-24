@@ -87,9 +87,9 @@ export const heatsinkWithLinearFins = defineFeature(function(context is Context,
         opBoolean(context, id + "unionAll", {
             "tools" : qUnion([
                 qCreatedBy(id + "finBody", EntityType.BODY),
-                qCreatedBy(id + "finPattern", EntityType.BODY)
+                qCreatedBy(id + "finPattern", EntityType.BODY),
+                qCreatedBy(id + "baseBody", EntityType.BODY)
             ]),
-            "targets" : qCreatedBy(id + "baseBody", EntityType.BODY),
             "operationType" : BooleanOperationType.UNION
         });
     });

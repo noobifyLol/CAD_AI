@@ -56,16 +56,18 @@ export const steppedShaftWithChamfer = defineFeature(function(context is Context
             "endBound"  : BoundingType.BLIND,
             "endDepth"  : definition.minorLength
         });
-        opBoolean(context, id + "unionShaft", {
-            "tools" : qCreatedBy(id + "minorBody", EntityType.BODY),
-            "targets" : qCreatedBy(id + "majorBody", EntityType.BODY),
-            "operationType" : BooleanOperationType.UNION
-        });
-
         // Break the sharp end edges with a chamfer.
         opChamfer(context, id + "endChamfer", {
-            "entities"    : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "majorBody", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
+            "entities"    : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "minorBody", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
             "chamferType" : ChamferType.EQUAL_OFFSETS,
             "width"       : definition.chamferWidth
         });
+        opBoolean(context, id + "unionShaft", {
+            "tools" : qUnion([
+                qCreatedBy(id + "minorBody", EntityType.BODY),
+                qCreatedBy(id + "majorBody", EntityType.BODY)
+            ]),
+            "operationType" : BooleanOperationType.UNION
+        });
+
     });

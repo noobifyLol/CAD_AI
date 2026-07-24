@@ -134,7 +134,7 @@ function inferDummyDeclarations(precondition, body) {
     const isEmptyGuarded = new RegExp(`isQueryEmpty\\s*\\(\\s*context\\s*,\\s*(?:definition\\s*\\.\\s*)?${name}\\b`).test(combined);
 
     if (isBoolDecl) {
-      decls.push(`var ${name} = true;`);
+      decls.push(`var _fake_${name} = true;`);
     } else if (isLengthDecl) {
       // Use the parameter's declared default from its bounds triple, exactly like the
       // Onshape dialog would. Uniform dummy values (all params = 1 inch) previously
@@ -145,16 +145,16 @@ function inferDummyDeclarations(precondition, body) {
       ).exec(combined);
       const lengthTriple = lengthBounds ? lengthBounds[1].split(",").map(v => Number(v.trim())) : null;
       const lengthDefault = lengthTriple && lengthTriple.length === 3 && Number.isFinite(lengthTriple[1]) ? lengthTriple[1] : 1;
-      decls.push(`var ${name} = ${lengthDefault} * inch;`);
+      decls.push(`var _fake_${name} = ${lengthDefault} * inch;`);
     } else if (isIntegerDecl) {
       const integerBounds = new RegExp(
         `isInteger\\s*\\(\\s*definition\\s*\\.\\s*${name}\\s*,\\s*\\{\\s*\\(unitless\\)\\s*:\\s*\\[([^\\]]+)\\]`
       ).exec(combined);
       const integerTriple = integerBounds ? integerBounds[1].split(",").map(v => Number(v.trim())) : null;
       const integerDefault = integerTriple && integerTriple.length === 3 && Number.isFinite(integerTriple[1]) ? integerTriple[1] : 3;
-      decls.push(`var ${name} = ${integerDefault};`);
+      decls.push(`var _fake_${name} = ${integerDefault};`);
     } else if (isQueryDecl && isEmptyGuarded) {
-      decls.push(`var ${name} = qNothing();`);
+      decls.push(`var _fake_${name} = qNothing();`);
     } else {
       return null; // Un-guarded Query, enum, or unrecognized shape — can't fake this safely.
     }
@@ -173,9 +173,12 @@ export function buildTestHarnessScript(fullModuleCode) {
     return { ok: false, reason: "Feature has a Query/enum-typed parameter that can't be safely faked for a headless check." };
   }
 
+  // Substitute with a reserved prefix so faked parameters can never collide with
+  // variables the feature body itself declares (e.g. `var pitchRadius =
+  // definition.pitchRadius;` must not become a duplicate declaration).
   let body = blocks.body;
   for (const name of inferred.names) {
-    body = body.replace(new RegExp(`definition\\s*\\.\\s*${name}\\b`, "g"), name);
+    body = body.replace(new RegExp(`definition\\s*\\.\\s*${name}\\b`, "g"), `_fake_${name}`);
   }
 
   const script = [
