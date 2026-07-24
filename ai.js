@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
+import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
 const DEFAULT_STRONG_TEXT_MODEL = "llama-3.3-70b-versatile";
@@ -506,6 +507,50 @@ async function callGroqVisionLLM(messages, model = VISION_MODEL, options = {}) {
 // ------------------------------
 // 1. Text LLM via Groq
 // ------------------------------
+// GPT-OSS-only capabilities: constrained-decoding "strict" JSON-schema mode (100%
+// schema adherence, never returns invalid JSON or wraps output in prose/code-fences)
+// and reasoning_effort. Every other model (llama-3.3-70b-versatile, llama-3.1-8b-instant,
+// qwen, etc.) still relies on the parseFeatureScriptJson/tryParseJson recovery logic
+// below — this is purely additive for gpt-oss calls.
+function isGptOssModel(model) {
+  return /^openai\/gpt-oss-(120b|20b)$/.test(String(model || ""));
+}
+// GPT-OSS spends hidden chain-of-thought tokens out of max_completion_tokens BEFORE
+// writing the actual answer (measured: ~99 reasoning tokens at the "medium" default vs
+// ~9 at "low" for an equivalent response) — on an already TPM-starved budget, that's
+// tokens stolen from the FeatureScript "code" field itself. "low" is deliberate, not a
+// quality shortcut: the strict system-prompt template already does the hard thinking,
+// gpt-oss just needs to follow it.
+const GPT_OSS_REASONING_EFFORT = process.env.GROQ_GPT_OSS_REASONING_EFFORT || "low";
+
+const FEATURESCRIPT_GENERATION_JSON_SCHEMA = {
+  name: "featurescript_candidate",
+  schema: {
+    type: "object",
+    properties: {
+      featureName: { type: "string" },
+      featureLabel: { type: "string" },
+      reasoning: { type: "string" },
+      code: { type: "string" },
+    },
+    required: ["featureName", "featureLabel", "reasoning", "code"],
+    additionalProperties: false,
+  },
+};
+
+const FEATURESCRIPT_REPAIR_JSON_SCHEMA = {
+  name: "featurescript_repair",
+  schema: {
+    type: "object",
+    properties: {
+      fixed: { type: "string" },
+      explanation: { type: "string" },
+    },
+    required: ["fixed", "explanation"],
+    additionalProperties: false,
+  },
+};
+
 async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {}) {
   const stage = options.stage || "generation";
   const credential = pickStageCredential(stage, options.affinity, options.keySlot);
@@ -536,6 +581,20 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
     max_completion_tokens: maxCompletionTokens,
     temperature: GROQ_TEMPERATURE,
   };
+
+  if (isGptOssModel(model)) {
+    requestBody.reasoning_effort = options.reasoningEffort || GPT_OSS_REASONING_EFFORT;
+    if (options.jsonSchema) {
+      requestBody.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: options.jsonSchema.name,
+          strict: true,
+          schema: options.jsonSchema.schema,
+        },
+      };
+    }
+  }
 
   const client = getGroqClient(credential.apiKey, options.timeoutMs || GROQ_TIMEOUT_MS);
   const startedAt = Date.now();
@@ -681,11 +740,41 @@ function messagesToPrompt(messages = []) {
   }).join("\n\n");
 }
 
-function nextKeySlot(slot) {
-  const match = /^k(\d+)$/i.exec(String(slot || ""));
-  if (!match) return null;
-  const index = Number(match[1]);
-  return `k${(index % FIXED_KEY_SLOT_SEQUENCE.length) + 1}`;
+// The 9 configured GROQ_API_KEY* slots are NOT all one org — probing confirmed they
+// span 3 distinct Groq orgs in ~3-key groups (org membership can shift if keys are
+// regenerated, so this is learned live from error text rather than hardcoded). That
+// matters a lot: Groq scopes both 413 (too-large) and 429 (rate-limit) errors "in
+// organization org_...", so rotating to a key in the SAME org as the one that just
+// failed is pure theater — it shares the exhausted bucket. Rotating to a key in a
+// DIFFERENT org gets a genuinely independent TPM/TPD budget and is worth trying
+// immediately (no backoff wait needed, since that bucket was never touched).
+const keySlotOrgCache = new Map(); // slot label ("k3") -> last observed org id
+
+function extractOrgId(message) {
+  const match = /organization `([^`]+)`/.exec(String(message || ""));
+  return match ? match[1] : null;
+}
+
+function computeInitialKeySlot(stage, affinity, poolSize) {
+  if (affinity) {
+    const slotIndex = stableHash(`${stage}:${affinity}`) % poolSize;
+    return FIXED_KEY_SLOT_SEQUENCE[slotIndex];
+  }
+  return FIXED_KEY_SLOT_SEQUENCE[Math.floor(Math.random() * poolSize)];
+}
+
+// Finds an untried slot whose org is confirmed different from every org already tried
+// for this model. Prefers a slot with a known-different org; falls back to a slot with
+// an unprobed (unknown) org, since that might turn out to be a fresh one too. Returns
+// null once nothing untried remains — that's the signal to give up on this model.
+function pickUntriedOrgSlot(poolSize, triedSlots, triedOrgs) {
+  const candidates = FIXED_KEY_SLOT_SEQUENCE.slice(0, poolSize).filter(slot => !triedSlots.has(slot));
+  const knownFreshOrg = candidates.find(slot => {
+    const org = keySlotOrgCache.get(slot);
+    return org && !triedOrgs.has(org);
+  });
+  if (knownFreshOrg) return knownFreshOrg;
+  return candidates.find(slot => !keySlotOrgCache.has(slot)) || null;
 }
 
 async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
@@ -693,21 +782,37 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
   const modelsToTry = [model, ...fallbackList.filter(candidate => candidate && candidate !== model)];
-  const ATTEMPTS_PER_MODEL = 2;
+  const stage = options.stage || "generation";
+  const poolSize = Math.max(1, Math.min(FIXED_KEY_SLOT_SEQUENCE.length, getStageKeyPool(stage).length));
+  // Headroom beyond poolSize so a couple of completion-shrink retries (which don't
+  // change org) don't eat into the budget meant for trying each distinct org.
+  const MAX_ATTEMPTS_PER_MODEL = poolSize + 2;
 
   let lastError = null;
   for (const candidate of modelsToTry) {
-    let attemptOptions = { ...options };
-    for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt += 1) {
+    let attemptOptions = {
+      ...options,
+      keySlot: options.keySlot || computeInitialKeySlot(stage, options.affinity, poolSize),
+    };
+    const triedSlots = new Set();
+    const triedOrgs = new Set();
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
+      triedSlots.add(attemptOptions.keySlot);
       try {
         const text = await callLLM(messages, candidate, attemptOptions);
-        if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate} for stage=${options.stage || "generation"}`);
+        if (candidate !== model) console.warn(`[AI] Used fallback model ${candidate} for stage=${stage}`);
         return text;
       } catch (err) {
         lastError = err;
         const message = String(err?.message || "");
         const tooLarge = /request too large|reduce your message size/i.test(message);
         const rateLimited = /rate limit|tokens per minute|tpm|429|rate_limit_exceeded/i.test(message);
+        const orgId = extractOrgId(message);
+        if (orgId) {
+          keySlotOrgCache.set(attemptOptions.keySlot, orgId);
+          triedOrgs.add(orgId);
+        }
 
         if (tooLarge) {
           // Groq counts prompt + max_completion_tokens against the TPM limit.
@@ -723,22 +828,25 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
             attemptOptions = { ...attemptOptions, maxCompletionTokens: shrunkCompletion };
             continue;
           }
-          console.warn(`[AI] Request cannot fit ${candidate} TPM limit even after shrinking; trying next fallback model.`);
+          const rotatedSlot = pickUntriedOrgSlot(poolSize, triedSlots, triedOrgs);
+          if (rotatedSlot) {
+            console.warn(`[AI] ${candidate} too large for key ${attemptOptions.keySlot}'s org even after shrinking; trying a different org via key ${rotatedSlot}.`);
+            attemptOptions = { ...options, keySlot: rotatedSlot };
+            continue;
+          }
+          console.warn(`[AI] Request cannot fit ${candidate} on any available org; trying next fallback model.`);
           break;
         }
 
-        if (rateLimited && options.retryOnRateLimit !== false) {
-          const retrySeconds = Number(message.match(/try again in\s+([\d.]+)s/i)?.[1] || 0);
-          const waitMs = Number(options.rateLimitBackoffMs || Math.max(1200, Math.ceil(retrySeconds * 1000) + 500));
-          const rotatedSlot = nextKeySlot(attemptOptions.keySlot);
+        if (rateLimited) {
+          const rotatedSlot = pickUntriedOrgSlot(poolSize, triedSlots, triedOrgs);
           if (rotatedSlot) {
-            console.warn(`[AI] Rate limit on stage=${options.stage || "generation"} model=${candidate}; rotating key ${attemptOptions.keySlot} -> ${rotatedSlot}, retrying after ${waitMs}ms.`);
+            console.warn(`[AI] Rate limit on stage=${stage} model=${candidate} (key ${attemptOptions.keySlot}'s org); trying a different org via key ${rotatedSlot}.`);
             attemptOptions = { ...attemptOptions, keySlot: rotatedSlot };
-          } else {
-            console.warn(`[AI] Rate limit on stage=${options.stage || "generation"} model=${candidate}; retrying after ${waitMs}ms.`);
+            continue;
           }
-          await new Promise(resolve => setTimeout(resolve, waitMs));
-          continue;
+          console.warn(`[AI] Rate limit on stage=${stage} model=${candidate}; every known org already tried, trying next fallback model.`);
+          break;
         }
 
         break;
@@ -3312,19 +3420,6 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
     is boolean / is Query declaration in the precondition block. Missing declarations cause
     runtime "undefined" or type errors.
 
-═══ GEARS / TOOTHED PARTS ═══
-- Gear helper lambdas MUST use untyped parameters (rule 10 above):
-  RIGHT: const invPoint = function(t, rb) { ... };
-  WRONG: const invPoint = function(t is number, rb is number) { ... };
-- Never use var for const helper lambdas at the feature body top level; use const.
-- Inside for loops over teeth, use var for loop-body temporaries (rule 12 above).
-- Tooth sketches must create CLOSED regions before extrusion.
-- Keep all user-facing values editable: tooth count, module or pitch radius, face width, pressure angle, and bore.
-- Never represent a finished spur gear as only concentric circles for root, pitch, and tip diameters.
-- Use sampled involute-style left and right tooth flanks plus tip/root arcs.
-- For a gear pair, keep the gears as separate bodies and offset their centers by pitchRadius1 + pitchRadius2.
-- Do not boolean-union two different gears together unless the prompt explicitly asks for one merged body.
-
 ═══ ADVANCED OPERATIONS ═══
 Use these when the shape genuinely needs them — do not force them onto simple geometry.
 
@@ -3404,7 +3499,7 @@ Intermediate plane construction — how to make a plane at an offset or angle:
   var offsetPlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal);
   var sidePlane   = plane(skPlane.origin, skPlane.x);  // perpendicular to sketch plane
 
-═══ GEAR GENERATION RULES (MUST USE INVOLUTE PROFILE) ═══\r\n-- For GEAR_SPUR shapes, you MUST use the full involute flank sampling approach:\r\n-- 1. Compute base circle, pitch circle, root circle, and tip circle radii from:\r\n--    - pitchRadius, pressureAngle, module (module = 2*pitchRadius / numTeeth)\r\n--    - tipRadius = pitchRadius + module\r\n--    - rootRadius = max(pitchRadius - 1.35*module, pitchRadius*0.5)\r\n--    - baseRadius = pitchRadius * cos(pressureAngle)\r\n-- 2. Draw the tooth profile using skArc for root arc, skArc for tip arc, and skFitSpline for involute flank\r\n-- 3. Create ONE tooth profile sketch, then pattern the tooth body with opPattern using rotationAround transforms and instanceNames (opPatternCircular does NOT exist)\r\n-- 4. Create the hub/body as a cylinder (skCircle + opExtrude) with bore hole\r\n-- 5. UNION the tooth body with the hub body using opBoolean\r\n-- DO NOT use simple concentric circles for gear teeth — that produces a placeholder, not a valid gear.\r\n-- DO NOT use skCircle alone for root/tip without involute spline in between.\r\n-- Every gear must have: involute flank spline, root arc, tip arc, circular pattern, boolean union, bore cut.\r\n\r\n═══ MECH / MULTI-BODY STRATEGY ═══
+═══ MECH / MULTI-BODY STRATEGY ═══
 Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
 Build each section as its own opExtrude call or fCylinder primitive
 for cylindrical parts), then union adjacent bodies:
@@ -3466,6 +3561,8 @@ Use a revolved spline profile for any organic tapered shape:
    4. Hub/cylinder body with bore — UNIONed with tooth body
    5. Every dimension exposed in precondition for user editing
 -- DO NOT use concentric circles alone — they produce a non-compiled placeholder.
+-- For a gear PAIR, keep the two gears as separate bodies offset by pitchRadius1 + pitchRadius2;
+   do not union two different gears unless the prompt explicitly asks for one merged body.
 ═══ EVERYDAY OBJECT DECOMPOSITION (HARD RULE) ═══
 A named real-world object must NEVER be modeled as one stretched primitive.
 Decompose it into its recognizable components and build each one:
@@ -5687,6 +5784,31 @@ export function validateFeatureScriptStrict(code, opts = {}) {
   };
 }
 
+// Extends a validateFeatureScriptStrict() result with a real Onshape compile check.
+// Only runs when the local regex validator already thinks the code is clean — it exists
+// to catch what regex CAN'T (unresolved functions, wrong-typed calls, missing skSolve,
+// etc.), not to duplicate it. Folds any real compiler errors into fatalIssues/ok so every
+// existing downstream consumer (repair gating, scoring, orchestration diagnostics) picks
+// them up automatically without needing its own awareness of Onshape. Fails open: a
+// misconfigured or unreachable Onshape check never blocks generation.
+async function applyOnshapeCompileCheck(strict) {
+  if (!strict.ok || !isOnshapeConfigured()) return strict;
+
+  const onshapeCheck = await testCompileFeatureScript(strict.code);
+  if (onshapeCheck.ok !== false) {
+    return { ...strict, onshapeCheck };
+  }
+
+  const extraFatal = onshapeCheck.errors.map(e => ({ message: `Onshape compiler: ${e.message}`, source: "onshape" }));
+  return {
+    ...strict,
+    ok: false,
+    fatalIssues: [...strict.fatalIssues, ...extraFatal],
+    fatalIssueCount: strict.fatalIssueCount + extraFatal.length,
+    onshapeCheck,
+  };
+}
+
 function keySlotsForStage(stage, count, affinity = "") {
   const configuredCount = Math.max(1, Math.min(
     FIXED_KEY_SLOT_SEQUENCE.length,
@@ -5729,6 +5851,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         keySlot,
         fullCode: true,
         maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
+        jsonSchema: FEATURESCRIPT_GENERATION_JSON_SCHEMA,
       });
 
       const parsed = parseFeatureScriptJson(raw, dims);
@@ -5740,7 +5863,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
       }
 
       // ── TEST ─────────────────────────────────────────────────────────────
-      const strict = validateFeatureScriptStrict(parsed.code);
+      const strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(parsed.code));
       const scored = scoreFeatureScriptCandidate(strict.code);
       const candidate = {
         candidateId,
@@ -5763,7 +5886,8 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
 
       // Early exit: this candidate is fully clean
       if (strict.ok) {
-        console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}`);
+        const verified = strict.onshapeCheck?.attempted ? " (Onshape-verified)" : "";
+        console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}${verified}`);
         break;
       }
 
@@ -5791,7 +5915,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
 }
 
 async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_ATTEMPTS) {
-  let strict = validateFeatureScriptStrict(code);
+  let strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(code));
   let workingCode = strict.code;
   let localIssues = strict.validationIssues;
   let fatalIssues = strict.fatalIssues;
@@ -5810,7 +5934,7 @@ async function runRepairCycle(code, learningContext, maxAttempts = CAD_REPAIR_AT
       affinity: `repair:${stableHash(workingCode)}:${attempt}`,
     });
     if (!repair?.fixed) break;
-    strict = validateFeatureScriptStrict(repair.fixed);
+    strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(repair.fixed));
     workingCode = strict.code;
     explanations.push(repair.explanation || `Repair pass ${attempt + 1} applied.`);
     repaired = true;
@@ -5832,6 +5956,7 @@ async function generateSimplifiedCandidate(prompt, dims, learningContext, retrie
     keySlot: slot,
     fullCode: true,
     maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
+    jsonSchema: FEATURESCRIPT_GENERATION_JSON_SCHEMA,
   });
   return parseFeatureScriptJson(raw, dims);
 }
@@ -6122,6 +6247,25 @@ candidateScores: bestCandidate ? [{
       orchestration,
     });
 
+    // Final defensive guard: buildGuaranteedFeatureScript above should never leave
+    // selectedCode empty, but if some edge case did slip through, never send the
+    // caller an empty response — fall back to the static base template.
+    if (!selectedCode) {
+      warnings.push("Every generation and fallback path produced no code; returned the static base template.");
+      return {
+        code: STRICT_FEATURESCRIPT_TEMPLATE,
+        featureName: "templateDrivenPart",
+        featureLabel: "Template Driven Part",
+        thinking,
+        dims,
+        generationMode: "static_template_fallback",
+        completionLevel: "partial",
+        warnings,
+        omissions,
+        orchestration,
+      };
+    }
+
     return {
       code: selectedCode,
       featureName: selectedFeatureName,
@@ -6143,9 +6287,62 @@ candidateScores: bestCandidate ? [{
       ]);
     }
 
-    const aiRecovery = await generateWithAiThinking(prompt, dims, learningContext, requestId);
-    const repaired = aiRecovery?.code ? await runRepairCycle(aiRecovery.code, learningContext, 1) : null;
+    // AI recovery is itself a Groq call and can throw (e.g. total quota exhaustion) —
+    // never let that escape uncaught, or the endpoint returns a bare error with no code.
+    let aiRecovery = null;
+    let repaired = null;
+    try {
+      aiRecovery = await generateWithAiThinking(prompt, dims, learningContext, requestId);
+      repaired = aiRecovery?.code ? await runRepairCycle(aiRecovery.code, learningContext, 1) : null;
+    } catch (recoveryErr) {
+      console.error("[AI] AI recovery path also failed.", recoveryErr?.message || String(recoveryErr));
+    }
     const recoveryCode = repaired?.strict?.ok ? repaired.code : "";
+
+    // Absolute guarantee: the caller must always get a FeatureScript file back, never
+    // an empty/omitted result. If both the main path and AI recovery failed (e.g. every
+    // Groq model is quota-exhausted), fall back to the network-free deterministic
+    // builder, and if even THAT somehow throws, fall back to the static base template
+    // (a plain string constant — it cannot throw).
+    if (!recoveryCode) {
+      console.warn("[AI] AI recovery produced no compile-safe code; using the guaranteed deterministic fallback.");
+      try {
+        const guaranteed = buildGuaranteedFeatureScript(prompt, dims, learningContext, retrieval);
+        return {
+          ...guaranteed,
+          warnings: [
+            `Main chatbot generation failed: ${String(err?.message || "unknown").slice(0, 100)}`,
+            "AI recovery also failed or produced no compile-safe code.",
+            ...(guaranteed.warnings || []),
+          ],
+        };
+      } catch (guaranteedErr) {
+        console.error("[AI] Guaranteed deterministic fallback itself failed; returning the static strict template.", guaranteedErr?.message || String(guaranteedErr));
+        return {
+          code: STRICT_FEATURESCRIPT_TEMPLATE,
+          featureName: "templateDrivenPart",
+          featureLabel: "Template Driven Part",
+          thinking: "Every generation, recovery, and deterministic-fallback path failed; returned the static base template so a response is never empty.",
+          dims,
+          generationMode: "static_template_fallback",
+          completionLevel: "partial",
+          warnings: [
+            `Main chatbot generation failed: ${String(err?.message || "unknown").slice(0, 100)}`,
+            "Every generation and fallback path failed; returned the static base template.",
+          ],
+          omissions: ["No shape-specific geometry could be generated; this is the generic parametric block template."],
+          orchestration: {
+            status: "completed",
+            completionLevel: "partial",
+            failedPass: "generation",
+            passes: {},
+            warnings: [],
+            omissions: [],
+          },
+        };
+      }
+    }
+
     const warnings = [`Main chatbot generation failed: ${String(err?.message || "unknown").slice(0, 100)}`];
     if (repaired?.repaired) warnings.push("Recovery code was automatically repaired.");
     if (repaired && !repaired.strict?.ok) warnings.push("Recovery code was withheld because local FeatureScript validation still found blocking issues.");
@@ -6755,6 +6952,7 @@ export async function debugFeatureScript(code, errors, options = {}) {
       affinity: options.affinity || `repair:${stableHash(sanitizedInput)}`,
       fullCode: true,
       maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
+      jsonSchema: FEATURESCRIPT_REPAIR_JSON_SCHEMA,
     });
     const parsed = tryParseJson(raw, null);
     const rawFeatureScript = /FeatureScript\s+\d+\s*;/.test(raw) ? raw : "";

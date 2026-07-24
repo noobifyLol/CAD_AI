@@ -161,13 +161,34 @@ app.post("/generate", async (req, res) => {
 
   try {
     console.log(`[/generate] body=${truncateForLog(req.body, 2000)}`);
-    const learningContext = await learning.fetchLearningContext(prompt, history);
+
+    // A DB hiccup fetching learning context must not block generation — FeatureScript
+    // generation doesn't fundamentally need it, so degrade to an empty context instead
+    // of failing the whole request before generateFeatureScript ever runs.
+    let learningContext = { examples: [], memoryMatches: [], featureScriptDocs: [] };
+    try {
+      learningContext = await learning.fetchLearningContext(prompt, history);
+    } catch (contextErr) {
+      console.error("[/generate] fetchLearningContext failed, continuing without it:", contextErr.message);
+    }
+
     const result = await generateFeatureScript(prompt, { learningContext, history });
-    const generationLog = await learning.logGeneration(prompt, result, {
-      learningContext,
-      userId: req.user?.id || null,
-    });
-    const diagnostics = await learning.diagnostics();
+
+    // generateFeatureScript is guaranteed to return usable code at this point (it has
+    // its own layered fallbacks). A failure logging/reading DB state afterward must not
+    // discard that result and hand the caller a bare error instead of their FeatureScript.
+    let generationLog = null;
+    let diagnostics = null;
+    try {
+      generationLog = await learning.logGeneration(prompt, result, {
+        learningContext,
+        userId: req.user?.id || null,
+      });
+      diagnostics = await learning.diagnostics();
+    } catch (postErr) {
+      console.error("[/generate] post-generation logging/diagnostics failed, returning result anyway:", postErr.message);
+    }
+
     console.log(`[/generate] resultMeta=${truncateForLog({
       featureName: result.featureName,
       featureLabel: result.featureLabel,
@@ -189,25 +210,40 @@ app.post("/debug", async (req, res) => {
 
   try {
     console.log(`[/debug] body=${truncateForLog({ ...req.body, code: code.slice(0, 1200) }, 2000)}`);
-    const learningContext = await learning.fetchLearningContext(`${errors}\n${code.slice(0, 400)}`);
-    const { fixed, explanation } = await debugFeatureScript(code, errors, { learningContext });
 
-    const debugLog = await learning.logDebugSession({
-      originalCode: code,
-      errorMessages: errors,
-      fixedCode: fixed,
-      explanation,
-    });
-
-    if (generationId) {
-      await learning.recordFeedback({
-        generationId,
-        signal: errors ? "compile_error" : "debug_requested",
-        feedback: errors || "Sent to debug for review.",
-      });
+    let learningContext = { examples: [], memoryMatches: [], featureScriptDocs: [] };
+    try {
+      learningContext = await learning.fetchLearningContext(`${errors}\n${code.slice(0, 400)}`);
+    } catch (contextErr) {
+      console.error("[/debug] fetchLearningContext failed, continuing without it:", contextErr.message);
     }
 
-    res.json({ fixed, explanation, createdAt: debugLog.createdAt, database: debugLog });
+    // debugFeatureScript always returns a usable { fixed, explanation } — it has its
+    // own internal fallback to the sanitized original code. A DB logging failure below
+    // must not discard that and hand the caller a bare error instead of their fix.
+    const { fixed, explanation } = await debugFeatureScript(code, errors, { learningContext });
+
+    let debugLog = null;
+    try {
+      debugLog = await learning.logDebugSession({
+        originalCode: code,
+        errorMessages: errors,
+        fixedCode: fixed,
+        explanation,
+      });
+
+      if (generationId) {
+        await learning.recordFeedback({
+          generationId,
+          signal: errors ? "compile_error" : "debug_requested",
+          feedback: errors || "Sent to debug for review.",
+        });
+      }
+    } catch (logErr) {
+      console.error("[/debug] logging/feedback failed, returning fix anyway:", logErr.message);
+    }
+
+    res.json({ fixed, explanation, createdAt: debugLog?.createdAt || new Date().toISOString(), database: debugLog });
   } catch (err) {
     console.error("[/debug]", err.message);
     res.status(500).json({ error: err.message });
@@ -221,23 +257,36 @@ app.post("/analyze", async (req, res) => {
   if (!imageBase64) return res.status(400).json({ error: "No image provided." });
 
   try {
-    const learningContext = await learning.fetchLearningContext(prompt);
+    let learningContext = { examples: [], memoryMatches: [], featureScriptDocs: [] };
+    try {
+      learningContext = await learning.fetchLearningContext(prompt);
+    } catch (contextErr) {
+      console.error("[/analyze] fetchLearningContext failed, continuing without it:", contextErr.message);
+    }
+
     const result = await analyzeImage(imageBase64, mimeType, prompt, { learningContext });
-    const generationLog = await learning.logGeneration(prompt || "Image analysis", result, {
-      learningContext,
-      userId: req.user?.id || null,
-    });
-    const generationId = normalizeDbLog(generationLog).id;
 
-    await learning.logImageAnalysis({
-      imageCount: 1,
-      imageContexts: ["Reference"],
-      globalPrompt: prompt,
-      aiDescription: result.description,
-      generationId,
-    });
+    // A DB logging failure after a successful analysis must not discard the result.
+    let generationLog = null;
+    let diagnostics = null;
+    try {
+      generationLog = await learning.logGeneration(prompt || "Image analysis", result, {
+        learningContext,
+        userId: req.user?.id || null,
+      });
+      const generationId = normalizeDbLog(generationLog).id;
+      await learning.logImageAnalysis({
+        imageCount: 1,
+        imageContexts: ["Reference"],
+        globalPrompt: prompt,
+        aiDescription: result.description,
+        generationId,
+      });
+      diagnostics = await learning.diagnostics();
+    } catch (logErr) {
+      console.error("[/analyze] post-analysis logging failed, returning result anyway:", logErr.message);
+    }
 
-    const diagnostics = await learning.diagnostics();
     res.json(generationResponse(result, generationLog, learningContext, diagnostics));
   } catch (err) {
     console.error("[/analyze]", err.message);
@@ -260,23 +309,36 @@ app.post("/analyze-multi", async (req, res) => {
     const imageContexts = images.map(img => String(img.context || "").trim()).filter(Boolean);
     const contextualPrompt = [globalPrompt, ...imageContexts].filter(Boolean).join(" | ");
 
-    const learningContext = await learning.fetchLearningContext(contextualPrompt);
+    let learningContext = { examples: [], memoryMatches: [], featureScriptDocs: [] };
+    try {
+      learningContext = await learning.fetchLearningContext(contextualPrompt);
+    } catch (contextErr) {
+      console.error("[/analyze-multi] fetchLearningContext failed, continuing without it:", contextErr.message);
+    }
+
     const result = await analyzeImages(images, globalPrompt, { learningContext });
-    const generationLog = await learning.logGeneration(contextualPrompt || "Multi-image analysis", result, {
-      learningContext,
-      userId: req.user?.id || null,
-    });
-    const generationId = normalizeDbLog(generationLog).id;
 
-    await learning.logImageAnalysis({
-      imageCount: images.length,
-      imageContexts,
-      globalPrompt,
-      aiDescription: result.description,
-      generationId,
-    });
+    // A DB logging failure after a successful analysis must not discard the result.
+    let generationLog = null;
+    let diagnostics = null;
+    try {
+      generationLog = await learning.logGeneration(contextualPrompt || "Multi-image analysis", result, {
+        learningContext,
+        userId: req.user?.id || null,
+      });
+      const generationId = normalizeDbLog(generationLog).id;
+      await learning.logImageAnalysis({
+        imageCount: images.length,
+        imageContexts,
+        globalPrompt,
+        aiDescription: result.description,
+        generationId,
+      });
+      diagnostics = await learning.diagnostics();
+    } catch (logErr) {
+      console.error("[/analyze-multi] post-analysis logging failed, returning result anyway:", logErr.message);
+    }
 
-    const diagnostics = await learning.diagnostics();
     res.json(generationResponse(result, generationLog, learningContext, diagnostics));
   } catch (err) {
     console.error("[/analyze-multi]", err.message);

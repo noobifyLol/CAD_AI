@@ -9,6 +9,7 @@
     "dev": "nodemon server.js",
     "test:guaranteed": "node test.js",
     "test:validator": "node scripts/validator_regression.mjs",
+    "test:onshape": "node scripts/onshape_compile_check.mjs",
     "test:e2e": "node scripts/e2e_generate.mjs",
     "seed:knowledge": "node scripts/seedCadKnowledge.js",
     "import:cad-knowledge": "node scripts/importCadKnowledgeCsv.js",
