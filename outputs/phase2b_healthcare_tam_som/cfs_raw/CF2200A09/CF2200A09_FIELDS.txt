@@ -1,0 +1,22 @@
+Field_Name|Label|Field_Type|Field_Length|Number_of_Decimals
+GEOTYPE|Type of geography flag|CHARACTER|2|0
+ST|FIPS state code|CHARACTER|2|0
+GEO_ID|Geographic identifier code|CHARACTER|30|0
+GEO_LABEL|Geographic Area Name|CHARACTER|255|0
+GEO_ID_F|Geo Footnote|CHARACTER|4|0
+COMM|Commodity code|CHARACTER|13|0
+COMM_LABEL|Meaning of Commodity code|CHARACTER|255|0
+DMODE|Mode category code|CHARACTER|3|0
+DMODE_LABEL|Meaning of DMODE|CHARACTER|255|0
+DMODE_F|Flag for Mode category code|CHARACTER|1|0
+SHIPDIST|Distance shipped code|CHARACTER|3|0
+SHIPDIST_LABEL|Meaning of SHIPDIST|CHARACTER|255|0
+YEAR|Year|CHARACTER|4|0
+VAL|Value ($ million)|NUMBER|10|0
+VAL_F|Value ($ million)|CHARACTER|1|0
+TON|Weight (thousand tons)|NUMBER|10|0
+TON_F|Weight (thousand tons)|CHARACTER|1|0
+VAL_S|Coefficient of variation for Value|NUMBER|10|1
+VAL_S_F|Coefficient of variation for Value|CHARACTER|1|0
+TON_S|Coefficient of variation for Weight|NUMBER|10|1
+TON_S_F|Coefficient of variation for Weight|CHARACTER|1|0

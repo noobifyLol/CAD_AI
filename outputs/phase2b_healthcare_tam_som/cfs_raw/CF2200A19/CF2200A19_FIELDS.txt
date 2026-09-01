@@ -1,0 +1,27 @@
+Field_Name|Label|Field_Type|Field_Length|Number_of_Decimals
+GEOTYPE|Type of geography flag|CHARACTER|2|0
+ST|FIPS state code|CHARACTER|2|0
+GEO_ID|Geographic identifier code|CHARACTER|30|0
+GEO_LABEL|Geographic Area Name|CHARACTER|255|0
+GEO_ID_F|Geo Footnote|CHARACTER|4|0
+DMODE|Mode category code|CHARACTER|3|0
+DMODE_F|Flag for Mode category code|CHARACTER|1|0
+DMODE_LABEL|Meaning of DMODE|CHARACTER|255|0
+NAICS2017|2017 NAICS code|CHARACTER|8|0
+NAICS2017_LABEL|Meaning of 2017 NAICS code|CHARACTER|255|0
+NAICS2017_F|2017 NAICS Footnote|CHARACTER|4|0
+SHIPWT|Shipment weight code|CHARACTER|3|0
+SHIPWT_LABEL|Meaning of SHIPWT|CHARACTER|255|0
+YEAR|Year|CHARACTER|4|0
+VAL|Value ($ million)|NUMBER|10|0
+VAL_F|Value ($ million)|CHARACTER|1|0
+TON|Weight (thousand tons)|NUMBER|10|0
+TON_F|Weight (thousand tons)|CHARACTER|1|0
+AVGMILE|Average distance (GCD) per shipment (miles)|NUMBER|10|0
+AVGMILE_F|Average distance (GCD) per shipment (miles)|CHARACTER|1|0
+VAL_S|Coefficient of variation for Value|NUMBER|10|1
+VAL_S_F|Coefficient of variation for Value|CHARACTER|1|0
+TON_S|Coefficient of variation for Weight|NUMBER|10|1
+TON_S_F|Coefficient of variation for Weight|CHARACTER|1|0
+AVGMILE_S|Coefficient of variation for Average distance (GCD) per shipment|NUMBER|10|1
+AVGMILE_S_F|Coefficient of variation for Average distance (GCD) per shipment|CHARACTER|1|0

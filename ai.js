@@ -6,8 +6,10 @@ import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.j
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
-const DEFAULT_STRONG_TEXT_MODEL = "llama-3.3-70b-versatile";
-const DEFAULT_FAST_MODEL = "llama-3.1-8b-instant";
+// llama-3.1-8b-instant and llama-3.3-70b-versatile are gone from Groq entirely as of
+// 2026-08-31 (confirmed via GET /openai/v1/models), same fate as llama-4-scout below.
+const DEFAULT_STRONG_TEXT_MODEL = "qwen/qwen3.8-27b";
+const DEFAULT_FAST_MODEL = "openai/gpt-oss-20b";
 
 const CODE_GENERATION_MODEL = process.env.GROQ_GENERATION_MODEL
   || process.env.GROQ_CODE_MODEL
@@ -42,8 +44,13 @@ const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS || 120000);
 const RAW_GROQ_MAX_COMPLETION_TOKENS = Number(process.env.GROQ_MAX_COMPLETION_TOKENS || 8192);
 const GROQ_MAX_COMPLETION_TOKENS = Number.isFinite(RAW_GROQ_MAX_COMPLETION_TOKENS) ? RAW_GROQ_MAX_COMPLETION_TOKENS : 8192;
 const RAW_GROQ_CODE_MAX_COMPLETION_TOKENS = Number(process.env.GROQ_CODE_MAX_COMPLETION_TOKENS || process.env.GROQ_GENERATION_MAX_COMPLETION_TOKENS || GROQ_MAX_COMPLETION_TOKENS || 8192);
+// Floor lowered from 4096: on this account's 8000 TPM (tokens/minute) free tier, a 4096-token
+// completion floor alone reserved over half the whole budget before a single prompt token was
+// counted, so nearly every generation call 413'd on the first attempt and had to shrink-retry.
+// 1200 still leaves room for a real FeatureScript file; chat()'s automatic shrink-on-413 logic
+// still raises or lowers this per request based on the actual reported TPM limit.
 const GROQ_CODE_MAX_COMPLETION_TOKENS = Math.max(
-  4096,
+  1200,
   Number.isFinite(RAW_GROQ_CODE_MAX_COMPLETION_TOKENS) ? RAW_GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS
 );
 const GROQ_MAX_PROMPT_CHARS = Number(process.env.GROQ_MAX_PROMPT_CHARS || 160000);
@@ -725,7 +732,7 @@ function inferShapeFromPrompt(prompt = "") {
   const text = normalizeText(prompt).toLowerCase();
   const shapeHints = [
     ["ROBOT_MECH", /\b(robot|robotic|mech|mecha|android|humanoid)\b/],
-    ["GEAR_SPUR", /\b(gear|spur|pinion|teeth|tooth|diametral pitch|pressure angle|involute)\b/],
+    ["GEAR_SPUR", /\b(gear|spur|pinion|sprocket|cog|teeth|tooth|diametral pitch|pressure angle|involute)\b/],
     ["FLANGE", /\b(flange|bolt circle|bolt hole|hub|mount|coupling flange)\b/],
     ["LINKAGE", /\b(linkage|linkage arm|connecting rod|coupler|arm|lever|clevis|tie rod|rod end)\b/],
     ["WASHER", /\b(washer|ring magnet|ring|shim|spacer disk)\b/],
@@ -2321,7 +2328,7 @@ function applyPromptHeuristics(prompt, dims) {
     normalized.holeRadiusInches = Math.min(normalized.holeRadiusInches, 0.08);
   }
 
-  if (/\b(gear|spur|pinion)\b/i.test(prompt) && !/\bgearbox\b/i.test(prompt)) {
+  if (/\b(gear|spur|pinion|sprocket|cog)\b/i.test(prompt) && !/\bgearbox\b/i.test(prompt)) {
     normalized.shape = "GEAR_SPUR";
     normalized.radiusInches = Math.max(normalized.radiusInches, 1);
     normalized.depthInches = Math.max(normalized.depthInches, 0.4);
@@ -3050,7 +3057,7 @@ WASHER        — washer, spacer disk, shim, flat ring
 BUSHING       — bushing, sleeve, journal bearing, short hollow cylinder (length ≈ diameter)
 HITCH_PEG     — hitch peg, mushroom head pin, thumb peg, lollipop pin,
                 any pin with a domed or spherical head on a cylindrical shaft
-GEAR_SPUR     — spur gear, gear wheel, pinion, drive gear, driven gear,
+GEAR_SPUR     — spur gear, gear wheel, pinion, drive gear, driven gear, sprocket, cog,
                 any gear described by tooth count or gear ratio
 CONE          — cone, frustum, funnel, nozzle, tapered tip, hopper, carrot-shape (approximate),
                 any shape that is wide at one end and narrows to a point or smaller circle.
@@ -3472,27 +3479,9 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
 - qSketchRegion must reference the sketch id expression, such as qSketchRegion(id + "sk1").
   NEVER pass the sketch variable itself, such as qSketchRegion(sk).
 - definition.depth is already a Length value from isLength() — NEVER write definition.depth * inch.
-- For cylinders or round parts with a center hole or top bore, prefer one sketch with concentric circles:
-    skCircle(sk, "outer", { "center": vector(0, 0) * inch, "radius": definition.radius });
-    skCircle(sk, "inner", { "center": vector(0, 0) * inch, "radius": definition.holeRadius });
-    skSolve(sk);
-    opExtrude(context, id + "ext1", {
-        "entities"  : qSketchRegion(id + "sk1", true),
-        "direction" : skPlane.normal,
-        "endBound"  : BoundingType.BLIND,
-        "endDepth"  : definition.height
-    });
-- NEVER use opCylinder — use fCylinder or sketch plus extrude instead.
-  To create a solid cylinder, sketch a circle and extrude it:
-    var cylSk = newSketchOnPlane(context, id + "cylSk", { "sketchPlane" : skPlane });
-    skCircle(cylSk, "cyl", { "center" : vector(0, 0) * inch, "radius" : definition.radius });
-    skSolve(cylSk);
-    opExtrude(context, id + "cyl1", {
-        "entities"  : qSketchRegion(id + "cylSk"),
-        "direction" : skPlane.normal,
-        "endBound"  : BoundingType.BLIND,
-        "endDepth"  : definition.height
-    });
+- For a center hole or bore, sketch concentric circles in ONE sketch and extrude with
+  qSketchRegion(id + "sk1", true) — the "true" flag keeps the inner region as a hole.
+- NEVER use opCylinder — use fCylinder, or sketch a circle and extrude it instead.
 - opRevolve: { "entities": Query, "axis": Line, "angleForward": 2 * PI * radian }
 - The revolve axis must be a Line value, not a query. For a profile drawn with radius on sketch X and height on sketch Y, use line(skPlane.origin, cross(skPlane.normal, skPlane.x)).
 - Organic tapered shapes like carrots should use a revolved spline profile with at least 4 profile points.
@@ -3520,173 +3509,31 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
 - skRegularPolygon(sk, "poly1", { "center": vector(0,0) * inch, "firstVertex": vector(r,0) * inch, "sides": 6 });
   ("skPolygon" does NOT exist — always use skRegularPolygon)
 
-═══ COMMON MISTAKES TO AVOID ═══
-1. Writing "definition.x is Length" in precondition — WRONG. Use isLength(definition.x, { (inch) : [0.1, 1.0, 10.0] } as LengthBoundSpec).
-2. Writing "definition.x * inch" in the body when x is an isLength param — doubles the units, WRONG.
-3. Passing qSketchRegion(sk) or qSketchRegion(sketch1) — WRONG. Use qSketchRegion(id + "sk1").
-4. Forgetting skSolve(sk) before opExtrude — sketch geometry will not appear without it.
-5. Named functions (function foo() {}) inside the feature body — use const lambdas instead.
-6. Using "skPolygon" — it does not exist. Use skRegularPolygon.
-7. Keeping helper variables that are computed but never used — remove them before returning code.
-8. Raw numbers in geometry operations — always attach units: vector(1, 0) * inch, not vector(1, 0).
-9. Organic profiles with only two spline points — these collapse into straight or trivial geometry.
-10. TYPED LAMBDA PARAMETERS — FeatureScript lambdas inside a feature body CANNOT have type annotations.
-    WRONG: const f = function(t is number, rb is number) { ... }
-    WRONG: const f = function(p, a is number) { ... }   ← even ONE typed param breaks compilation
-    RIGHT: const f = function(t, rb) { ... }
-    RIGHT: const f = function(p, a) { ... }
-    The error message is: "Error in initializer function arguments" or "missing TOP_SEMI at 'function'"
-11. INCREMENT/DECREMENT — FeatureScript has NO ++ or -- operators.
-    WRONG: k++   WRONG: i--   → these cause "no viable alternative" parse errors.
-    RIGHT: k += 1   RIGHT: i -= 1
-12. const INSIDE LOOP BODIES — const is only valid at the top level of the feature body.
-    Inside a for/while/if block you MUST use var.
-    WRONG: for (var k = 0; ...) { const x = expr; }
-    RIGHT: for (var k = 0; ...) { var x = expr; }
-13. ARRAY .length — FeatureScript arrays have NO .length property.
-    WRONG: arr[arr.length - 1]   → runtime error
-    RIGHT: use a known index like arr[5], or track the count with a separate var.
-14. Using opCylinder — normalize it to fCylinder or to sketch + extrude.
-    WRONG: opCylinder(context, id + "cyl1", { "bottomCenter": ..., ... })
-    RIGHT: fCylinder(context, id + "cyl1", { "bottomCenter": ..., "topCenter": ..., "radius": ... })
-15. Using definition.param in the body without declaring it in the precondition.
-    Every definition.param accessed in the body MUST have a matching isLength / isInteger /
-    is boolean / is Query declaration in the precondition block. Missing declarations cause
-    runtime "undefined" or type errors.
-
 ═══ ADVANCED OPERATIONS ═══
 Use these when the shape genuinely needs them — do not force them onto simple geometry.
+A matching compile-verified example (with full code) is usually supplied in DATABASE CONTEXT
+when the prompt calls for one of these — follow that example's structure over inventing your own.
 
-opLoft — creates a solid by transitioning between two or more profile sketches:
-  // Each profile must be a separate sketch on a different plane.
-  var sk1 = newSketchOnPlane(context, id + "prof1", { "sketchPlane" : planeA });
-  skCircle(sk1, "c", { "center" : vector(0,0)*inch, "radius" : definition.baseRadius });
-  skSolve(sk1);
-  var sk2 = newSketchOnPlane(context, id + "prof2", { "sketchPlane" : planeB });
-  skCircle(sk2, "c", { "center" : vector(0,0)*inch, "radius" : definition.topRadius });
-  skSolve(sk2);
-  opLoft(context, id + "loft1", {
-      "profileSubqueries" : [qSketchRegion(id + "prof1"), qSketchRegion(id + "prof2")]
-  });
-  // For 3+ profiles, add more entries to "profileSubqueries". Profiles must be in order along the path.
-  // NEVER add "sections" or "edges" keys — FS 2931 opLoft uses "profileSubqueries".
-
-opSweep — extrudes a profile sketch along a path sketch:
-  // Path sketch: a single open wire (skLineSegment, skArc, or skFitSpline curve)
-  var pathSk = newSketchOnPlane(context, id + "path", { "sketchPlane" : skPlane });
-  skFitSpline(pathSk, "spine", { "points" : [vector(0,0)*inch, vector(1,0.5)*inch, vector(2,0)*inch] });
-  skSolve(pathSk);
-  // Profile sketch on a plane perpendicular to the path start
-  var profPlane = plane(skPlane.origin, skPlane.x);  // perpendicular to skPlane
-  var profSk = newSketchOnPlane(context, id + "prof", { "sketchPlane" : profPlane });
-  skCircle(profSk, "c", { "center" : vector(0,0)*inch, "radius" : definition.radius });
-  skSolve(profSk);
-  opSweep(context, id + "sweep1", {
-      "profiles" : qSketchRegion(id + "prof"),
-      "path"     : qCreatedBy(id + "path", EntityType.EDGE)
-  });
-
-opShell — hollows a solid body, leaving a specified wall thickness:
-  // Must be called AFTER the solid body exists (after opExtrude or opRevolve).
-  opShell(context, id + "shell1", {
-      "entities"  : qCapEntity(id + "extrude1", CapType.END, EntityType.FACE),
-      "thickness" : -definition.wallThickness
-  });
-  // In FS 2931, pass the face(s) to remove/open as entities; do not use an excludeFaces key.
-
-opFillet — rounds selected edges:
-  opFillet(context, id + "fillet1", {
-      "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "body1", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
-      "radius"   : definition.filletRadius
-  });
-
-opChamfer — bevels selected edges:
-  opChamfer(context, id + "cham1", {
-      "entities"  : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "body1", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED),
-      "chamferType" : ChamferType.EQUAL_OFFSETS,
-      "width"     : definition.chamferWidth
-  });
-
-opPattern — circular or linear arrays of bodies/faces. There is NO opPatternCircular, opPatternLinear,
-opCircularPattern, or opLinearPattern — those functions DO NOT EXIST. Build parallel arrays of
-transforms and instanceNames. The ORIGINAL body is preserved, so loop from 1 to count-1:
-  // CIRCULAR pattern around the sketch normal:
-  var patternAxis = line(skPlane.origin, skPlane.normal);
-  var transforms = [];
-  var instanceNames = [];
-  for (var i = 1; i < definition.instanceCount; i += 1)
-  {
-      transforms = append(transforms, rotationAround(patternAxis, (i * 2 * PI / definition.instanceCount) * radian));
-      instanceNames = append(instanceNames, "inst" ~ i);
-  }
-  opPattern(context, id + "pattern1", {
-      "entities" : qCreatedBy(id + "boss1", EntityType.BODY),
-      "transforms" : transforms,
-      "instanceNames" : instanceNames
-  });
-  // LINEAR pattern: replace the transform line with a translation along a direction:
-  //   transforms = append(transforms, transform(skPlane.x * (definition.spacing * i)));
-  // Instance names may use only letters, numbers, +, -, /, _ — build them with the ~ operator.
-  // After patterning, union everything: "tools" : qUnion([qCreatedBy(id + "boss1", EntityType.BODY), qCreatedBy(id + "pattern1", EntityType.BODY)]).
-
-Intermediate plane construction — how to make a plane at an offset or angle:
-  var offsetPlane = plane(skPlane.origin + skPlane.normal * definition.height, skPlane.normal);
-  var sidePlane   = plane(skPlane.origin, skPlane.x);  // perpendicular to sketch plane
+- opLoft: each profile is its own solved sketch on its own plane; takes "profileSubqueries" : [qSketchRegion(...), ...] in order along the path. NEVER "sections" or "edges" keys.
+- opSweep: path sketch is a single open wire; profile sketch must be on a plane perpendicular to the path start, e.g. plane(skPlane.origin, skPlane.x). Takes "profiles" and "path" : qCreatedBy(pathId, EntityType.EDGE).
+- opShell: called AFTER the solid body exists; "entities" is the face(s) to remove (e.g. qCapEntity(bodyId, CapType.END, EntityType.FACE)), "thickness" is negative to hollow inward. No excludeFaces key.
+- opFillet/opChamfer: "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(bodyId, EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED); opChamfer also needs "chamferType" : ChamferType.EQUAL_OFFSETS.
+- opPattern: there is NO opPatternCircular, opPatternLinear, opCircularPattern, or opLinearPattern — those DO NOT EXIST. Build parallel "transforms" (rotationAround(axis, angle) for circular, transform(direction * spacing) for linear) and "instanceNames" arrays. The ORIGINAL body is preserved, so loop from i = 1 to count - 1. Instance names use only letters, numbers, +, -, /, _, built with the ~ operator. After patterning, union the original and the pattern body together.
+- Offset/side planes: plane(skPlane.origin + skPlane.normal * offset, skPlane.normal) for a parallel plane; plane(skPlane.origin, skPlane.x) for one perpendicular to the sketch plane.
 
 ═══ MECH / MULTI-BODY STRATEGY ═══
 Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
-Build each section as its own opExtrude call or fCylinder primitive
-for cylindrical parts), then union adjacent bodies:
-
-  // Pattern: sketch circle → skSolve → opExtrude for each cylindrical part, then union
-  var legSk = newSketchOnPlane(context, id + "legSk", { "sketchPlane" : skPlane });
-  skCircle(legSk, "leg1c", { "center" : vector(sideOff, 0) * inch, "radius" : definition.legRadius });
-  skSolve(legSk);
-  opExtrude(context, id + "leg1", {
-      "entities"  : qSketchRegion(id + "legSk"),
-      "direction" : skPlane.normal,
-      "endBound"  : BoundingType.BLIND,
-      "endDepth"  : definition.legLength
-  });
-  opExtrude(context, id + "foot1", { "entities": qSketchRegion(id + "footSk"), ... });
-  opBoolean(context, id + "joinLeg1", {
-            "tools" : qUnion([
-                qCreatedBy(id + "foot1", EntityType.BODY),
-                qCreatedBy(id + "leg1", EntityType.BODY)
-            ]),
-            "operationType" : BooleanOperationType.UNION
-        });
-
-For robot/mech shapes:
-- Build the torso first as a BOX (opExtrude of a rectangle)
-- Add limbs as cylinders (sketch circle + opExtrude) positioned relative to the torso
-- Use vector arithmetic for positioning: skPlane.origin + skPlane.normal * offset + skPlane.x * sideOffset
-- UNION all parts that should be one body; leave separate bodies as separate if they are distinct parts
+Build each section as its own opExtrude call (or fCylinder for cylindrical parts), position it with
+vector arithmetic (skPlane.origin + skPlane.normal * offset + skPlane.x * sideOffset), then union
+adjacent bodies with opBoolean UNION + qUnion([...]). For robots/mechs: torso first as a BOX, limbs
+as cylinders positioned relative to the torso. Leave distinct parts as separate bodies if the prompt
+implies an assembly rather than one welded solid.
 
 ═══ ORGANIC SHAPES (CARROTS, ROOTS, PODS, BLOBS) ═══
-Use a revolved spline profile for any organic tapered shape:
-  var sk = newSketchOnPlane(context, id + "profile", { "sketchPlane" : skPlane });
-  // 5-7 control points on the right side of the axis (x > 0), axis on x=0
-  // Taper from wide at bottom to narrow at top for a carrot/root shape
-  skLineSegment(sk, "axis", { "start" : vector(0, 0)*inch, "end" : vector(0, htv)*inch });
-  skFitSpline(sk, "profile", { "points" : [
-      vector(bRv, 0)*inch,
-      vector(bRv * 0.9, htv * 0.2)*inch,
-      vector(bRv * 0.7, htv * 0.45)*inch,
-      vector(bRv * 0.4, htv * 0.7)*inch,
-      vector(0.02, htv)*inch
-  ] });
-  skLineSegment(sk, "top",  { "start" : vector(0.02, htv)*inch, "end" : vector(0, htv)*inch });
-  skLineSegment(sk, "base", { "start" : vector(0, 0)*inch, "end" : vector(bRv, 0)*inch });
-  skSolve(sk);
-  var revolveAxis = line(skPlane.origin, cross(skPlane.normal, skPlane.x));
-  opRevolve(context, id + "body", {
-      "entities"     : qSketchRegion(id + "profile"),
-      "axis"         : revolveAxis,
-      "angleForward" : 2 * PI * radian
-  });
-  // The axis line must connect to the profile edges to close the region.
-  // A 2-point spline or a simple line is NOT sufficient for realistic organic shapes.
+Use a revolved spline profile: an axis line on x = 0, a skFitSpline with 5-7 control points on the
+x > 0 side tapering from wide to narrow, and straight closing lines back to the axis so the region is
+closed. A 2-point spline collapses into trivial geometry and is NOT sufficient. Revolve axis =
+line(skPlane.origin, cross(skPlane.normal, skPlane.x)), angleForward = 2 * PI * radian.
 
 
 ═══ GEAR RULE (HARD CONSTRAINT FOR GEAR_SPUR) ═══
@@ -4140,7 +3987,7 @@ function classifyOperationFamily(prompt, dims, decomposition = null) {
   if (/\bopen[\s-]?top\b|\benclosure\b|\bhousing\b/.test(text) || requestedOps.includes("shell")) return "open_top_shell_box";
   if (/\bfillet(?:ed)?\b/.test(text) && /\bchamfer(?:ed)?\b/.test(text)) return "fillet_chamfer_block";
   if (/\bfillet(?:ed)?\b/.test(text) && (/\bbox|cube|block|rectangular/.test(text) || dims.shape === "BOX")) return "filleted_box";
-  if (/\bgear\b|\bspur\b|\bpinion\b/.test(text)) return "spur_gear";
+  if (/\bgear\b|\bspur\b|\bpinion\b|\bsprocket\b|\bcog\b/.test(text)) return "spur_gear";
   if (/\bcarrot\b/.test(text)) return "carrot";
   if (/\bmushroom\b/.test(text)) return "mushroom";
   if (dims.shape === "L_BRACKET" || /\bl[\s-]?bracket\b|\bangle bracket\b|\bcorner bracket\b/.test(text)) return "l_bracket";
@@ -6029,10 +5876,15 @@ async function generateViaPlanCompiler(prompt, dims, learningContext, requestId)
         userLines.push("PREVIOUS PLAN ERRORS — fix ALL of these in the new plan:");
         for (const issue of feedback.slice(0, 10)) userLines.push(`- ${issue.message}`);
       }
+      // gpt-oss FIRST here (not the usual code-model order): only gpt-oss supports
+      // strict JSON-schema decoding, which guarantees a structurally valid plan.
+      // Measured: gpt-oss plans need ~1 semantic fix; llama plans (no strict mode)
+      // arrive with ~11 structural errors. The plan prompt is ~1.2k tokens, so it
+      // fits gpt-oss's 8k TPM ceiling that raw-code generation never could.
       const raw = await chat([
         { role: "system", content: buildPlanSystemPrompt() },
         { role: "user", content: userLines.join("\n") },
-      ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
+      ], "openai/gpt-oss-120b", ["openai/gpt-oss-20b", COMPLEX_MODEL, FALLBACK_MODEL], {
         stage: "generation",
         affinity: `${requestId}:plan:${attempt}`,
         maxCompletionTokens: 2560,

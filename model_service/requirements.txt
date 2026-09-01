@@ -1,0 +1,10 @@
+# Install torch first with the CUDA 12.8 (Blackwell/RTX 5080) index:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+# transformers is pinned to 4.51.x: Qwen2-VL processor loading is broken in 5.x.
+accelerate==1.14.0
+numpy==2.5.1
+pillow==12.3.0
+safetensors==0.8.0
+tokenizers==0.21.4
+torch==2.11.0+cu128
+transformers==4.51.3

@@ -108,9 +108,16 @@
     {
       "file": "hex_bolt.fs",
       "title": "Hex Bolt",
-      "keywords": ["bolt", "screw", "fastener", "hex", "hexagon", "hardware", "nut", "threaded", "machine screw", "cap screw"],
+      "keywords": ["bolt", "screw", "fastener", "hex", "hexagon", "hardware", "threaded", "machine screw", "cap screw"],
       "operations": ["skRegularPolygon", "opExtrude", "opBoolean UNION", "opChamfer"],
       "lesson": "A bolt = hex polygon head + cylindrical shaft on an offset plane + union + tip chamfer."
+    },
+    {
+      "file": "hex_nut.fs",
+      "title": "Hex Nut",
+      "keywords": ["nut", "hex nut", "jam nut", "lock nut", "castle nut", "fastener", "threaded hole"],
+      "operations": ["skRegularPolygon", "opExtrude"],
+      "lesson": "A nut is a hex polygon with a concentric bore circle in the SAME sketch, extruded once — never a bolt shaft with no head, and never a bolt-with-shaft template reused for a nut."
     },
     {
       "file": "wheel_with_spokes.fs",
@@ -125,6 +132,41 @@
       "keywords": ["frame", "picture", "photo", "border", "window", "bezel", "outline", "rectangular ring", "gasket", "trim"],
       "operations": ["opExtrude"],
       "lesson": "A frame is a rectangular ring: outer and inner rectangles in the SAME sketch extrude into the border with the middle open."
+    },
+    {
+      "file": "sphere_ball.fs",
+      "title": "Sphere",
+      "keywords": ["sphere", "ball", "orb", "globe", "round ball", "marble", "bead", "ball bearing", "half sphere", "dome"],
+      "operations": ["opRevolve"],
+      "lesson": "A sphere is a semicircle arc plus a closing line drawn exactly on the axis, revolved 360 degrees; the closing line must be coincident with the revolve axis."
+    },
+    {
+      "file": "torus_ring.fs",
+      "title": "Torus",
+      "keywords": ["torus", "donut", "doughnut", "o-ring", "bagel", "tube ring", "inner tube", "ring toroid"],
+      "operations": ["opRevolve"],
+      "lesson": "A torus is a circle offset from (never touching) the revolve axis, revolved 360 degrees."
+    },
+    {
+      "file": "d_shaft_keyed.fs",
+      "title": "D-Shaft",
+      "keywords": ["d-shaft", "d shaft", "flat shaft", "flatted shaft", "keyed shaft", "motor shaft", "coupling shaft", "half moon shaft", "flat sided shaft", "d-bore"],
+      "operations": ["opExtrude", "opBoolean SUBTRACTION"],
+      "lesson": "A D-shaft is a round shaft with an oversized rectangular tool boolean-subtracted past one side to leave a single flat face."
+    },
+    {
+      "file": "knurled_knob.fs",
+      "title": "Knurled Knob",
+      "keywords": ["knurled", "knurl", "grip", "textured knob", "fluted knob", "ridged dial", "grooved handle", "finger grip", "dial knob", "adjustment knob"],
+      "operations": ["opExtrude", "opPattern", "rotationAround", "opBoolean SUBTRACTION"],
+      "lesson": "Knurling is a thin radial groove tool circular-patterned with opPattern around the knob axis, then boolean-subtracted from the base cylinder (not unioned, since it removes material)."
+    },
+    {
+      "file": "wedge_ramp.fs",
+      "title": "Wedge Ramp",
+      "keywords": ["ramp", "wedge", "incline", "doorstop", "chock", "angled block", "kerb ramp", "threshold ramp", "sloped block"],
+      "operations": ["opExtrude"],
+      "lesson": "A ramp/wedge is a closed right-triangle profile (base, vertical back, sloped hypotenuse) extruded once."
     }
   ]
 }

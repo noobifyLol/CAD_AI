@@ -1,0 +1,443 @@
+#GEOTYPE|ST|GEO_ID|GEO_LABEL|GEO_ID_F|COMM|COMM_LABEL|DMODE|DMODE_F|DMODE_LABEL|YEAR|VAL|VAL_F|TON|TON_F|AVGMILE|AVGMILE_F|VAL_S|VAL_S_F|TON_S|TON_S_F|AVGMILE_S|AVGMILE_S_F
+01|00|0100000US|United States||0000|All Commodities|00||All modes|2022|2992166||1237954||290||2.7||8.9||17.6|
+01|00|0100000US|United States||0000|All Commodities|10||Single modes|2022|2770951||1189350||104||2.8||9||5.3|
+01|00|0100000US|United States||0000|All Commodities|11|n|Truck|2022|2706530||1114980||97||3||9.7||5.1|
+01|00|0100000US|United States||0000|All Commodities|111||For-hire truck|2022|1225792||452385||308||3.7||7.8||16.8|
+01|00|0100000US|United States||0000|All Commodities|112||Company-owned truck|2022|1337827||590610||65||4.3||12.4||3.9|
+01|00|0100000US|United States||0000|All Commodities|113|o|Customer pick-up|2022|142911||71986||124||7.5||14||48.6|
+01|00|0100000US|United States||0000|All Commodities|12||Rail|2022|37428||47466||945||11.6||17.6||13.6|
+01|00|0100000US|United States||0000|All Commodities|13||Water|2022|9092||17766||889||41.9||42.8||15.6|
+01|00|0100000US|United States||0000|All Commodities|131||Inland water|2022|0|S|0|S|175||0|S|0|S|46.6|
+01|00|0100000US|United States||0000|All Commodities|132||Great Lakes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||0000|All Commodities|133||Deep sea|2022|0|S|0|S|1030||0|S|0|S|16.2|
+01|00|0100000US|United States||0000|All Commodities|14||Air (includes truck and air)|2022|12209||231||1290||24.1||27.2||6.7|
+01|00|0100000US|United States||0000|All Commodities|15||Pipeline|2022|5634||8659||0|S|23.4||23.6||0|S
+01|00|0100000US|United States||0000|All Commodities|16|x|Other single modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||0000|All Commodities|20||Multiple modes|2022|187152||32387||832||7||15.8||9.5|
+01|00|0100000US|United States||0000|All Commodities|21||Parcel, U.S.P.S. or courier|2022|155658||2502||832||8.9||13||9.5|
+01|00|0100000US|United States||0000|All Commodities|22||Truck and rail|2022|25805||28012||616||14.5||18.5||16|
+01|00|0100000US|United States||0000|All Commodities|23||Truck and water|2022|4746||1756||748||14||21.7||21.9|
+01|00|0100000US|United States||0000|All Commodities|24||Rail and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||0000|All Commodities|25|x|Other multiple modes|2022|8||5||663||37.6||37.9||39.4|
+01|00|0100000US|United States||0000|All Commodities|30|z|Unknown mode|2022|34062||16216||753||14.8||39.3||16.6|
+01|00|0100000US|United States||01|Animals and fish (live)|00||All modes|2022|0|S|0|S|610||0|S|0|S|21|
+01|00|0100000US|United States||01|Animals and fish (live)|10||Single modes|2022|0|S|0|S|333||0|S|0|S|26.1|
+01|00|0100000US|United States||01|Animals and fish (live)|11|n|Truck|2022|0|S|0|S|331||0|S|0|S|26.2|
+01|00|0100000US|United States||01|Animals and fish (live)|111||For-hire truck|2022|0|S|8||0|S|0|S|38.1||0|S
+01|00|0100000US|United States||01|Animals and fish (live)|112||Company-owned truck|2022|0|S|0|S|342||0|S|0|S|26.7|
+01|00|0100000US|United States||01|Animals and fish (live)|113|o|Customer pick-up|2022|0|S|0|S|91||0|S|0|S|45.2|
+01|00|0100000US|United States||01|Animals and fish (live)|14||Air (includes truck and air)|2022|1||0|Z|912||25.3||27.4||8.5|
+01|00|0100000US|United States||01|Animals and fish (live)|20||Multiple modes|2022|0|S|0|S|708||0|S|0|S|19.2|
+01|00|0100000US|United States||01|Animals and fish (live)|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|708||0|S|0|S|19.2|
+01|00|0100000US|United States||01|Animals and fish (live)|30|z|Unknown mode|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||02|Cereal grains (includes seed)|00||All modes|2022|2966||10540||72||47.5||44.4||17.6|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|10||Single modes|2022|0|S|9716||71||0|S|49.2||17.8|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|11|n|Truck|2022|280||963||71||41.5||44.8||17.6|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|111||For-hire truck|2022|0|S|0|S|214||0|S|0|S|41|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|112||Company-owned truck|2022|84||0|S|57||32.5||0|S|13.7|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|113|o|Customer pick-up|2022|9||0|S|0|S|47.3||0|S|0|S
+01|00|0100000US|United States||02|Cereal grains (includes seed)|12||Rail|2022|755||2917||0|S|20.5||21.3||0|S
+01|00|0100000US|United States||02|Cereal grains (includes seed)|13||Water|2022|0|S|0|S|613||0|S|0|S|19.2|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|131||Inland water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||02|Cereal grains (includes seed)|133||Deep sea|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||02|Cereal grains (includes seed)|14||Air (includes truck and air)|2022|0|Z|0|Z|97||33.6||33.9||6.8|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|16|x|Other single modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||02|Cereal grains (includes seed)|20||Multiple modes|2022|221||825||0|S|37.6||37.2||0|S
+01|00|0100000US|United States||02|Cereal grains (includes seed)|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|107||0|S|0|S|23.4|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|22||Truck and rail|2022|220||824||182||34.5||34.1||45.1|
+01|00|0100000US|United States||02|Cereal grains (includes seed)|23||Truck and water|2022|0|Z|0|Z|96||9.2||9.2||0|Z
+01|00|0100000US|United States||02|Cereal grains (includes seed)|30|z|Unknown mode|2022|0|Z|0|Z|1||48.7||35.3||0|Z
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|00||All modes|2022|134793||68730||197||6.6||4.5||28.3|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|10||Single modes|2022|131364||67378||133||6.6||4.7||17.5|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|11|n|Truck|2022|129983||65229||130||6.8||4.3||18.1|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|111||For-hire truck|2022|55758||32241||419||13.8||13.8||26.5|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|112||Company-owned truck|2022|60088||25032||65||8.9||12.1||7.7|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|113|o|Customer pick-up|2022|14137||7956||0|S|33.2||19.5||0|S
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|12||Rail|2022|995||1642||364||29.8||27.1||15.9|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|13||Water|2022|0|S|0|S|1239||0|S|0|S|15.5|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|131||Inland water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|133||Deep sea|2022|0|S|0|S|1339||0|S|0|S|17.1|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|14||Air (includes truck and air)|2022|174||43||1406||17.5||25.7||31.3|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|15||Pipeline|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|20||Multiple modes|2022|2967||1257||1010||25.8||37.6||22.8|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|21||Parcel, U.S.P.S. or courier|2022|1590||103||1011||43.1||29.6||22.9|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|22||Truck and rail|2022|1154||1089||655||36.9||41.6||31.8|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|23||Truck and water|2022|222||64||869||45.3||45.7||45|
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|25|x|Other multiple modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||03|Agricultural products (excludes animal feed, cereal grains, and forage products)|30|z|Unknown mode|2022|0|S|95||0|S|0|S|41.3||0|S
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|00||All modes|2022|19281||0|S|232||38.6||0|S|23.2|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|10||Single modes|2022|18135||0|S|136||41.8||0|S|18.9|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|11|n|Truck|2022|17361||0|S|129||44.4||0|S|16.9|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|111||For-hire truck|2022|8368||0|S|380||41.3||0|S|18.5|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|112||Company-owned truck|2022|3659||1128||67||32.3||31.8||7.6|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|113|o|Customer pick-up|2022|0|S|0|S|489||0|S|0|S|23.1|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|12||Rail|2022|0|S|0|S|445||0|S|0|S|37.4|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|13||Water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|133||Deep sea|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|14||Air (includes truck and air)|2022|0|S|1||2614||0|S|44.1||22.6|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|20||Multiple modes|2022|257||683||698||37||49.3||19.4|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|21||Parcel, U.S.P.S. or courier|2022|46||0|S|698||46.1||0|S|20.3|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|22||Truck and rail|2022|176||659||549||49.9||45.3||32.1|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|23||Truck and water|2022|0|S|0|S|1365||0|S|0|S|9.6|
+01|00|0100000US|United States||04|Animal feed, eggs, honey, and other products of animal origin|30|z|Unknown mode|2022|0|S|277||0|S|0|S|40||0|S
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|00||All modes|2022|504927||119222||592||4.4||7.1||27.4|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|10||Single modes|2022|473291||110779||106||4.8||8.1||6.8|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|11|n|Truck|2022|462800||105727||101||4.8||8.5||6.2|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|111||For-hire truck|2022|256104||58288||368||6.5||6.4||12.8|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|112||Company-owned truck|2022|172099||38532||76||7.2||19.8||6.4|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|113|o|Customer pick-up|2022|34596||8906||217||13.2||15.1||13.2|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|12||Rail|2022|9398||4896||953||31.3||30.7||15.2|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|13||Water|2022|485||119||1618||30.1||29.5||13.8|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|133||Deep sea|2022|485||119||1618||30.1||29.5||13.8|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|14||Air (includes truck and air)|2022|608||38||2369||49.1||41||10.3|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|20||Multiple modes|2022|9468||3261||1454||13.4||27||16.9|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|1455||0|S|0|S|16.9|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|22||Truck and rail|2022|5057||2542||0|S|33.6||37.7||0|S
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|23||Truck and water|2022|2046||358||502||18||15.8||45.1|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|24||Rail and water|2022|0|S|0|S|1779||0|S|0|S|7.6|
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|25|x|Other multiple modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||05|Meat, poultry, fish, seafood, and their preparations|30|z|Unknown mode|2022|22168||5181||326||23.6||30.6||27.9|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|00||All modes|2022|113992||38841||167||5.3||7.7||22.3|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|10||Single modes|2022|111479||38004||77||5.3||7.5||8.9|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|11|n|Truck|2022|110241||37601||77||5.4||7.6||8.9|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|111||For-hire truck|2022|51472||19292||0|S|8.7||8.9||0|S
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|112||Company-owned truck|2022|52310||15921||68||5.8||10||7|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|113|o|Customer pick-up|2022|6458||2388||0|S|21.1||22.6||0|S
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|12||Rail|2022|1110||382||997||31.2||44.3||12.6|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|13||Water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|133||Deep sea|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|14||Air (includes truck and air)|2022|0|S|0|S|1709||0|S|0|S|26|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|20||Multiple modes|2022|2122||571||891||30||26.7||8.3|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|21||Parcel, U.S.P.S. or courier|2022|1118||105||892||41.2||38.2||8.3|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|22||Truck and rail|2022|964||445||621||39||33.3||27.2|
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|23||Truck and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||06|Milled grain products and preparations, and bakery products|30|z|Unknown mode|2022|391||0|S|336||49||0|S|27.8|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|00||All modes|2022|489428||399296||191||4.4||27.1||11.5|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|10||Single modes|2022|470865||384250||91||4.1||27.8||12|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|11|n|Truck|2022|462714||376382||91||4.2||28.5||12.2|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|111||For-hire truck|2022|240051||166955||470||4.4||18.2||18.1|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|112||Company-owned truck|2022|174057||178797||59||7.4||38.2||8.3|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|113|o|Customer pick-up|2022|48606||30630||366||8.3||33.4||8.5|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|12||Rail|2022|8065||7827||806||15.9||16.4||13.1|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|13||Water|2022|57||35||0|S|34.3||36.9||0|S
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|131||Inland water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|133||Deep sea|2022|57||35||0|S|34.3||36.9||0|S
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|14||Air (includes truck and air)|2022|29||6||2377||32.1||31.3||20.1|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|20||Multiple modes|2022|13020||8871||887||14.5||28.8||4.4|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|21||Parcel, U.S.P.S. or courier|2022|3420||338||887||12.5||15.1||4.4|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|22||Truck and rail|2022|8737||8055||819||21.9||31.4||15|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|23||Truck and water|2022|858||475||901||47.9||44.2||29.7|
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|24||Rail and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|25|x|Other multiple modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||07|Other prepared foodstuffs and fats and oils|30|z|Unknown mode|2022|5543||0|S|537||27.3||0|S|22.5|
+01|00|0100000US|United States||08|Alcoholic beverages|00||All modes|2022|270037||119981||192||3.6||6.4||12.9|
+01|00|0100000US|United States||08|Alcoholic beverages|10||Single modes|2022|259066||116724||70||3.7||6.3||11.7|
+01|00|0100000US|United States||08|Alcoholic beverages|11|n|Truck|2022|256464||114671||67||3.7||6.2||11.2|
+01|00|0100000US|United States||08|Alcoholic beverages|111||For-hire truck|2022|75519||41029||449||7.5||12.8||10.6|
+01|00|0100000US|United States||08|Alcoholic beverages|112||Company-owned truck|2022|169879||70466||37||3.5||6.7||5.7|
+01|00|0100000US|United States||08|Alcoholic beverages|113|o|Customer pick-up|2022|11066||3176||0|S|21||14.9||0|S
+01|00|0100000US|United States||08|Alcoholic beverages|12||Rail|2022|2383||1908||1663||22.9||23.6||19.5|
+01|00|0100000US|United States||08|Alcoholic beverages|13||Water|2022|0|S|0|S|1055||0|S|0|S|46.9|
+01|00|0100000US|United States||08|Alcoholic beverages|131||Inland water|2022|0|Z|0|Z|39||48.4||37.9||49.3|
+01|00|0100000US|United States||08|Alcoholic beverages|132||Great Lakes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||08|Alcoholic beverages|133||Deep sea|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||08|Alcoholic beverages|14||Air (includes truck and air)|2022|0|S|0|S|2291||0|S|0|S|17|
+01|00|0100000US|United States||08|Alcoholic beverages|15||Pipeline|2022|89||128||0|S|6.3||4.4||0|S
+01|00|0100000US|United States||08|Alcoholic beverages|20||Multiple modes|2022|10042||2958||776||11.3||21.2||10|
+01|00|0100000US|United States||08|Alcoholic beverages|21||Parcel, U.S.P.S. or courier|2022|6596||335||779||14.1||14.7||10|
+01|00|0100000US|United States||08|Alcoholic beverages|22||Truck and rail|2022|2840||2229||393||26||27||40.6|
+01|00|0100000US|United States||08|Alcoholic beverages|23||Truck and water|2022|584||384||0|S|28.1||25.8||0|S
+01|00|0100000US|United States||08|Alcoholic beverages|24||Rail and water|2022|0|S|0|S|53||0|S|0|S|45.5|
+01|00|0100000US|United States||08|Alcoholic beverages|25|x|Other multiple modes|2022|0|S|1||514||0|S|43.1||35.6|
+01|00|0100000US|United States||08|Alcoholic beverages|30|z|Unknown mode|2022|930||298||1135||37.6||49.9||28.5|
+01|00|0100000US|United States||09|Tobacco products|00||All modes|2022|5513||152||841||14.3||20.7||4.1|
+01|00|0100000US|United States||09|Tobacco products|10||Single modes|2022|3889||108||297||15.9||26.3||25.6|
+01|00|0100000US|United States||09|Tobacco products|11|n|Truck|2022|3889||108||295||15.9||26.3||25.6|
+01|00|0100000US|United States||09|Tobacco products|111||For-hire truck|2022|568||45||923||49.8||43.8||24.9|
+01|00|0100000US|United States||09|Tobacco products|112||Company-owned truck|2022|3321||63||76||16.7||26.9||8.1|
+01|00|0100000US|United States||09|Tobacco products|113|o|Customer pick-up|2022|0|Z|0|Z|9||25.2||30.1||33.7|
+01|00|0100000US|United States||09|Tobacco products|14||Air (includes truck and air)|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||09|Tobacco products|20||Multiple modes|2022|1617||43||884||20.8||26||4.4|
+01|00|0100000US|United States||09|Tobacco products|21||Parcel, U.S.P.S. or courier|2022|1617||43||884||20.8||26||4.4|
+01|00|0100000US|United States||09|Tobacco products|30|z|Unknown mode|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||11|Natural sands|00||All modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||11|Natural sands|10||Single modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||11|Natural sands|11|n|Truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||11|Natural sands|112||Company-owned truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||12|Gravel and crushed stone (excludes dolomite and slate)|00||All modes|2022|0|S|0|S|12||0|S|0|S|7|
+01|00|0100000US|United States||12|Gravel and crushed stone (excludes dolomite and slate)|10||Single modes|2022|0|S|0|S|12||0|S|0|S|7|
+01|00|0100000US|United States||12|Gravel and crushed stone (excludes dolomite and slate)|11|n|Truck|2022|0|S|0|S|12||0|S|0|S|7|
+01|00|0100000US|United States||12|Gravel and crushed stone (excludes dolomite and slate)|112||Company-owned truck|2022|0|S|0|S|12||0|S|0|S|7|
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|00||All modes|2022|0|S|15||85||0|S|44.1||29.2|
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|10||Single modes|2022|0|S|15||74||0|S|44.1||44.9|
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|11|n|Truck|2022|0|S|15||73||0|S|44.1||45.8|
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|111||For-hire truck|2022|0|Z|5||0|S|22.3||49.9||0|S
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|112||Company-owned truck|2022|0|S|0|S|73||0|S|0|S|48.4|
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|113|o|Customer pick-up|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|14||Air (includes truck and air)|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|20||Multiple modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||13|Other non-metallic minerals, not elsewhere classified|30|z|Unknown mode|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|00||All modes|2022|17396||20304||163||22.1||20.4||36.7|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|10||Single modes|2022|15345||17279||96||24.1||23||11.6|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|11|n|Truck|2022|12138||13112||82||26.1||25||20.9|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|111||For-hire truck|2022|8582||8847||120||36||34.6||22.2|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|112||Company-owned truck|2022|2514||2904||0|S|18.7||20.9||0|S
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|113|o|Customer pick-up|2022|1043||1361||30||41.5||36.1||44.6|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|12||Rail|2022|1508||2459||693||20.3||22.6||17.9|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|14||Air (includes truck and air)|2022|0|S|0|S|652||0|S|0|S|9.5|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|15||Pipeline|2022|1698||1707||0|S|17.4||20||0|S
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|20||Multiple modes|2022|2049||3023||885||32.3||38.8||11.5|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|22||Truck and rail|2022|2049||3023||899||30.5||37.4||8|
+01|00|0100000US|United States||17|Gasoline and aviation turbine fuel|30|z|Unknown mode|2022|2||2||0|S|40.4||46.6||0|S
+01|00|0100000US|United States||18|Fuel oils|00||All modes|2022|22741||27511||32||14.2||14.7||22.1|
+01|00|0100000US|United States||18|Fuel oils|10||Single modes|2022|22207||26032||31||14.5||15.4||23.2|
+01|00|0100000US|United States||18|Fuel oils|11|n|Truck|2022|20085||23679||31||16.8||17.9||23.6|
+01|00|0100000US|United States||18|Fuel oils|111||For-hire truck|2022|7135||8940||62||22.6||25.2||24|
+01|00|0100000US|United States||18|Fuel oils|112||Company-owned truck|2022|9896||10761||27||21.8||19.2||41|
+01|00|0100000US|United States||18|Fuel oils|113|o|Customer pick-up|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||18|Fuel oils|12||Rail|2022|768||826||232||15.2||23.7||33.8|
+01|00|0100000US|United States||18|Fuel oils|13||Water|2022|552||789||113||13.9||9.2||6.8|
+01|00|0100000US|United States||18|Fuel oils|131||Inland water|2022|552||789||113||13.9||9.2||6.8|
+01|00|0100000US|United States||18|Fuel oils|15||Pipeline|2022|801||738||0|S|28.8||29.7||0|S
+01|00|0100000US|United States||18|Fuel oils|20||Multiple modes|2022|468||1384||0|S|36.3||49.2||0|S
+01|00|0100000US|United States||18|Fuel oils|21||Parcel, U.S.P.S. or courier|2022|1||0|S|0|S|11||0|S|0|S
+01|00|0100000US|United States||18|Fuel oils|22||Truck and rail|2022|467||1383||0|S|36.5||49.2||0|S
+01|00|0100000US|United States||18|Fuel oils|30|z|Unknown mode|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|00||All modes|2022|29473||64359||39||15.9||15.2||13.5|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|10||Single modes|2022|28287||61678||38||17.1||16.5||13.7|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|11|n|Truck|2022|19168||46231||36||17.2||16.3||14.7|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|111||For-hire truck|2022|11920||30481||41||18.9||17.4||34.4|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|112||Company-owned truck|2022|5286||11082||35||14.2||29.1||20.7|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|113|o|Customer pick-up|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|12||Rail|2022|5218||9322||510||36.8||29.1||16.5|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|13||Water|2022|0|S|0|S|157||0|S|0|S|8.4|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|131||Inland water|2022|0|S|0|S|157||0|S|0|S|8.4|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|14||Air (includes truck and air)|2022|0|S|0|S|285||0|S|0|S|22.1|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|15||Pipeline|2022|659||940||0|S|29.6||31.5||0|S
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|20||Multiple modes|2022|1134||2606||228||33.4||35||25.1|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|22||Truck and rail|2022|1123||2592||341||33.2||34.9||20.2|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|23||Truck and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|25|x|Other multiple modes|2022|0|S|0|S|1709||0|S|0|S|34.4|
+01|00|0100000US|United States||19|Other coal and petroleum products, not elsewhere classified|30|z|Unknown mode|2022|0|S|0|S|74||0|S|0|S|33.8|
+01|00|0100000US|United States||20|Basic chemicals|00||All modes|2022|24196||63951||296||11.4||11.6||17|
+01|00|0100000US|United States||20|Basic chemicals|10||Single modes|2022|21859||61064||122||11.3||11.7||26.6|
+01|00|0100000US|United States||20|Basic chemicals|11|n|Truck|2022|17293||52849||88||14.1||9.6||21.5|
+01|00|0100000US|United States||20|Basic chemicals|111||For-hire truck|2022|7051||7305||482||35.3||23.6||8.7|
+01|00|0100000US|United States||20|Basic chemicals|112||Company-owned truck|2022|8173||44488||43||10.7||11.3||11.1|
+01|00|0100000US|United States||20|Basic chemicals|113|o|Customer pick-up|2022|0|S|1056||27||0|S|35.4||41.5|
+01|00|0100000US|United States||20|Basic chemicals|12||Rail|2022|2537||2759||345||37.6||25||19.3|
+01|00|0100000US|United States||20|Basic chemicals|13||Water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||20|Basic chemicals|133||Deep sea|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||20|Basic chemicals|14||Air (includes truck and air)|2022|125||0|S|1023||17.6||0|S|13.8|
+01|00|0100000US|United States||20|Basic chemicals|15||Pipeline|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||20|Basic chemicals|20||Multiple modes|2022|2132||2139||844||26.1||25.1||8.7|
+01|00|0100000US|United States||20|Basic chemicals|21||Parcel, U.S.P.S. or courier|2022|635||5||846||18.3||21.9||9|
+01|00|0100000US|United States||20|Basic chemicals|22||Truck and rail|2022|1470||1905||560||37.5||21.9||16.2|
+01|00|0100000US|United States||20|Basic chemicals|23||Truck and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||20|Basic chemicals|30|z|Unknown mode|2022|205||747||306||28.8||33.6||23.3|
+01|00|0100000US|United States||21|Pharmaceutical products|00||All modes|2022|416794||3819||548||6.4||17.4||7|
+01|00|0100000US|United States||21|Pharmaceutical products|10||Single modes|2022|291003||3066||416||10.3||17.7||12.2|
+01|00|0100000US|United States||21|Pharmaceutical products|11|n|Truck|2022|281079||3038||222||10.4||17.8||6.2|
+01|00|0100000US|United States||21|Pharmaceutical products|111||For-hire truck|2022|274324||2091||271||10.7||16.7||10.6|
+01|00|0100000US|United States||21|Pharmaceutical products|112||Company-owned truck|2022|5297||859||93||31.4||38.5||15.8|
+01|00|0100000US|United States||21|Pharmaceutical products|113|o|Customer pick-up|2022|1458||88||196||30.8||30.3||28.9|
+01|00|0100000US|United States||21|Pharmaceutical products|12||Rail|2022|0|S|0|S|157||0|S|0|S|49.3|
+01|00|0100000US|United States||21|Pharmaceutical products|13||Water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||21|Pharmaceutical products|131||Inland water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||21|Pharmaceutical products|14||Air (includes truck and air)|2022|9908||19||1046||29.6||27.1||9|
+01|00|0100000US|United States||21|Pharmaceutical products|20||Multiple modes|2022|124462||750||561||11.8||31.4||9.1|
+01|00|0100000US|United States||21|Pharmaceutical products|21||Parcel, U.S.P.S. or courier|2022|124395||740||561||11.8||31.3||9.1|
+01|00|0100000US|United States||21|Pharmaceutical products|22||Truck and rail|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||21|Pharmaceutical products|23||Truck and water|2022|0|S|9||0|S|0|S|42.8||0|S
+01|00|0100000US|United States||21|Pharmaceutical products|24||Rail and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||21|Pharmaceutical products|30|z|Unknown mode|2022|1329||2||795||39.4||35.3||13.9|
+01|00|0100000US|United States||22|Fertilizers|00||All modes|2022|16192||30255||246||22.3||36.6||12.4|
+01|00|0100000US|United States||22|Fertilizers|10||Single modes|2022|15814||27718||242||22.4||33.3||12.1|
+01|00|0100000US|United States||22|Fertilizers|11|n|Truck|2022|11098||12121||231||18.4||13.9||12.1|
+01|00|0100000US|United States||22|Fertilizers|111||For-hire truck|2022|269||266||820||32.4||40||21.2|
+01|00|0100000US|United States||22|Fertilizers|112||Company-owned truck|2022|10763||11755||208||19.2||14.4||14|
+01|00|0100000US|United States||22|Fertilizers|113|o|Customer pick-up|2022|66||100||0|S|13.9||42.4||0|S
+01|00|0100000US|United States||22|Fertilizers|12||Rail|2022|1422||0|S|644||41.3||0|S|19.9|
+01|00|0100000US|United States||22|Fertilizers|13||Water|2022|2292||3715||0|S|21||27.6||0|S
+01|00|0100000US|United States||22|Fertilizers|131||Inland water|2022|2292||3715||0|S|21||27.6||0|S
+01|00|0100000US|United States||22|Fertilizers|15||Pipeline|2022|1003||1593||0|S|25.2||39.5||0|S
+01|00|0100000US|United States||22|Fertilizers|20||Multiple modes|2022|0|S|0|S|766||0|S|0|S|12.4|
+01|00|0100000US|United States||22|Fertilizers|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|867||0|S|0|S|29.9|
+01|00|0100000US|United States||22|Fertilizers|22||Truck and rail|2022|0|S|0|S|738||0|S|0|S|14.1|
+01|00|0100000US|United States||22|Fertilizers|30|z|Unknown mode|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|00||All modes|2022|28582||0|S|244||13.7||0|S|12.9|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|10||Single modes|2022|25930||0|S|138||15.3||0|S|18.6|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|11|n|Truck|2022|24171||0|S|123||15.2||0|S|17.6|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|111||For-hire truck|2022|18499||4844||523||15.3||24||10.6|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|112||Company-owned truck|2022|5046||0|S|53||45.2||0|S|24.9|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|113|o|Customer pick-up|2022|626||301||200||33.4||39.6||21.4|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|12||Rail|2022|1665||789||725||39.3||12.8||10|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|13||Water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|133||Deep sea|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|14||Air (includes truck and air)|2022|76||0|S|1097||19.7||0|S|8.1|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|20||Multiple modes|2022|1043||253||893||29.4||29.9||7.4|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|21||Parcel, U.S.P.S. or courier|2022|444||13||890||21.4||16.5||7.5|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|22||Truck and rail|2022|0|S|225||1604||0|S|33||16.8|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|23||Truck and water|2022|47||16||938||29.1||47.4||39.4|
+01|00|0100000US|United States||23|Other chemical products and preparations, not elsewhere classified|30|z|Unknown mode|2022|1609||0|S|312||26.4||0|S|35.5|
+01|00|0100000US|United States||24|Plastics and rubber|00||All modes|2022|0|S|0|S|491||0|S|0|S|23.9|
+01|00|0100000US|United States||24|Plastics and rubber|10||Single modes|2022|0|S|0|S|213||0|S|0|S|21.1|
+01|00|0100000US|United States||24|Plastics and rubber|11|n|Truck|2022|0|S|0|S|147||0|S|0|S|27.7|
+01|00|0100000US|United States||24|Plastics and rubber|111||For-hire truck|2022|0|S|0|S|675||0|S|0|S|17|
+01|00|0100000US|United States||24|Plastics and rubber|112||Company-owned truck|2022|126||31||81||23.5||45.3||15.5|
+01|00|0100000US|United States||24|Plastics and rubber|113|o|Customer pick-up|2022|0|S|0|S|167||0|S|0|S|37.6|
+01|00|0100000US|United States||24|Plastics and rubber|12||Rail|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||24|Plastics and rubber|14||Air (includes truck and air)|2022|0|S|0|S|863||0|S|0|S|35.5|
+01|00|0100000US|United States||24|Plastics and rubber|20||Multiple modes|2022|0|S|0|S|1123||0|S|0|S|18.7|
+01|00|0100000US|United States||24|Plastics and rubber|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|1123||0|S|0|S|18.8|
+01|00|0100000US|United States||24|Plastics and rubber|23||Truck and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||24|Plastics and rubber|30|z|Unknown mode|2022|0|S|0|S|433||0|S|0|S|44.9|
+01|00|0100000US|United States||26|Wood products|00||All modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||26|Wood products|10||Single modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||26|Wood products|11|n|Truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||26|Wood products|111||For-hire truck|2022|0|S|0|S|896||0|S|0|S|9.8|
+01|00|0100000US|United States||26|Wood products|112||Company-owned truck|2022|0|S|0|S|47||0|S|0|S|12.2|
+01|00|0100000US|United States||26|Wood products|113|o|Customer pick-up|2022|0|S|0|S|19||0|S|0|S|24.5|
+01|00|0100000US|United States||26|Wood products|20||Multiple modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||26|Wood products|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|00||All modes|2022|14||0|S|154||46.3||0|S|20.7|
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|10||Single modes|2022|14||0|S|154||46.6||0|S|21|
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|11|n|Truck|2022|14||0|S|154||46.6||0|S|21|
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|111||For-hire truck|2022|0|S|0|S|821||0|S|0|S|29.9|
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|112||Company-owned truck|2022|5||1||128||22.8||18.7||12.9|
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|113|o|Customer pick-up|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|20||Multiple modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||27|Pulp, newsprint, paper, and paperboard|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||28|Paper or paperboard articles|00||All modes|2022|128||86||83||31.8||49.2||8.7|
+01|00|0100000US|United States||28|Paper or paperboard articles|10||Single modes|2022|127||85||81||31.8||49.2||9.6|
+01|00|0100000US|United States||28|Paper or paperboard articles|11|n|Truck|2022|127||85||80||31.8||49.2||9.5|
+01|00|0100000US|United States||28|Paper or paperboard articles|111||For-hire truck|2022|34||0|S|0|S|35.5||0|S|0|S
+01|00|0100000US|United States||28|Paper or paperboard articles|112||Company-owned truck|2022|93||19||84||35.1||30.1||16.7|
+01|00|0100000US|United States||28|Paper or paperboard articles|113|o|Customer pick-up|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||28|Paper or paperboard articles|14||Air (includes truck and air)|2022|0|Z|0|S|1016||41.4||0|S|21.6|
+01|00|0100000US|United States||28|Paper or paperboard articles|20||Multiple modes|2022|0|S|0|S|188||0|S|0|S|40.8|
+01|00|0100000US|United States||28|Paper or paperboard articles|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|188||0|S|0|S|40.8|
+01|00|0100000US|United States||29|Printed products|00||All modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||29|Printed products|10||Single modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||29|Printed products|11|n|Truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||29|Printed products|111||For-hire truck|2022|2||0|S|0|S|23.1||0|S|0|S
+01|00|0100000US|United States||29|Printed products|112||Company-owned truck|2022|0|S|0|S|3||0|S|0|S|2.2|
+01|00|0100000US|United States||29|Printed products|20||Multiple modes|2022|0|Z|0|S|485||36.5||0|S|45.9|
+01|00|0100000US|United States||29|Printed products|21||Parcel, U.S.P.S. or courier|2022|0|Z|0|S|485||36.5||0|S|45.9|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|00||All modes|2022|0|S|0|S|715||0|S|0|S|22.6|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|10||Single modes|2022|0|S|0|S|490||0|S|0|S|31|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|11|n|Truck|2022|0|S|0|S|491||0|S|0|S|31.1|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|111||For-hire truck|2022|0|S|41||828||0|S|45.8||37.7|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|112||Company-owned truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|113|o|Customer pick-up|2022|0|S|0|S|78||0|S|0|S|46.8|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|12||Rail|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|14||Air (includes truck and air)|2022|0|S|0|S|697||0|S|0|S|48.5|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|20||Multiple modes|2022|0|S|0|Z|848||0|S|47.7||18.7|
+01|00|0100000US|United States||30|Textiles, leather, and articles of textiles or leather|21||Parcel, U.S.P.S. or courier|2022|0|S|0|Z|848||0|S|47.7||18.7|
+01|00|0100000US|United States||31|Non-metallic mineral products|00||All modes|2022|0|S|126||0|S|0|S|48.2||0|S
+01|00|0100000US|United States||31|Non-metallic mineral products|10||Single modes|2022|0|S|126||0|S|0|S|47.1||0|S
+01|00|0100000US|United States||31|Non-metallic mineral products|11|n|Truck|2022|0|S|126||0|S|0|S|47.1||0|S
+01|00|0100000US|United States||31|Non-metallic mineral products|111||For-hire truck|2022|0|S|0|S|1046||0|S|0|S|36.9|
+01|00|0100000US|United States||31|Non-metallic mineral products|112||Company-owned truck|2022|17||122||0|S|41.5||45.9||0|S
+01|00|0100000US|United States||31|Non-metallic mineral products|20||Multiple modes|2022|0|S|0|S|1311||0|S|0|S|41.1|
+01|00|0100000US|United States||31|Non-metallic mineral products|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|1311||0|S|0|S|41.1|
+01|00|0100000US|United States||32|Base metal in primary or semi-finished forms and in finished basic shapes|00||All modes|2022|59||23||272||37||37||23.7|
+01|00|0100000US|United States||32|Base metal in primary or semi-finished forms and in finished basic shapes|10||Single modes|2022|59||23||273||37||37||25|
+01|00|0100000US|United States||32|Base metal in primary or semi-finished forms and in finished basic shapes|11|n|Truck|2022|59||23||273||37||37||25|
+01|00|0100000US|United States||32|Base metal in primary or semi-finished forms and in finished basic shapes|111||For-hire truck|2022|57||23||386||38||37||17.6|
+01|00|0100000US|United States||32|Base metal in primary or semi-finished forms and in finished basic shapes|112||Company-owned truck|2022|0|S|0|S|39||0|S|0|S|30.5|
+01|00|0100000US|United States||32|Base metal in primary or semi-finished forms and in finished basic shapes|20||Multiple modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||32|Base metal in primary or semi-finished forms and in finished basic shapes|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||33|Articles of base metal|00||All modes|2022|0|S|0|S|342||0|S|0|S|31.5|
+01|00|0100000US|United States||33|Articles of base metal|10||Single modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||33|Articles of base metal|11|n|Truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||33|Articles of base metal|111||For-hire truck|2022|0|S|0|S|493||0|S|0|S|34.9|
+01|00|0100000US|United States||33|Articles of base metal|112||Company-owned truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||33|Articles of base metal|113|o|Customer pick-up|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||33|Articles of base metal|20||Multiple modes|2022|0|S|0|S|554||0|S|0|S|40.1|
+01|00|0100000US|United States||33|Articles of base metal|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|554||0|S|0|S|40.1|
+01|00|0100000US|United States||34|Machinery|00||All modes|2022|0|S|0|S|812||0|S|0|S|26|
+01|00|0100000US|United States||34|Machinery|10||Single modes|2022|0|S|0|S|289||0|S|0|S|45.4|
+01|00|0100000US|United States||34|Machinery|11|n|Truck|2022|0|S|0|S|289||0|S|0|S|45.4|
+01|00|0100000US|United States||34|Machinery|111||For-hire truck|2022|0|S|0|S|618||0|S|0|S|35.2|
+01|00|0100000US|United States||34|Machinery|112||Company-owned truck|2022|13||0|S|57||26.5||0|S|44.5|
+01|00|0100000US|United States||34|Machinery|113|o|Customer pick-up|2022|0|S|0|S|20||0|S|0|S|38.9|
+01|00|0100000US|United States||34|Machinery|20||Multiple modes|2022|0|S|0|S|832||0|S|0|S|36|
+01|00|0100000US|United States||34|Machinery|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|991||0|S|0|S|34.7|
+01|00|0100000US|United States||34|Machinery|22||Truck and rail|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|00||All modes|2022|20377||3808||676||21||37.1||19.7|
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|10||Single modes|2022|15232||3735||0|S|21.5||38.1||0|S
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|11|n|Truck|2022|14779||3730||0|S|22.6||38.2||0|S
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|111||For-hire truck|2022|7792||2165||311||19.5||45.2||15.5|
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|112||Company-owned truck|2022|6673||1532||86||33.2||42.1||28.3|
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|113|o|Customer pick-up|2022|313||33||0|S|29.6||30.9||0|S
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|12||Rail|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|13||Water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|133||Deep sea|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|14||Air (includes truck and air)|2022|0|S|0|S|1645||0|S|0|S|25.5|
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|20||Multiple modes|2022|5130||0|S|874||49||0|S|9|
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|21||Parcel, U.S.P.S. or courier|2022|5118||0|S|874||49.2||0|S|8.9|
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|23||Truck and water|2022|0|S|0|S|2942||0|S|0|S|37.3|
+01|00|0100000US|United States||35|Electronic and other electrical equipment and components, and office equipment|30|z|Unknown mode|2022|0|S|0|S|661||0|S|0|S|19.5|
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|00||All modes|2022|0|S|0|S|600||0|S|0|S|22.7|
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|10||Single modes|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|11|n|Truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|111||For-hire truck|2022|0|S|0|S|716||0|S|0|S|33.8|
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|112||Company-owned truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|113|o|Customer pick-up|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|14||Air (includes truck and air)|2022|0|Z|0|S|335||14.9||0|S|7.9|
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|20||Multiple modes|2022|2||0|Z|693||43.1||46.1||22.6|
+01|00|0100000US|United States||36|Motorized and other vehicles (includes parts)|21||Parcel, U.S.P.S. or courier|2022|2||0|Z|693||43.1||46.1||22.6|
+01|00|0100000US|United States||38|Precision instruments and apparatus|00||All modes|2022|21772||1299||358||36.6||49.1||40.4|
+01|00|0100000US|United States||38|Precision instruments and apparatus|10||Single modes|2022|0|S|0|S|1054||0|S|0|S|17.2|
+01|00|0100000US|United States||38|Precision instruments and apparatus|11|n|Truck|2022|0|S|0|S|243||0|S|0|S|18.5|
+01|00|0100000US|United States||38|Precision instruments and apparatus|111||For-hire truck|2022|2599||72||265||28.5||31.2||34.4|
+01|00|0100000US|United States||38|Precision instruments and apparatus|112||Company-owned truck|2022|0|S|0|S|225||0|S|0|S|20.4|
+01|00|0100000US|United States||38|Precision instruments and apparatus|113|o|Customer pick-up|2022|58||0|S|0|S|43.2||0|S|0|S
+01|00|0100000US|United States||38|Precision instruments and apparatus|14||Air (includes truck and air)|2022|474||0|S|1377||28||0|S|8.5|
+01|00|0100000US|United States||38|Precision instruments and apparatus|20||Multiple modes|2022|6286||199||0|S|45.7||48.2||0|S
+01|00|0100000US|United States||38|Precision instruments and apparatus|21||Parcel, U.S.P.S. or courier|2022|6210||0|S|0|S|46.4||0|S|0|S
+01|00|0100000US|United States||38|Precision instruments and apparatus|22||Truck and rail|2022|41||40||1026||5.4||33.4||27.6|
+01|00|0100000US|United States||38|Precision instruments and apparatus|23||Truck and water|2022|0|S|0|Z|0|S|0|S|41.1||0|S
+01|00|0100000US|United States||38|Precision instruments and apparatus|30|z|Unknown mode|2022|0|S|0|S|968||0|S|0|S|17.9|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|00||All modes|2022|0|S|0|S|545||0|S|0|S|23.5|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|10||Single modes|2022|0|S|0|S|293||0|S|0|S|30.9|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|11|n|Truck|2022|0|S|0|S|293||0|S|0|S|30.9|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|111||For-hire truck|2022|0|S|0|S|773||0|S|0|S|40.4|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|112||Company-owned truck|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|113|o|Customer pick-up|2022|0|S|0|S|7||0|S|0|S|7.8|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|20||Multiple modes|2022|0|S|0|S|802||0|S|0|S|16.7|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|834||0|S|0|S|16.7|
+01|00|0100000US|United States||39|Furniture, mattresses and mattress supports, lamps, lighting fittings, and illuminated signs|23||Truck and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||40|Miscellaneous manufactured products|00||All modes|2022|212||0|S|371||39.7||0|S|19|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|10||Single modes|2022|190||0|S|135||44.7||0|S|12.4|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|11|n|Truck|2022|189||0|S|130||44.8||0|S|13.7|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|111||For-hire truck|2022|0|S|0|S|305||0|S|0|S|37|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|112||Company-owned truck|2022|0|S|0|S|91||0|S|0|S|17.2|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|113|o|Customer pick-up|2022|0|S|1||0|S|0|S|42.2||0|S
+01|00|0100000US|United States||40|Miscellaneous manufactured products|12||Rail|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||40|Miscellaneous manufactured products|14||Air (includes truck and air)|2022|0|S|0|S|1125||0|S|0|S|25.4|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|20||Multiple modes|2022|0|S|1||538||0|S|48.6||23.2|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|21||Parcel, U.S.P.S. or courier|2022|0|S|0|S|538||0|S|0|S|23.1|
+01|00|0100000US|United States||40|Miscellaneous manufactured products|22||Truck and rail|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||40|Miscellaneous manufactured products|30|z|Unknown mode|2022|0|S|0|S|184||0|S|0|S|43.5|
+01|00|0100000US|United States||43|Mixed freight|00||All modes|2022|850306||219492||168||9.1||5.4||16.6|
+01|00|0100000US|United States||43|Mixed freight|10||Single modes|2022|846144||218493||111||9.1||5.4||6.8|
+01|00|0100000US|United States||43|Mixed freight|11|n|Truck|2022|845166||217939||109||9.2||5.4||6.9|
+01|00|0100000US|United States||43|Mixed freight|111||For-hire truck|2022|197822||62967||173||16.7||10.6||14.9|
+01|00|0100000US|United States||43|Mixed freight|112||Company-owned truck|2022|635336||151717||96||8.2||4.5||7.6|
+01|00|0100000US|United States||43|Mixed freight|113|o|Customer pick-up|2022|12008||3255||280||22.3||28.7||22|
+01|00|0100000US|United States||43|Mixed freight|12||Rail|2022|784||522||0|S|49.2||34.3||0|S
+01|00|0100000US|United States||43|Mixed freight|13||Water|2022|40||11||1173||36.9||39.7||21.8|
+01|00|0100000US|United States||43|Mixed freight|133||Deep sea|2022|40||11||1173||36.9||39.7||21.8|
+01|00|0100000US|United States||43|Mixed freight|14||Air (includes truck and air)|2022|154||20||1320||23.7||21.2||14.6|
+01|00|0100000US|United States||43|Mixed freight|20||Multiple modes|2022|3885||922||723||30.1||17.8||24|
+01|00|0100000US|United States||43|Mixed freight|21||Parcel, U.S.P.S. or courier|2022|2625||0|S|723||46.3||0|S|24|
+01|00|0100000US|United States||43|Mixed freight|22||Truck and rail|2022|508||460||369||30||35.4||26.3|
+01|00|0100000US|United States||43|Mixed freight|23||Truck and water|2022|751||179||678||32.5||40||35.6|
+01|00|0100000US|United States||43|Mixed freight|24||Rail and water|2022|0|S|0|S|0|S|0|S|0|S|0|S
+01|00|0100000US|United States||43|Mixed freight|25|x|Other multiple modes|2022|0|Z|0|Z|185||9.2||9.2||5.8|
+01|00|0100000US|United States||43|Mixed freight|30|z|Unknown mode|2022|277||76||179||43.5||46.6||48.6|

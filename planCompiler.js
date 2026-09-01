@@ -299,6 +299,10 @@ export function validatePlan(plan) {
       const tools = Array.isArray(step.tools) ? step.tools : [];
       if (!tools.length) fail(`${where}: tools list is empty.`);
       tools.forEach(ref => expectBodyRef(ref, `${where} tools`));
+      // The merged/cut result is itself referenceable, so later steps can shell,
+      // fillet, or pattern the combined body (a plan that couldn't do this had to
+      // duplicate work — gpt-oss correctly tried to and was wrongly rejected).
+      bodyIds.add(stepId);
     } else if (op === "circular_pattern") {
       expectBodyRef(step.target, `${where} target`);
       expectExpr(step.count, `${where} count`);
@@ -372,6 +376,16 @@ export function compilePlanToFeatureScript(plan) {
   body.push("");
 
   const sketchPlaneVars = new Map(); // sketch step id -> plane var name
+  // Which ids a boolean result may be attributed to. Onshape may track a merged
+  // body under the boolean's own id or under the surviving input's id depending on
+  // the operation, so a reference to a boolean step resolves through both — a
+  // union of an empty sub-query contributes nothing, so this is safe either way.
+  const booleanResultAliases = new Map(); // boolean step id -> [ids to query]
+  const bodyQuery = ref => {
+    const aliases = booleanResultAliases.get(ref);
+    if (!aliases) return `qCreatedBy(id + "${ref}", EntityType.BODY)`;
+    return `qUnion([${aliases.map(alias => `qCreatedBy(id + "${alias}", EntityType.BODY)`).join(", ")}])`;
+  };
 
   for (const step of plan.steps) {
     if (step.op === "sketch") {
@@ -428,13 +442,17 @@ export function compilePlanToFeatureScript(plan) {
       body.push(`        });`);
       body.push("");
     } else if (step.op === "shell") {
+      // qCapEntity needs the id of the operation that actually created the cap face
+      // (an extrude), never a boolean id — resolve through the alias chain.
+      const capSourceId = (booleanResultAliases.get(step.target) || [step.target])
+        .find(alias => !booleanResultAliases.has(alias)) || step.target;
       body.push(`        opShell(context, id + "${step.id}", {`);
-      body.push(`            "entities"  : qCapEntity(id + "${step.target}", CapType.END, EntityType.FACE),`);
+      body.push(`            "entities"  : qCapEntity(id + "${capSourceId}", CapType.END, EntityType.FACE),`);
       body.push(`            "thickness" : -(${expr(step.value)} * inch)`);
       body.push(`        });`);
       body.push("");
     } else if (step.op === "fillet" || step.op === "chamfer") {
-      const edges = `qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(id + "${step.target}", EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED)`;
+      const edges = `qEdgeTopologyFilter(qOwnedByBody(${bodyQuery(step.target)}, EntityType.EDGE), EdgeTopology.TWO_SIDED)`;
       if (step.op === "fillet") {
         body.push(`        opFillet(context, id + "${step.id}", {`);
         body.push(`            "entities" : ${edges},`);
@@ -452,21 +470,23 @@ export function compilePlanToFeatureScript(plan) {
       // Onshape-verified semantics: UNION takes ALL bodies in "tools" and must NOT
       // have a "targets" key (targets is only for SUBTRACTION/grouping) — passing
       // targets with UNION fails with BOOLEAN_BAD_INPUT in the real compiler.
-      const unionBodies = [step.target, ...step.tools].map(ref => `qCreatedBy(id + "${ref}", EntityType.BODY)`);
+      const unionBodies = [step.target, ...step.tools].map(ref => bodyQuery(ref));
       body.push(`        opBoolean(context, id + "${step.id}", {`);
       body.push(`            "tools" : qUnion([\n                ${unionBodies.join(",\n                ")}\n            ]),`);
       body.push(`            "operationType" : BooleanOperationType.UNION`);
       body.push(`        });`);
       body.push("");
+      booleanResultAliases.set(step.id, [step.target, step.id]);
     } else if (step.op === "boolean_subtract") {
-      const tools = step.tools.map(ref => `qCreatedBy(id + "${ref}", EntityType.BODY)`);
+      const tools = step.tools.map(ref => bodyQuery(ref));
       const toolsExpr = tools.length === 1 ? tools[0] : `qUnion([\n                ${tools.join(",\n                ")}\n            ])`;
       body.push(`        opBoolean(context, id + "${step.id}", {`);
       body.push(`            "tools" : ${toolsExpr},`);
-      body.push(`            "targets" : qCreatedBy(id + "${step.target}", EntityType.BODY),`);
+      body.push(`            "targets" : ${bodyQuery(step.target)},`);
       body.push(`            "operationType" : BooleanOperationType.SUBTRACTION`);
       body.push(`        });`);
       body.push("");
+      booleanResultAliases.set(step.id, [step.target, step.id]);
     } else if (step.op === "circular_pattern" || step.op === "linear_pattern") {
       const countVar = `cnt_${step.id}`;
       const trVar = `tr_${step.id}`;
@@ -485,7 +505,7 @@ export function compilePlanToFeatureScript(plan) {
       body.push(`            ${nmVar} = append(${nmVar}, "${step.id}" ~ i);`);
       body.push(`        }`);
       body.push(`        opPattern(context, id + "${step.id}", {`);
-      body.push(`            "entities" : qCreatedBy(id + "${step.target}", EntityType.BODY),`);
+      body.push(`            "entities" : ${bodyQuery(step.target)},`);
       body.push(`            "transforms" : ${trVar},`);
       body.push(`            "instanceNames" : ${nmVar}`);
       body.push(`        });`);

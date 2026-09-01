@@ -86,7 +86,34 @@ const patternPlan = {
   ],
 };
 
-const plans = [["mug", mugPlan], ["plate", platePlan], ["patternHub", patternPlan]];
+// Exercises referencing a boolean RESULT downstream (shell + fillet after union) —
+// the case a real gpt-oss plan produced and the validator initially rejected.
+const postBooleanPlan = {
+  featureName: "plannedBin",
+  featureLabel: "Planned Bin",
+  reasoning: "Two merged blocks, then hollow and soften the combined body.",
+  parameters: [
+    { name: "binWidth", label: "Bin Width", kind: "length", min: 1, default: 3, max: 12 },
+    { name: "binDepth", label: "Bin Depth", kind: "length", min: 1, default: 2, max: 12 },
+    { name: "binHeight", label: "Bin Height", kind: "length", min: 0.5, default: 2, max: 12 },
+    { name: "wallThickness", label: "Wall", kind: "length", min: 0.04, default: 0.12, max: 0.5 },
+  ],
+  steps: [
+    { ...nullStep, op: "sketch", id: "mainSk", plane: "base", entities: [
+      { type: "rectangle", id: "main", corner1: ["-binWidth / 2", "-binDepth / 2"], corner2: ["binWidth / 2", "binDepth / 2"], center: null, radius: null, firstVertex: null, sides: null, start: null, mid: null, end: null, points: null },
+    ] },
+    { ...nullStep, op: "extrude", id: "mainBody", sketch: "mainSk", value: "binHeight" },
+    { ...nullStep, op: "sketch", id: "lipSk", plane: "base", entities: [
+      { type: "rectangle", id: "lip", corner1: ["binWidth / 2 - wallThickness", "-binDepth / 2"], corner2: ["binWidth / 2 + binWidth / 4", "binDepth / 2"], center: null, radius: null, firstVertex: null, sides: null, start: null, mid: null, end: null, points: null },
+    ] },
+    { ...nullStep, op: "extrude", id: "lipBody", sketch: "lipSk", value: "binHeight" },
+    { ...nullStep, op: "boolean_union", id: "merged", target: "mainBody", tools: ["lipBody"] },
+    { ...nullStep, op: "shell", id: "hollow", target: "merged", value: "wallThickness" },
+    { ...nullStep, op: "fillet", id: "soften", target: "merged", value: "wallThickness * 0.4" },
+  ],
+};
+
+const plans = [["mug", mugPlan], ["plate", platePlan], ["patternHub", patternPlan], ["postBoolean", postBooleanPlan]];
 const compiledById = {};
 for (const [name, plan] of plans) {
   const planErrors = validatePlan(plan);

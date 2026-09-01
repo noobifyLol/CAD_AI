@@ -33,6 +33,24 @@ export function isOnshapeConfigured() {
   );
 }
 
+// Onshape rate-limits bursts with HTTP 429. Serialize calls with a minimum spacing
+// so a multi-candidate generation (or a test sweep) doesn't lose its ground-truth
+// check to throttling — a skipped check is safe but blind.
+const MIN_REQUEST_SPACING_MS = Number(process.env.ONSHAPE_MIN_REQUEST_SPACING_MS || 1500);
+let requestChain = Promise.resolve();
+let lastRequestAt = 0;
+
+function throttled(task) {
+  const scheduled = requestChain.then(async () => {
+    const waitMs = Math.max(0, lastRequestAt + MIN_REQUEST_SPACING_MS - Date.now());
+    if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+    lastRequestAt = Date.now();
+    return task();
+  });
+  requestChain = scheduled.catch(() => {});
+  return scheduled;
+}
+
 function signedRequest(method, path, bodyObj) {
   return new Promise((resolve, reject) => {
     const nonce = crypto.randomBytes(16).toString("hex").slice(0, 25);
@@ -209,7 +227,13 @@ export async function testCompileFeatureScript(code) {
 
   try {
     const path = `/api/partstudios/d/${TEST_DOCUMENT_ID}/w/${TEST_WORKSPACE_ID}/e/${TEST_PARTSTUDIO_ID}/featurescript`;
-    const result = await signedRequest("POST", path, { script: harness.script });
+    let result = await throttled(() => signedRequest("POST", path, { script: harness.script }));
+    // One backoff retry on throttling — losing the ground-truth check to a burst
+    // would silently downgrade validation to regex-only.
+    if (result.status === 429) {
+      await new Promise(resolve => setTimeout(resolve, Number(process.env.ONSHAPE_RETRY_BACKOFF_MS || 8000)));
+      result = await throttled(() => signedRequest("POST", path, { script: harness.script }));
+    }
     if (result.status !== 200) {
       return { attempted: true, ok: null, errors: [], warnings: [], skippedReason: `Onshape returned HTTP ${result.status}: ${result.body.slice(0, 300)}` };
     }

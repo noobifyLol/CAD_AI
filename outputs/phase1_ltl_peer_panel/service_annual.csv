@@ -1,0 +1,9 @@
+carrier,year,mastio_rank,mastio_rank_denominator,mastio_percentile,mastio_overall_rank,mastio_national_carrier_rank,mastio_overall_weighted_quality_score,on_time_service_pct,cargo_claims_ratio_pct,damage_claims_ratio_pct,service_metric_definition,source_url,source_status,notes
+FedEx Freight,2024,,,,,,,,,,,,Gap,Mastio/public service source pending
+Old Dominion Freight Line,2024,,,,,,,,,,,,Gap,Mastio/public service source pending
+XPO North American LTL,2024,,,,,,,,,,,,Gap,Mastio/public service source pending
+Saia,2024,,,,,,,,,,,,Gap,Mastio/public service source pending
+FedEx Freight,2025,,,,,,,,,,,,Gap,Mastio/public service source pending
+Old Dominion Freight Line,2025,,,,,,,,,,,,Gap,Mastio/public service source pending
+XPO North American LTL,2025,,,,,,,,,,,,Gap,Mastio/public service source pending
+Saia,2025,,,,,,,,,,,,Gap,Mastio/public service source pending
