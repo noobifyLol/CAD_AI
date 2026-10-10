@@ -97,5 +97,42 @@ expectFlagged('unitless center vector', STRICT_FEATURESCRIPT_TEMPLATE.replace(
   '"firstCorner" : vector(-1, -1),'
 ), ['need units']);
 
+// 6) Hallucinated op-level "operationType": ExtrudeOperationType.CUT (seen live on the
+//    web app: Onshape "Variable ExtrudeOperationType not found"). As the last key or a
+//    middle key, the sanitizer must drop it and leave valid code; used anywhere else it
+//    must be flagged.
+const firstEndDepth = /("endDepth"\s*:\s*definition\.\w+)/;
+for (const [label, insert] of [
+  ['fake ExtrudeOperationType as last key', '$1,\n            "operationType" : ExtrudeOperationType.CUT'],
+  ['fake ExtrudeOperationType as middle key', '"operationType" : ExtrudeOperationType.CUT,\n            $1'],
+]) {
+  const bad = STRICT_FEATURESCRIPT_TEMPLATE.replace(firstEndDepth, insert);
+  const strict = validateFeatureScriptStrict(bad);
+  if (bad !== STRICT_FEATURESCRIPT_TEMPLATE && strict.ok && !/ExtrudeOperationType/.test(strict.code)) {
+    console.log(`PASS (repaired) ${label}`);
+  } else {
+    failures += 1;
+    console.log(`FAIL (should be repaired) ${label} — ok=${strict.ok} stillPresent=${/ExtrudeOperationType/.test(strict.code)}`);
+  }
+}
+expectFlagged('fake RevolveOperationType outside a map', STRICT_FEATURESCRIPT_TEMPLATE.replace(
+  firstEndDepth, '$1\n        });\n        var mode = RevolveOperationType.CUT;\n        ({ "x" : 1'
+), ['enum does not exist']);
+
+// 7) A body queried by the id of the shell that modified it (empty in Onshape) must be
+//    rewritten to the extrude that created it; the shell's own entities stay untouched.
+{
+  const shellCase = STRICT_FEATURESCRIPT_TEMPLATE.replace(firstEndDepth, '$1\n        });\n'
+    + '        opShell(context, id + "shell", { "entities" : qCreatedBy(id + "extrudeBody", EntityType.BODY), "thickness" : 0.05 * inch });\n'
+    + '        opFillet(context, id + "round", { "entities" : qOwnedByBody(qCreatedBy(id + "shell", EntityType.BODY), EntityType.EDGE), "radius" : 0.01 * inch });\n'
+    + '        ({ "x" : 1');
+  const strict = validateFeatureScriptStrict(shellCase);
+  const fixed = strict.code.includes('qOwnedByBody(qCreatedBy(id + "extrudeBody", EntityType.BODY)')
+    && !strict.code.includes('qCreatedBy(id + "shell", EntityType.BODY)')
+    && strict.code.includes('"entities" : qCreatedBy(id + "extrudeBody", EntityType.BODY), "thickness"');
+  if (shellCase !== STRICT_FEATURESCRIPT_TEMPLATE && fixed) console.log('PASS (repaired) body queried by shell id -> creating extrude');
+  else { failures += 1; console.log('FAIL (should be repaired) body queried by shell id'); }
+}
+
 console.log(failures === 0 ? '\nALL VALIDATOR CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -2792,6 +2792,38 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     if (code !== before) record("op_inc_dec_fix", before, code);
   }
 
+  // Hallucinated op-level "operationType": ExtrudeOperationType.CUT (and Revolve/Loft/...)
+  // does not exist; op functions only create bodies, so drop the key. A following
+  // opBoolean does the actual cut/join. Handles the key being last (drop the comma
+  // before it) or in the middle (drop the comma after it).
+  {
+    const before = code;
+    const fakeEnum = String.raw`"operationType"\s*:\s*(?:Extrude|Revolve|Loft|Sweep|Shell|Fillet|Chamfer)OperationType\.\w+`;
+    code = code.replace(new RegExp(String.raw`,\s*\n[ \t]*${fakeEnum}[ \t]*(?=\r?\n\s*\})`, "g"), "");
+    code = code.replace(new RegExp(String.raw`\n[ \t]*${fakeEnum}[ \t]*,[ \t]*(?=\r?\n)`, "g"), "");
+    if (code !== before) record("drop_nonexistent_op_operation_type", before, code);
+  }
+
+  // opShell / opFillet / opChamfer MODIFY an existing body; they do not create one, so
+  // qCreatedBy(<that op id>, EntityType.BODY) is empty and later booleans/fillets act on
+  // nothing. Point those queries at the operation that created the body instead (the
+  // compile-verified cup example references the extrude, not the shell).
+  {
+    const before = code;
+    const modifierOp = /\bop(?:Shell|Fillet|Chamfer)\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{[^}]*?"entities"\s*:\s*(?:qOwnedByBody\s*\(\s*)?qCreatedBy\s*\(\s*id\s*\+\s*"(\w+)"\s*,\s*EntityType\.BODY\s*\)/g;
+    const creatorOf = {};
+    for (const match of code.matchAll(modifierOp)) creatorOf[match[1]] = match[2];
+    // Follow chains (shell of a fillet of an extrude) back to the creating operation.
+    const resolve = name => { let seen = 0; while (creatorOf[name] && seen++ < 10) name = creatorOf[name]; return name; };
+    for (const modified of Object.keys(creatorOf)) {
+      code = code.replace(
+        new RegExp(String.raw`qCreatedBy\(\s*id\s*\+\s*"${modified}"\s*,\s*EntityType\.BODY\s*\)`, "g"),
+        `qCreatedBy(id + "${resolve(modified)}", EntityType.BODY)`,
+      );
+    }
+    if (code !== before) record("query_body_from_creating_op_not_modifier", before, code);
+  }
+
   // Array length fix: replace arr.length with size(arr)
   {
     const before = code;
@@ -6793,6 +6825,10 @@ function validateFeatureScript(code) {
     }
     if (/\b(qEdges|qEdgeAll|qBodyFaces|qAllEdges)\s*\(/.test(line)) {
       addIssue(lineNo, "Unsupported edge/body helper detected. Use qOwnedByBody(...) and qEdgeTopologyFilter(...) patterns instead.", line);
+    }
+    // Hallucinated enums: Onshape fails with "Variable ExtrudeOperationType not found".
+    if (/\b(?:Extrude|Revolve|Loft|Sweep|Shell|Fillet|Chamfer)OperationType\s*\./.test(line)) {
+      addIssue(lineNo, "This enum does not exist in FeatureScript. opExtrude/opRevolve/opLoft/opSweep only create bodies: cut or join with opBoolean (BooleanOperationType.SUBTRACTION / UNION).", line);
     }
     if (/\bnewSketch\s*\([^)]*evPlane\s*\(\s*context\s*,\s*definition\.\w+/.test(line)) {
       addIssue(lineNo, "newSketch with raw definition face/plane selection is fragile here. Prefer newSketchOnPlane with a resolved skPlane variable.", line);
