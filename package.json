@@ -23,6 +23,8 @@
     "model:serve": "node scripts/run_python.mjs .venv model_service/cadfs_server.py",
     "model:check": "node scripts/check_model_backend.mjs",
     "deepcad:serve": "node scripts/run_python.mjs .text2cad/venv hf_space/run_local.py",
+    "deepcad:modal-secret": "node scripts/deepcad_modal_secret.mjs",
+    "deepcad:deploy": "node scripts/run_python.mjs .text2cad/venv -m modal deploy hf_space/modal_app.py",
     "model:deploy": "node scripts/run_python.mjs .venv -m modal deploy model_service/modal_app.py",
     "prune:cad-memory": "node scripts/pruneCadMemory.js",
     "db:learning-report": "node scripts/dbLearningReport.js",

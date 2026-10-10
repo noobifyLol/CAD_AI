@@ -64,9 +64,12 @@ prompt ─► Text2CAD (Hugging Face Space, hf_space/) ─► sketch + extrude s
 
 Setup: the Text2CAD weights are gated, so first accept the terms at
 https://huggingface.co/datasets/SadilKhan/Text2CAD and create a read token (`HF_TOKEN`).
-Then either deploy [hf_space/](hf_space/README.md) as a free Docker Space, or run it on
-this computer with `npm run deepcad:serve` (see "Run it locally" there). Finally set
-`DEEPCAD_MODEL_URL` (and `DEEPCAD_MODEL_TOKEN` if you gave the Space an `API_TOKEN`).
+Then either deploy [hf_space/](hf_space/README.md) on Modal's free monthly credits
+(`npm run deepcad:modal-secret`, `npm run deepcad:deploy`), or run it on this computer
+with `npm run deepcad:serve` (see "Run it locally" there). Finally set
+`DEEPCAD_MODEL_URL` (and `DEEPCAD_MODEL_TOKEN`). The default **Auto** generator sends
+flat, extruded parts to the model, checks the result against the prompt, and uses
+Parametric AI for everything else, or with a warning when the model is unavailable.
 Text2CAD only makes sketch + extrude parts. Revolves, lofts, sweeps, fillets and
 patterns-as-features belong to the parametric generator. Text2CAD's license is
 CC BY-NC-SA 4.0 (non-commercial).

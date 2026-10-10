@@ -716,6 +716,7 @@
           <div class="hint">Ctrl + Enter to generate. Inches by default; mm is understood.</div>
           <label class="engine-label" for="gen-engine">Generator</label>
           <select id="gen-engine" class="engine-select">
+            <option value="auto" selected>Auto (DeepCAD for flat parts, Parametric AI for the rest)</option>
             <option value="parametric">Parametric AI (Groq)</option>
             <option value="deepcad">DeepCAD model (Text2CAD, Hugging Face)</option>
           </select>

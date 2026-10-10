@@ -40,7 +40,11 @@ function updateEngineHint() {
   const engine = document.getElementById('gen-engine')?.value;
   if (!hint) return;
   const deepcad = runtimeConfig?.deepcad;
-  if (engine === 'deepcad' && deepcad && !deepcad.configured) {
+  if (engine === 'auto') {
+    hint.textContent = deepcad?.configured
+      ? 'Flat, extruded parts (plates, rings, brackets) go to the DeepCAD model; cones, gears and curved or everyday objects go to Parametric AI.'
+      : 'The DeepCAD model is not connected on this server, so Auto uses Parametric AI.';
+  } else if (engine === 'deepcad' && deepcad && !deepcad.configured) {
     hint.textContent = 'The DeepCAD model is not connected yet: set DEEPCAD_MODEL_URL on the server (see hf_space/README.md). JSON import below still works.';
   } else if (engine === 'deepcad') {
     hint.textContent = 'Text2CAD predicts exact sketch + extrude steps; the server compiles them to FeatureScript. The first request after the Space sleeps can take a minute.';
@@ -398,6 +402,8 @@ async function verifyGeneratedCode() {
 }
 
 // ── DeepCAD (Text2CAD) generation and JSON import ──
+// Returns { done: true } when it produced code, or { done: false, reason } when Auto
+// mode should hand the prompt to the parametric generator instead.
 async function runDeepcad(body, { button, busyLabel, idleLabel, prompt }) {
   button.innerHTML = `<div class="spinner"></div><span>${busyLabel}</span>`;
   button.disabled = true;
@@ -410,14 +416,21 @@ async function runDeepcad(body, { button, busyLabel, idleLabel, prompt }) {
       body: JSON.stringify(body),
     });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'DeepCAD generation failed');
+    if (body.auto && data.route === 'parametric') return { done: false, reason: data.reason };
+    if (!r.ok) {
+      if (body.auto && r.status === 422) return { done: false, reason: 'the DeepCAD model could not build this part' };
+      if (body.auto) return { done: false, unavailable: true, reason: `the DeepCAD model is unavailable (${data.error || `HTTP ${r.status}`})` };
+      throw new Error(data.error || 'DeepCAD generation failed');
+    }
     setOutput('gen-output', data.code, 'copy-btn');
     renderVerification(data.verification);
     const steps = `${data.stats.steps} sketch/extrude step${data.stats.steps === 1 ? '' : 's'}`;
     const notes = data.warnings?.length ? ` ${data.warnings.join(' ')}` : '';
-    setStatus('gen-status', `Generated "${data.featureLabel}" from ${steps}.${notes}`, 'ok');
+    setStatus('gen-status', `Generated "${data.featureLabel}" with the DeepCAD model from ${steps}.${notes}`, 'ok');
     setThinking('gen', JSON.stringify(data.sequence, null, 2));
+    return { done: true };
   } catch (e) {
+    if (body.auto) return { done: false, unavailable: true, reason: `the DeepCAD model could not be reached (${e.message})` };
     setStatus('gen-status', `Error: ${e.message}`, 'error');
     showRunModal({
       title: 'DeepCAD generation failed',
@@ -428,6 +441,7 @@ async function runDeepcad(body, { button, busyLabel, idleLabel, prompt }) {
       orchestration: null,
       outputKind: 'generation',
     });
+    return { done: true };
   } finally {
     button.textContent = idleLabel;
     button.disabled = false;
@@ -455,21 +469,26 @@ async function compileDeepcadJson() {
 async function generate() {
   const prompt = document.getElementById('gen-prompt').value.trim();
   if (!prompt) return;
-  if (document.getElementById('gen-engine')?.value === 'deepcad') {
-    await runDeepcad({ prompt }, {
+  const engine = document.getElementById('gen-engine')?.value || 'auto';
+  let autoNote = '';
+  if (engine === 'deepcad' || engine === 'auto') {
+    const outcome = await runDeepcad({ prompt, auto: engine === 'auto' }, {
       button: document.getElementById('gen-btn'),
       busyLabel: 'Generating',
       idleLabel: 'Generate FeatureScript',
       prompt,
     });
-    return;
+    if (outcome.done) return;
+    autoNote = outcome.unavailable
+      ? `Warning: the DeepCAD model is unavailable right now (its free monthly credits may be used up, or it is restarting), so Parametric AI made this part instead. `
+      : `Auto used Parametric AI because ${outcome.reason}. `;
   }
   const body = { prompt };
 
   const btn = document.getElementById('gen-btn');
   btn.innerHTML = '<div class="spinner"></div><span>Generating</span>';
   btn.disabled = true;
-  setStatus('gen-status', 'Calling CAD AI...', 'loading');
+  setStatus('gen-status', `${autoNote}Calling CAD AI...`, 'loading');
   setThinking('gen', '');
 
   try {
@@ -493,17 +512,17 @@ async function generate() {
       : partial
       ? `Generated partial "${data.featureLabel}" - ${databaseStatusText(data.database)}`
       : `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`;
-    setStatus('gen-status', statusMessage, data.code ? 'ok' : 'error');
+    setStatus('gen-status', autoNote + statusMessage, data.code ? 'ok' : 'error');
     showRunModal({
       title: simplified ? 'Generation simplified' : repaired ? 'Generation repaired' : partial ? 'Generation partial' : 'Generation complete',
       ok: Boolean(data.code),
-      message: simplified
+      message: autoNote + (simplified
         ? `Generated simplified "${data.featureLabel}". ${data.warnings?.join(' | ') || 'The fallback path simplified the model to preserve compile safety and editability.'}`
         : repaired
         ? `Generated repaired "${data.featureLabel}". ${data.warnings?.join(' | ') || 'Validator-guided repair was applied.'}`
         : partial
         ? `Generated partial "${data.featureLabel}". ${data.omissions?.join(' | ') || 'Some features were safely omitted.'}`
-        : `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
+        : `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`),
       createdAt: data.createdAt,
       database: data.database,
       generationId: data.generationId,

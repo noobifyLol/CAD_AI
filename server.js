@@ -11,7 +11,7 @@ import {
 } from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
 import { createLearningService } from "./learning.js";
-import { DeepcadError, generateDeepcadFeature, getDeepcadConfig, verifyFeatureScript } from "./deepcadService.js";
+import { DeepcadError, assessDeepcadFit, generateDeepcadFeature, getDeepcadConfig, verifyFeatureScript } from "./deepcadService.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 10000);
@@ -277,6 +277,15 @@ app.post("/generate-deepcad", async (req, res) => {
   const prompt = String(req.body.prompt || "").trim();
   const sequence = req.body.sequence && typeof req.body.sequence === "object" ? req.body.sequence : null;
   if (!prompt && !sequence) return res.status(400).json({ error: "Provide a prompt or a CAD sequence." });
+  // Auto mode: only send prompts the model can actually build; the page runs the
+  // parametric generator for everything else (and whenever the model is unavailable).
+  if (req.body.auto && !sequence) {
+    const fit = assessDeepcadFit(prompt);
+    if (!getDeepcadConfig().configured) {
+      return res.json({ route: "parametric", reason: "the DeepCAD model is not connected on this server" });
+    }
+    if (!fit.fits) return res.json({ route: "parametric", reason: fit.reason });
+  }
   try {
     console.log(`[/generate-deepcad] prompt=${truncateForLog(prompt, 300)} sequence=${Boolean(sequence)}`);
     const result = await generateDeepcadFeature({
@@ -284,7 +293,12 @@ app.post("/generate-deepcad", async (req, res) => {
       sequence,
       sizeInches: req.body.sizeInches,
       featureLabel: req.body.featureLabel,
+      autoFallback: Boolean(req.body.auto),
     });
+    if (req.body.auto && result.missingFeatures?.length) {
+      console.log(`[/generate-deepcad] auto -> parametric: ${result.missingFeatures.join("; ")}`);
+      return res.json({ route: "parametric", reason: `the DeepCAD result left something out (${result.missingFeatures.join("; ")})` });
+    }
     console.log(`[/generate-deepcad] mode=${result.generationMode} verdict=${result.verification.verdict} steps=${result.stats.steps}`);
     res.json(result);
   } catch (err) {

@@ -33,7 +33,33 @@ token from an account that accepted its terms:
 2. Create a **Read** token at https://huggingface.co/settings/tokens.
 3. Use that token as `HF_TOKEN` below (a Space secret when deployed, `.env` when local).
 
-## Deploy (about 10 minutes, free CPU hardware is enough)
+## Deploy on Modal (free monthly credits, recommended)
+
+Since 2026 Hugging Face charges for Docker and Gradio Spaces (PRO plan), so the free
+route is [Modal](https://modal.com): its Starter plan includes monthly compute credits,
+and this service only runs while parts are being generated (it shuts down after 3 idle
+minutes). From the repository root, after "Run it locally" setup below:
+
+1. Create a free account at https://modal.com, then link this computer (opens a browser):
+   ```bash
+   .text2cad/venv/Scripts/modal setup
+   ```
+2. Store the secrets on Modal (reads `HF_TOKEN` from `.env`, generates `DEEPCAD_MODEL_TOKEN`):
+   ```bash
+   npm run deepcad:modal-secret
+   ```
+3. Deploy (the first build takes several minutes):
+   ```bash
+   npm run deepcad:deploy
+   ```
+   It prints a URL like `https://<workspace>--cad-ai-text2cad-web.modal.run`.
+4. On Render (Environment) and in `.env`, set `DEEPCAD_MODEL_URL` to that URL and
+   `DEEPCAD_MODEL_TOKEN` to the value in `.env`.
+
+When the credits run out or the service is down, the website's **Auto** generator uses
+Parametric AI instead and shows a warning.
+
+## Deploy as a Hugging Face Space (needs Hugging Face PRO)
 
 1. Create a Space at https://huggingface.co/new-space: pick **Docker** → **Blank**,
    hardware **CPU basic (free)**.
