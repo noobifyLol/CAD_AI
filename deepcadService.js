@@ -11,6 +11,7 @@
 import { compileCadSequenceToFeatureScript } from "./deepcadCompiler.js";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { validateFeatureScriptStrict } from "./ai.js";
+import { libraryInfo, matchLibraryPart } from "./deepcadLibrary.js";
 
 const MODEL_URL = String(process.env.DEEPCAD_MODEL_URL || "").trim().replace(/\/+$/, "");
 const MODEL_TOKEN = String(process.env.DEEPCAD_MODEL_TOKEN || "").trim();
@@ -19,7 +20,7 @@ const MODEL_TIMEOUT_MS = Number(process.env.DEEPCAD_MODEL_TIMEOUT_MS || 120000);
 const MODEL_WAKE_BUDGET_MS = Number(process.env.DEEPCAD_MODEL_WAKE_MS || 240000);
 
 export function getDeepcadConfig() {
-  return { configured: Boolean(MODEL_URL), url: MODEL_URL || null, onshapeCompileCheck: isOnshapeConfigured() };
+  return { configured: Boolean(MODEL_URL), url: MODEL_URL || null, onshapeCompileCheck: isOnshapeConfigured(), library: libraryInfo() };
 }
 
 export class DeepcadError extends Error {
@@ -104,6 +105,47 @@ export function assessDeepcadFit(prompt) {
     return { fits: false, reason: "the prompt does not describe a flat, extruded part (plate, ring, bracket, block...)" };
   }
   return { fits: true, reason: `"${geometric}" is a sketch-and-extrude shape` };
+}
+
+// The part library holds real extruded parts, so it can give curved SKETCHES (rounded
+// plates, hooks, brackets with arcs) but not true 3D-revolved/lofted/swept shapes; their
+// "cone"/"bottle" descriptions are flat silhouettes. Those go to the parametric generator.
+const LIBRARY_3D_ONLY = /\b(cones?|conical|taper(ed)?|spheres?|spherical|balls?|domes?|hemispheres?|bottles?|vases?|cups?|mugs?|bowls?|funnels?|torus|donuts?|doughnuts?|springs?|coils?|helix|helical|threads?|threaded|revolved?|lofted?|swept|sweep|propellers?|airfoils?|wings?)\b/i;
+
+/**
+ * Closest real DeepCAD part for the prompt, compiled to FeatureScript (free, no model).
+ * Returns the same shape as generateDeepcadFeature, or null when nothing fits well enough.
+ */
+export async function generateFromLibrary(prompt, { sizeInches = null, featureLabel = null } = {}) {
+  const text = String(prompt || "").trim();
+  if (!text || LIBRARY_3D_ONLY.test(text)) return null;
+  const started = Date.now();
+  const match = matchLibraryPart(text, sequence => {
+    const compiled = compileCadSequenceToFeatureScript(sequence);
+    return compiled.ok && !findMissingFeatures(text, compiled.sequence).length;
+  });
+  if (!match) return null;
+  const size = Number(sizeInches) > 0 ? Number(sizeInches) : parseOverallSizeInches(text);
+  const label = featureLabel || labelFromPrompt(text);
+  const compiled = compileCadSequenceToFeatureScript(match.sequence, { sizeInches: size, featureLabel: label, featureName: "deepcadPart" });
+  if (!compiled.ok) return null;
+  const verification = await verifyFeatureScript(compiled.code);
+  if (verification.verdict === "static_errors" || verification.verdict === "fails_in_onshape") return null;
+  const warnings = [...compiled.warnings, `Closest real DeepCAD part: "${match.part.name.slice(0, 160)}".`];
+  if (!size) warnings.push(`No size in the prompt; the part defaults to ${compiled.stats.defaultSizeInches} in across. Change "Overall Size" in the feature dialog.`);
+  return {
+    code: compiled.code,
+    featureName: compiled.featureName,
+    featureLabel: compiled.featureLabel,
+    generationMode: "deepcad_library",
+    sequence: compiled.sequence,
+    stats: compiled.stats,
+    model: { name: "DeepCAD part library", match: match.part.name, uid: match.part.uid, coverage: Number(match.coverage.toFixed(2)) },
+    verification,
+    missingFeatures: [],
+    warnings,
+    elapsedSec: Number(((Date.now() - started) / 1000).toFixed(2)),
+  };
 }
 
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12 };

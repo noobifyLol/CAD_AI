@@ -62,6 +62,14 @@ prompt ─► Text2CAD (Hugging Face Space, hf_space/) ─► sketch + extrude s
 - **Imports.** Paste DeepCAD `cad_json` files, Text2CAD minimal JSON, or
   `cad-sequence/v1` into *Import a DeepCAD / Text2CAD JSON* to compile them directly.
 
+**DeepCAD part library.** Auto first searches 30,000 real DeepCAD parts
+([data/deepcad_library.json.gz](data/deepcad_library.json.gz), built from the Text2CAD
+descriptions by [scripts/deepcad_library/](scripts/deepcad_library/)) and, when one matches the
+prompt's main noun, counts and features, compiles it to FeatureScript instantly and for free
+(curved sketches included). True 3D shapes (cones, bottles, springs) go to Parametric AI.
+Rebuild with `download.py`, `extract.py`, then `node scripts/deepcad_library/build.mjs compile`
+and `select`. Data license: CC BY-NC-SA 4.0 (non-commercial).
+
 Setup: the Text2CAD weights are gated, so first accept the terms at
 https://huggingface.co/datasets/SadilKhan/Text2CAD and create a read token (`HF_TOKEN`).
 Then either deploy [hf_space/](hf_space/README.md) on Modal's free monthly credits

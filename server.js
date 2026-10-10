@@ -11,7 +11,7 @@ import {
 } from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
 import { createLearningService } from "./learning.js";
-import { DeepcadError, assessDeepcadFit, generateDeepcadFeature, getDeepcadConfig, verifyFeatureScript } from "./deepcadService.js";
+import { DeepcadError, assessDeepcadFit, generateDeepcadFeature, generateFromLibrary, getDeepcadConfig, verifyFeatureScript } from "./deepcadService.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 10000);
@@ -280,6 +280,17 @@ app.post("/generate-deepcad", async (req, res) => {
   // Auto mode: only send prompts the model can actually build; the page runs the
   // parametric generator for everything else (and whenever the model is unavailable).
   if (req.body.auto && !sequence) {
+    // 1) Closest real DeepCAD part (free, instant, real curved sketches), when it fits well.
+    try {
+      const fromLibrary = await generateFromLibrary(prompt, { sizeInches: req.body.sizeInches, featureLabel: req.body.featureLabel });
+      if (fromLibrary) {
+        console.log(`[/generate-deepcad] auto -> library part ${fromLibrary.model.uid}: ${fromLibrary.model.match.slice(0, 100)}`);
+        return res.json(fromLibrary);
+      }
+    } catch (err) {
+      console.warn("[/generate-deepcad] library lookup failed:", err.message);
+    }
+    // 2) The DeepCAD model for flat parts it handles; 3) otherwise Parametric AI.
     const fit = assessDeepcadFit(prompt);
     if (!getDeepcadConfig().configured) {
       return res.json({ route: "parametric", reason: "the DeepCAD model is not connected on this server" });

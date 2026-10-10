@@ -215,9 +215,17 @@ export function buildTestHarnessScript(fullModuleCode) {
 // Always fail-open: any misconfiguration, unsupported shape, or network problem
 // resolves with ok:null (skipped) rather than throwing, so callers can safely fall
 // back to local-only validation.
+// When Onshape keeps answering 429 (the account's API allowance is used up), stop asking
+// for a while instead of spending an 8 s backoff on every single check.
+let rateLimitedUntil = 0;
+const RATE_LIMIT_PAUSE_MS = Number(process.env.ONSHAPE_RATE_LIMIT_PAUSE_MS || 600000);
+
 export async function testCompileFeatureScript(code) {
   if (!isOnshapeConfigured()) {
     return { attempted: false, ok: null, errors: [], warnings: [], skippedReason: "Onshape compile check not configured." };
+  }
+  if (Date.now() < rateLimitedUntil) {
+    return { attempted: false, ok: null, errors: [], warnings: [], skippedReason: `Onshape API rate limit reached (HTTP 429); checks paused for ${Math.ceil((rateLimitedUntil - Date.now()) / 60000)} more min.` };
   }
 
   const harness = buildTestHarnessScript(code);
@@ -234,6 +242,7 @@ export async function testCompileFeatureScript(code) {
       await new Promise(resolve => setTimeout(resolve, Number(process.env.ONSHAPE_RETRY_BACKOFF_MS || 8000)));
       result = await throttled(() => signedRequest("POST", path, { script: harness.script }));
     }
+    if (result.status === 429) rateLimitedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
     if (result.status !== 200) {
       return { attempted: true, ok: null, errors: [], warnings: [], skippedReason: `Onshape returned HTTP ${result.status}: ${result.body.slice(0, 300)}` };
     }

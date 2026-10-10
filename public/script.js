@@ -41,9 +41,10 @@ function updateEngineHint() {
   if (!hint) return;
   const deepcad = runtimeConfig?.deepcad;
   if (engine === 'auto') {
-    hint.textContent = deepcad?.configured
+    const library = deepcad?.library?.available ? `First it looks for a matching real part among ${deepcad.library.parts.toLocaleString()} DeepCAD parts. ` : '';
+    hint.textContent = library + (deepcad?.configured
       ? 'Flat, extruded parts (plates, rings, brackets) go to the DeepCAD model; cones, gears and curved or everyday objects go to Parametric AI.'
-      : 'The DeepCAD model is not connected on this server, so Auto uses Parametric AI.';
+      : 'Otherwise Auto uses Parametric AI (the DeepCAD model is not connected on this server).');
   } else if (engine === 'deepcad' && deepcad && !deepcad.configured) {
     hint.textContent = 'The DeepCAD model is not connected yet: set DEEPCAD_MODEL_URL on the server (see hf_space/README.md). JSON import below still works.';
   } else if (engine === 'deepcad') {
@@ -426,7 +427,11 @@ async function runDeepcad(body, { button, busyLabel, idleLabel, prompt }) {
     renderVerification(data.verification);
     const steps = `${data.stats.steps} sketch/extrude step${data.stats.steps === 1 ? '' : 's'}`;
     const notes = data.warnings?.length ? ` ${data.warnings.join(' ')}` : '';
-    setStatus('gen-status', `Generated "${data.featureLabel}" with the DeepCAD model from ${steps}.${notes}`, 'ok');
+    const source = data.generationMode === 'deepcad_library'
+      ? `from a real DeepCAD part ("${String(data.model?.match || '').slice(0, 90)}")`
+      : `with the DeepCAD model from ${steps}`;
+    const otherNotes = data.generationMode === 'deepcad_library' ? (data.warnings || []).filter(w => !w.startsWith('Closest real DeepCAD part')).join(' ') : notes.trim();
+    setStatus('gen-status', `Generated "${data.featureLabel}" ${source}.${otherNotes ? ` ${otherNotes}` : ''}`, 'ok');
     setThinking('gen', JSON.stringify(data.sequence, null, 2));
     return { done: true };
   } catch (e) {
