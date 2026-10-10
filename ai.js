@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
-import { autoCloseOpenProfiles, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
+import { autoAlignSweepProfiles, autoCloseOpenProfiles, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
 // llama-3.1-8b-instant and llama-3.3-70b-versatile are gone from Groq entirely as of
@@ -2826,6 +2826,53 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     if (code !== before) record("query_body_from_creating_op_not_modifier", before, code);
   }
 
+  // A body referenced by an opBoolean's id (qCreatedBy(id + "cut1", BODY) after a cut)
+  // may be tracked by Onshape under the boolean id or under the surviving input's id.
+  // Query both, as the compile-verified plan compiler does: an empty member of a qUnion
+  // contributes nothing, so this is safe either way. (Live failure: a phone stand whose
+  // second cut and fillet targeted the first cut's id: "Cannot resolve entities".)
+  try {
+    const before = code;
+    const booleans = {};
+    for (const match of code.matchAll(/\bopBoolean\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{/g)) {
+      const open = match.index + match[0].length - 1;
+      let depth = 0;
+      let close = open;
+      for (; close < code.length; close += 1) {
+        if (code[close] === "{") depth += 1;
+        else if (code[close] === "}" && --depth === 0) break;
+      }
+      const map = code.slice(open, close + 1);
+      const subtract = /SUBTRACTION|INTERSECTION/.test(map) && /"targets"/.test(map);
+      const source = subtract ? (map.match(/"targets"\s*:\s*([\s\S]*?)(?:,\s*"\w+"\s*:|\}\s*$)/) || [])[1] : (map.match(/"tools"\s*:\s*([\s\S]*?)(?:,\s*"\w+"\s*:|\}\s*$)/) || [])[1];
+      const inputs = [...String(source || "").matchAll(/qCreatedBy\s*\(\s*id\s*\+\s*"(\w+)"\s*,\s*EntityType\.BODY\s*\)/g)].map(m => m[1]);
+      if (inputs.length) booleans[match[1]] = { inputs, at: close };
+    }
+    // Expand chains: a cut of a cut resolves to every id the body may live under.
+    const expand = (name, seen = new Set()) => {
+      if (seen.has(name)) return [];
+      seen.add(name);
+      const entry = booleans[name];
+      if (!entry) return [name];
+      return [name, ...entry.inputs.flatMap(input => expand(input, seen))];
+    };
+    for (const [name, entry] of Object.entries(booleans)) {
+      const aliases = [...new Set(expand(name))].filter(alias => alias !== name);
+      if (!aliases.length) continue;
+      const union = `qUnion([${aliases.map(alias => `qCreatedBy(id + "${alias}", EntityType.BODY)`).join(", ")}, qCreatedBy(id + "${name}", EntityType.BODY)])`;
+      // Only references after the boolean, and not ones already rewritten (idempotent).
+      const head = code.slice(0, entry.at);
+      const tail = code.slice(entry.at).replace(
+        new RegExp(String.raw`(?<!qUnion\(\[\s*)(?<!EntityType\.BODY\),\s*)qCreatedBy\(\s*id\s*\+\s*"${name}"\s*,\s*EntityType\.BODY\s*\)`, "g"),
+        union,
+      );
+      code = head + tail;
+    }
+    if (code !== before) record("query_boolean_result_by_all_ids", before, code);
+  } catch {
+    // leave as is
+  }
+
   // A region sketch missing exactly one segment (e.g. a revolve profile with no bottom
   // line) gets that segment added, so qSketchRegion finds the region.
   try {
@@ -2837,6 +2884,19 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     }
   } catch {
     // leave the code as it was; the validator still reports the open profile
+  }
+
+  // A sweep profile must face along the path's start direction (door hook whose
+  // circle faced sideways while the path started upward).
+  try {
+    const before = code;
+    const result = autoAlignSweepProfiles(code);
+    if (result.fixed.length) {
+      code = result.code;
+      record("align_sweep_profile_to_path", before, code);
+    }
+  } catch {
+    // leave as is; the validator still reports it
   }
 
   // Array length fix: replace arr.length with size(arr)
@@ -5985,6 +6045,50 @@ async function generateViaPlanCompiler(prompt, dims, learningContext, requestId)
 // early as soon as a clean candidate is found, or returns the best-scoring
 // candidate seen after all iterations.
 //
+// Groq's free tier counts prompt + max_completion_tokens against a 7000-8000 TPM limit
+// per request. The full generation prompt (rules + template + example + retrieval rows
+// + database context) measured ~7000-8200 tokens, so every attempt 413'd and requests
+// fell back to the nearest library example (an L bracket came back as a flat plate).
+// Keep the prompt under a budget by dropping the least valuable context first; the
+// worked example, template directive and rules always stay.
+// Calibrated against Groq's own counts in 413 errors: these prompts run ~4.6 chars per
+// token (4.4 keeps a little margin). 5000 prompt + 2600 completion fits the 8000 limit.
+const GENERATION_PROMPT_TOKEN_BUDGET = Number(process.env.GROQ_PROMPT_TOKEN_BUDGET || 5000);
+const estimatePromptTokens = text => Math.ceil(String(text || "").length / 4.4);
+
+function fitGenerationMessages(system, user) {
+  const total = () => estimatePromptTokens(system) + estimatePromptTokens(user);
+  const before = total();
+  const dropped = [];
+  const dropUserLine = prefix => {
+    const lines = user.split("\n");
+    const kept = lines.filter(line => !line.startsWith(prefix));
+    if (kept.length !== lines.length) {
+      user = kept.join("\n");
+      dropped.push(prefix.replace(/[:\s]+$/, ""));
+    }
+  };
+  const steps = [
+    () => dropUserLine("SOURCE_ROWS:"),
+    () => dropUserLine("DATASET_ROWS:"),
+    () => {
+      const at = system.indexOf("\n\nDATABASE CONTEXT\n");
+      if (at >= 0) {
+        system = system.slice(0, at);
+        dropped.push("DATABASE CONTEXT");
+      }
+    },
+    () => dropUserLine("DB_ROWS:"),
+    () => dropUserLine("DOC_ROWS:"),
+    () => dropUserLine("STYLE HINT:"),
+  ];
+  for (const step of steps) {
+    if (total() <= GENERATION_PROMPT_TOKEN_BUDGET) break;
+    step();
+  }
+  return { system, user, before, after: total(), dropped };
+}
+
 async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
   const MAX_ITERATIONS = Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
   const slots = keySlotsForStage("generation", MAX_ITERATIONS, `${requestId}:gtf`);
@@ -5998,9 +6102,14 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
     const preferSimple = iteration >= MAX_ITERATIONS - 1; // last pass: simplify to ensure cleanliness
 
     try {
+      const fitted = fitGenerationMessages(
+        withLearningContext(buildSystemPromptForRequest(prompt), learningContext),
+        buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }),
+      );
+      console.log(`[AI] GTF iteration ${iteration + 1}: prompt ~${fitted.before} -> ~${fitted.after} tokens (budget ${GENERATION_PROMPT_TOKEN_BUDGET})${fitted.dropped.length ? `, dropped ${fitted.dropped.join(", ")}` : ""}; system ${fitted.system.length} chars, user ${fitted.user.length} chars`);
       const raw = await chat([
-        { role: "system", content: withLearningContext(buildSystemPromptForRequest(prompt), learningContext) },
-        { role: "user", content: buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }) },
+        { role: "system", content: fitted.system },
+        { role: "user", content: fitted.user },
       ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
         stage: "generation",
         affinity: `${requestId}:gtf:${candidateId}`,
@@ -6042,7 +6151,9 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
 
       // Early exit: this candidate is fully clean
       if (strict.ok) {
-        const verified = strict.onshapeCheck?.attempted ? " (Onshape-verified)" : "";
+        const verified = strict.onshapeCheck?.ok === true
+          ? " (Onshape-verified)"
+          : strict.onshapeCheck?.attempted ? " (Onshape check unavailable)" : "";
         console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}${verified}`);
         break;
       }

@@ -212,6 +212,93 @@ function analyseProfiles(code) {
   return results;
 }
 
+/**
+ * Sweeps: the profile must face along the path where the path starts (a coin threaded
+ * on a wire). Works in the base sketch plane's frame (x, y = cross(normal, x), normal),
+ * for paths drawn on that plane and profile planes whose normal is one of its axes.
+ * Returns [{ planeVar, normalText, fixText, dot, at }] for misaligned sweeps.
+ */
+const AXIS_EXPRESSIONS = [
+  [/^skPlane\.x$/, [1, 0, 0]],
+  [/^-\s*skPlane\.x$/, [-1, 0, 0]],
+  [/^skPlane\.normal$/, [0, 0, 1]],
+  [/^-\s*skPlane\.normal$/, [0, 0, -1]],
+  [/^cross\(\s*skPlane\.normal\s*,\s*skPlane\.x\s*\)$/, [0, 1, 0]],
+  [/^-\s*cross\(\s*skPlane\.normal\s*,\s*skPlane\.x\s*\)$/, [0, -1, 0]],
+];
+
+function axisOf(expression, aliases) {
+  let text = String(expression || "").trim();
+  if (aliases[text]) text = aliases[text];
+  for (const [pattern, vector] of AXIS_EXPRESSIONS) if (pattern.test(text)) return vector;
+  return null;
+}
+
+function analyseSweeps(code) {
+  const env = buildEnv(code);
+  const results = [];
+  const sketchPlaneOf = {};
+  for (const match of code.matchAll(/\bvar\s+(\w+)\s*=\s*newSketchOnPlane\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{\s*"sketchPlane"\s*:\s*(\w+)\s*\}/g)) {
+    sketchPlaneOf[match[2]] = { sketchVar: match[1], planeVar: match[3] };
+  }
+  // var skY = cross(skPlane.normal, skPlane.x); style aliases for axis expressions
+  const aliases = Object.fromEntries([...code.matchAll(/\bvar\s+(\w+)\s*=\s*(-?\s*(?:cross\(\s*skPlane\.normal\s*,\s*skPlane\.x\s*\)|skPlane\.(?:x|normal)))\s*;/g)].map(m => [m[1], m[2]]));
+  const planes = {};
+  for (const match of code.matchAll(/\bvar\s+(\w+)\s*=\s*plane\s*\(([^;]+)\)\s*;/g)) {
+    const args = splitTopLevel(match[2]);
+    if (args.length === 2) planes[match[1]] = { origin: args[0], normal: args[1], at: match.index, text: match[0] };
+  }
+  const calls = sketchCalls(code);
+  for (const match of code.matchAll(/\bopSweep\s*\(\s*context\s*,\s*id\s*\+\s*"\w+"\s*,\s*\{([\s\S]*?)\}\s*\)\s*;/g)) {
+    const profileId = (match[1].match(/"profiles"\s*:\s*qSketchRegion\s*\(\s*id\s*\+\s*"(\w+)"/) || [])[1];
+    const pathId = (match[1].match(/"path"\s*:\s*qCreatedBy\s*\(\s*id\s*\+\s*"(\w+)"/) || [])[1];
+    const profile = sketchPlaneOf[profileId];
+    const path = sketchPlaneOf[pathId];
+    if (!profile || !path || path.planeVar !== "skPlane" || !planes[profile.planeVar]) continue;
+    const plane = planes[profile.planeVar];
+    const normal = axisOf(plane.normal, aliases);
+    if (!normal) continue;
+    const first = calls.find(call => call.sketch === path.sketchVar && ["skFitSpline", "skLineSegment", "skArc"].includes(call.fn));
+    if (!first) continue;
+    let p0;
+    let p1;
+    if (first.fn === "skFitSpline") {
+      const list = splitTopLevel((mapEntry(first.map, "points") || "").slice(1, -1)).filter(Boolean);
+      p0 = evaluatePoint(list[0] || "", env);
+      p1 = evaluatePoint(list[1] || "", env);
+    } else {
+      p0 = evaluatePoint(mapEntry(first.map, "start") || "", env);
+      p1 = evaluatePoint(mapEntry(first.map, first.fn === "skArc" ? "mid" : "end") || "", env);
+    }
+    if (!p0 || !p1) continue;
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-9) continue;
+    const tangent = [dx / length, dy / length, 0];
+    const dot = Math.abs(tangent[0] * normal[0] + tangent[1] * normal[1]);
+    if (dot >= 0.5) continue;
+    let fixText = null;
+    if (Math.abs(tangent[0]) > 0.9) fixText = tangent[0] > 0 ? "skPlane.x" : "-skPlane.x";
+    else if (Math.abs(tangent[1]) > 0.9) fixText = tangent[1] > 0 ? "cross(skPlane.normal, skPlane.x)" : "-cross(skPlane.normal, skPlane.x)";
+    results.push({ planeVar: profile.planeVar, plane, fixText, dot, at: match.index, tangent });
+  }
+  return results;
+}
+
+/** Point misaligned sweep profiles along the path's start direction (axis-aligned starts only). */
+export function autoAlignSweepProfiles(code) {
+  let text = String(code || "");
+  const fixed = [];
+  for (const sweep of analyseSweeps(text).filter(s => s.fixText).sort((a, b) => b.plane.at - a.plane.at)) {
+    const replacement = sweep.plane.text.replace(/,\s*([^,]+?)\s*\)\s*;\s*$/, `, ${sweep.fixText});`);
+    if (replacement === sweep.plane.text) continue;
+    text = text.slice(0, sweep.plane.at) + replacement + text.slice(sweep.plane.at + sweep.plane.text.length);
+    fixed.push(sweep.planeVar);
+  }
+  return { code: text, fixed };
+}
+
 /** Ids created by operations (op*(context, id + "x")) and sketches. */
 function createdIds(code) {
   const ids = new Set();
@@ -221,9 +308,21 @@ function createdIds(code) {
   return ids;
 }
 
+/**
+ * Rewrite `var bodyId = id + "revolve";` aliases so later `qCapEntity(bodyId, ...)` and
+ * `qCreatedBy(bodyId, ...)` read as `id + "revolve"`; the checks below match that form.
+ */
+function inlineIdAliases(code) {
+  let text = code;
+  for (const match of code.matchAll(/\bvar\s+(\w+)\s*=\s*id\s*\+\s*"(\w+)"\s*;/g)) {
+    text = text.replace(new RegExp(String.raw`\b(qCreatedBy|qSketchRegion|qCapEntity|newSketchOnPlane|op[A-Z]\w*)\s*\(\s*(context\s*,\s*)?${match[1]}\b`, "g"), `$1($2id + "${match[2]}"`);
+  }
+  return text;
+}
+
 /** Issues in the validator's shape: { line, message, text }. */
 export function checkFeatureScriptGeometry(code) {
-  const text = String(code || "");
+  const text = inlineIdAliases(String(code || ""));
   const issues = [];
   for (const profile of analyseProfiles(text)) {
     const points = profile.dangling.slice(0, 4).map(point => `(${+point.x.toFixed(3)}, ${+point.y.toFixed(3)})`).join(", ");
@@ -233,6 +332,25 @@ export function checkFeatureScriptGeometry(code) {
       text: `skSolve(${profile.sketchVar})`,
     });
   }
+  for (const sweep of analyseSweeps(text)) {
+    const dir = sweep.tangent.slice(0, 2).map(v => +v.toFixed(2)).join(", ");
+    issues.push({
+      line: lineOf(text, sweep.plane.at),
+      message: `The sweep profile plane "${sweep.planeVar}" faces along ${sweep.plane.normal}, but the path starts in direction (${dir}) of the sketch plane, so the profile lies along the path instead of across it and opSweep fails. Make the profile plane's normal the path's start direction${sweep.fixText ? ` (${sweep.fixText})` : ""}.`,
+      text: sweep.plane.text.trim(),
+    });
+  }
+
+  // opShell has no "removeFaces" option: the faces to open go in "entities" together
+  // with nothing else, so the model's intended opening silently disappears.
+  for (const match of text.matchAll(/\bopShell\s*\([^;]*?"removeFaces"\s*:/g)) {
+    issues.push({
+      line: lineOf(text, match.index),
+      message: `opShell has no "removeFaces" option, so this opening is ignored and the body is shelled closed. Put the faces to remove in "entities" (for an extruded body: qCapEntity(id + "<extrude>", CapType.END, EntityType.FACE)); for a revolved body subtract an inner revolve with opBoolean instead.`,
+      text: '"removeFaces"',
+    });
+  }
+
   // End caps only exist on extrudes: qCapEntity on a revolve/loft/sweep id is empty.
   const opKinds = Object.fromEntries([...text.matchAll(/\b(op[A-Z]\w*|extrude|revolve|loft|sweep)\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"/g)].map(match => [match[2], match[1]]));
   for (const match of text.matchAll(/qCapEntity\s*\(\s*id\s*\+\s*"(\w+)"/g)) {
