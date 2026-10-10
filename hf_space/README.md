@@ -36,9 +36,11 @@ token from an account that accepted its terms:
 ## Deploy on Modal (free monthly credits, recommended)
 
 Since 2026 Hugging Face charges for Docker and Gradio Spaces (PRO plan), so the free
-route is [Modal](https://modal.com): its Starter plan includes monthly compute credits,
-and this service only runs while parts are being generated (it shuts down after 3 idle
-minutes). From the repository root, after "Run it locally" setup below:
+route is [Modal](https://modal.com): its Starter plan includes $1/month of compute
+credits without a payment method ($30/month with one), and this service only runs while
+parts are being generated (it shuts down after 1 idle minute). That is roughly 0.3 cents
+per request, a few hundred parts a month. From the repository root, after "Run it
+locally" setup below:
 
 1. Create a free account at https://modal.com, then link this computer (opens a browser):
    ```bash

@@ -85,6 +85,20 @@ export function assessDeepcadFit(prompt) {
   if (blocker) {
     return { fits: false, reason: `"${blocker}" needs shapes the DeepCAD model cannot make (it only extrudes flat sketches)` };
   }
+  // Shapes Text2CAD consistently gets wrong (24-prompt survey, 2026-10-10; decoding is
+  // deterministic, so the same prompt always fails the same way). Skipping the model for
+  // these saves Modal credits that would only be spent on a result Auto discards.
+  const lower = String(prompt || "").toLowerCase(); // original text: "bolt holes" still intact
+  const knownMiss = [
+    [/\b[ltu][- ]?shaped\b|\bangle bracket\b|\bchannel\b/, "L/T/U profiles come back as plain rectangles"],
+    [/\b(boss|on top|stacked|stepped|step|raised|with a (smaller|larger))\b/, "stacked features come back as a single body"],
+    [/\b(slots?|cut-?outs?|pockets?|recess(es)?|notch(es)?|window)\b/, "slots, cutouts and pockets get left out"],
+    [/\b(tube|pipe)s?\b/, "tubes come back as solid cylinders"],
+    [/\b(2|3|5|6|7|8|9|10|12|two|three|five|six|seven|eight|nine|ten|twelve)\s+(?:(?!(?:mm|cm|m|in|inch|inches)\b)[a-z-]+\s+){0,2}holes?\b/, "hole counts other than one or four come out wrong"],
+    [/\bbolt[- ]?holes?\b/, "bolt-hole patterns come out wrong"],
+  ].find(([pattern]) => pattern.test(lower));
+  if (knownMiss) return { fits: false, reason: `the DeepCAD model gets this kind of part wrong (${knownMiss[1]})` };
+
   const geometric = wordIn(DEEPCAD_FRIENDLY, text);
   if (!geometric) {
     return { fits: false, reason: "the prompt does not describe a flat, extruded part (plate, ring, bracket, block...)" };
@@ -135,6 +149,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Auto mode gives up sooner: a normal wake-up takes well under a minute, and when the
 // service is out of credits or down the page should fall back to Parametric AI quickly.
 const AUTO_WAKE_BUDGET_MS = Number(process.env.DEEPCAD_AUTO_WAKE_MS || 90000);
+const SEQUENCE_CACHE_LIMIT = 300;
+const sequenceCache = new Map(); // normalized prompt -> model result (oldest evicted first)
 
 async function fetchModelSequence(prompt, wakeBudgetMs = MODEL_WAKE_BUDGET_MS) {
   if (!MODEL_URL) {
@@ -143,6 +159,11 @@ async function fetchModelSequence(prompt, wakeBudgetMs = MODEL_WAKE_BUDGET_MS) {
       503,
     );
   }
+  // Decoding is deterministic (greedy), so a repeated prompt gives the same sequence:
+  // answer it from memory instead of spending Modal credits again.
+  const cacheKey = prompt.toLowerCase().replace(/\s+/g, " ").trim();
+  if (sequenceCache.has(cacheKey)) return { ...sequenceCache.get(cacheKey), attempts: 0, cached: true };
+
   const started = Date.now();
   let attempt = 0;
   for (;;) {
@@ -187,7 +208,10 @@ async function fetchModelSequence(prompt, wakeBudgetMs = MODEL_WAKE_BUDGET_MS) {
       throw new DeepcadError(`Model service returned ${response.status}: ${detail}`, response.status === 422 ? 422 : 502);
     }
     if (!data?.sequence) throw new DeepcadError("Model service response had no sequence.", 502);
-    return { sequence: data.sequence, elapsedSec: data.elapsedSec ?? null, model: data.model || "Text2CAD", attempts: attempt };
+    const result = { sequence: data.sequence, elapsedSec: data.elapsedSec ?? null, model: data.model || "Text2CAD" };
+    if (sequenceCache.size >= SEQUENCE_CACHE_LIMIT) sequenceCache.delete(sequenceCache.keys().next().value);
+    sequenceCache.set(cacheKey, result);
+    return { ...result, attempts: attempt };
   }
 }
 

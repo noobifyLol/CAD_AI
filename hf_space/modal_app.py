@@ -1,9 +1,10 @@
 """Text2CAD service on Modal (https://modal.com): free monthly credits, scales to zero.
 
 Runs the same FastAPI app as the Hugging Face Space (app.py: GET /health, POST /generate)
-on a CPU container that starts on the first request and shuts down after a few idle
-minutes, so it only uses credits while parts are being generated. Hugging Face now
-charges for CPU Spaces; Modal's free Starter credits cover this comfortably.
+on a CPU container that starts on the first request and shuts down after one idle
+minute, so it only uses credits while parts are being generated. Hugging Face now
+charges for CPU Spaces. Modal's Starter plan gives $1/month free without a payment
+method ($30/month with one), enough for a few hundred parts a month.
 
 One time (from the repository root, see README.md "Deploy on Modal"):
     npm run deepcad:modal-secret   # stores HF_TOKEN and a generated API_TOKEN on Modal
@@ -62,9 +63,13 @@ image = (
 @app.function(
     image=image,
     secrets=[SECRET],
-    cpu=2.0,
-    memory=4096,
-    scaledown_window=180,  # idle minutes are billed, so shut down fairly soon
+    # Without a payment method Modal's Starter plan gives $1/month of credits, and an idle
+    # container is billed for its reserved CPU and memory. So reserve one core (decoding
+    # still runs fine) and shut down one minute after the last request: roughly 0.3 cents
+    # per isolated request, a few hundred parts a month.
+    cpu=1.0,
+    memory=4096,  # BERT-large + decoder actually use ~3 GB; asking for less only risks OOM
+    scaledown_window=60,
     timeout=600,
     max_containers=1,  # one small CPU container is plenty and caps credit use
 )
