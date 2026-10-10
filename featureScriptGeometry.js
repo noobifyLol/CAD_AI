@@ -162,6 +162,111 @@ function buildEnv(code) {
 }
 
 const pointKey = point => `${point.x.toFixed(5)},${point.y.toFixed(5)}`;
+const EPS = 1e-5;
+const samePoint = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < EPS;
+
+/** Circle through three points, or null when they are collinear. */
+function circleThrough(a, b, c) {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-12) return null;
+  const sq = p => p.x * p.x + p.y * p.y;
+  const x = (sq(a) * (b.y - c.y) + sq(b) * (c.y - a.y) + sq(c) * (a.y - b.y)) / d;
+  const y = (sq(a) * (c.x - b.x) + sq(b) * (a.x - c.x) + sq(c) * (b.x - a.x)) / d;
+  return { x, y, r: Math.hypot(a.x - x, a.y - y) };
+}
+
+/** Does point p lie on the curve somewhere other than at the curve's own end points? */
+function touchesInterior(curve, p) {
+  if (curve.kind === "line") {
+    if (samePoint(p, curve.a) || samePoint(p, curve.b)) return false;
+    const dx = curve.b.x - curve.a.x;
+    const dy = curve.b.y - curve.a.y;
+    const length2 = dx * dx + dy * dy;
+    if (length2 < 1e-18) return false;
+    const t = ((p.x - curve.a.x) * dx + (p.y - curve.a.y) * dy) / length2;
+    if (t <= 0 || t >= 1) return false;
+    return Math.hypot(curve.a.x + t * dx - p.x, curve.a.y + t * dy - p.y) < EPS;
+  }
+  if (curve.kind === "arc") {
+    if (samePoint(p, curve.a) || samePoint(p, curve.b)) return false;
+    if (samePoint(p, curve.m)) return true;
+    const circle = circleThrough(curve.a, curve.m, curve.b);
+    if (!circle || Math.abs(Math.hypot(p.x - circle.x, p.y - circle.y) - circle.r) > EPS) return false;
+    // on the arc's side: p and m on the same side of chord a-b
+    const side = q => (curve.b.x - curve.a.x) * (q.y - curve.a.y) - (curve.b.y - curve.a.y) * (q.x - curve.a.x);
+    return side(p) * side(curve.m) > 0;
+  }
+  if (curve.kind === "spline") {
+    return curve.points.slice(1, -1).some(point => samePoint(point, p));
+  }
+  if (curve.kind === "circle") {
+    return Math.abs(Math.hypot(p.x - curve.center.x, p.y - curve.center.y) - curve.radius) < EPS;
+  }
+  return false;
+}
+
+/** Every evaluable point of a sketch (for extent checks): curve ends, arc mids, spline points, circle extremes. */
+function sketchPoints(calls, sketchVar, env) {
+  const points = [];
+  for (const call of calls.filter(c => c.sketch === sketchVar)) {
+    if (call.fn === "skLineSegment" || call.fn === "skArc") {
+      for (const key of ["start", "mid", "end"]) {
+        const point = evaluatePoint(mapEntry(call.map, key) || "", env);
+        if (point) points.push(point);
+      }
+    } else if (call.fn === "skFitSpline") {
+      const list = mapEntry(call.map, "points");
+      if (list?.startsWith("[")) for (const text of splitTopLevel(list.slice(1, -1))) { const point = evaluatePoint(text, env); if (point) points.push(point); }
+    } else if (call.fn === "skCircle") {
+      const center = evaluatePoint(mapEntry(call.map, "center") || "", env);
+      const radius = evaluate(mapEntry(call.map, "radius") || "", env);
+      if (center && radius !== null) points.push({ x: center.x - radius, y: center.y }, { x: center.x + radius, y: center.y }, { x: center.x, y: center.y - radius }, { x: center.x, y: center.y + radius });
+    } else if (call.fn === "skRectangle") {
+      for (const key of ["firstCorner", "secondCorner"]) {
+        const point = evaluatePoint(mapEntry(call.map, key) || "", env);
+        if (point) points.push(point);
+      }
+    }
+  }
+  return points;
+}
+
+/**
+ * Revolve profiles must stay on one side of the axis, otherwise Onshape reports
+ * "Revolve would create self-intersecting part" (headphones band drawn from -W/2 to +W/2
+ * and revolved about x = 0). Handles axes along the base plane's sketch Y or X axis.
+ */
+function revolveCrossings(code) {
+  const env = buildEnv(code);
+  const base = basePlaneVar(code);
+  const calls = sketchCalls(code);
+  const sketchOf = {};
+  for (const match of code.matchAll(/\bvar\s+(\w+)\s*=\s*newSketchOnPlane\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{\s*"sketchPlane"\s*:\s*(\w+)\s*\}/g)) {
+    sketchOf[match[2]] = { sketchVar: match[1], planeVar: match[3] };
+  }
+  const lineVars = Object.fromEntries([...code.matchAll(/\bvar\s+(\w+)\s*=\s*(line\s*\([^;]+\))\s*;/g)].map(m => [m[1], m[2]]));
+  const b = base.replace(/[$]/g, "\\$");
+  const yAxis = new RegExp(`^line\\(\\s*${b}\\.origin\\s*,\\s*-?\\s*cross\\(\\s*${b}\\.normal\\s*,\\s*${b}\\.x\\s*\\)\\s*\\)$`);
+  const xAxis = new RegExp(`^line\\(\\s*${b}\\.origin\\s*,\\s*-?\\s*${b}\\.x\\s*\\)$`);
+  const results = [];
+  for (const match of code.matchAll(/\bopRevolve\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{([\s\S]*?)\}\s*\)\s*;/g)) {
+    const sketchId = (match[2].match(/"entities"\s*:\s*qSketchRegion\s*\(\s*id\s*\+\s*"(\w+)"/) || [])[1];
+    let axis = (match[2].match(/"axis"\s*:\s*(line\s*\([^\n]*?\)\s*\)|line\s*\([^\n]*?\)|\w+)\s*,?\s*\n/) || [])[1];
+    if (!sketchId || !axis) continue;
+    axis = (lineVars[axis.trim()] || axis).replace(/\s+/g, " ").trim();
+    const sketch = sketchOf[sketchId];
+    if (!sketch || sketch.planeVar !== base) continue;
+    const coordinate = yAxis.test(axis) ? "x" : xAxis.test(axis) ? "y" : null;
+    if (!coordinate) continue;
+    const values = sketchPoints(calls, sketch.sketchVar, env).map(point => point[coordinate]);
+    if (!values.length) continue;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const scale = Math.max(1, max - min);
+    if (min < -1e-6 * scale && max > 1e-6 * scale) results.push({ revolveId: match[1], sketchId, coordinate, min, max, at: match.index });
+  }
+  return results;
+}
 
 /**
  * Open-profile analysis per region sketch: { sketchVar, sketchId, dangling: [points], solveAt }.
@@ -175,6 +280,7 @@ function analyseProfiles(code) {
     const mine = calls.filter(call => call.sketch === sketchVar);
     if (!mine.length) continue;
     const ends = [];
+    const curves = []; // geometry to test "does this end touch another curve's interior?"
     let skip = false;
     for (const call of mine) {
       if (mapEntry(call.map, "construction") === "true") continue;
@@ -183,15 +289,25 @@ function analyseProfiles(code) {
         const b = evaluatePoint(mapEntry(call.map, "end") || "", env);
         if (!a || !b) { skip = true; break; }
         ends.push(a, b);
+        if (call.fn === "skLineSegment") curves.push({ kind: "line", a, b });
+        else {
+          const m = evaluatePoint(mapEntry(call.map, "mid") || "", env);
+          if (m) curves.push({ kind: "arc", a, m, b });
+        }
       } else if (call.fn === "skFitSpline") {
         const points = mapEntry(call.map, "points");
         if (!points || !points.startsWith("[")) { skip = true; break; }
-        const list = splitTopLevel(points.slice(1, -1)).filter(Boolean);
-        const first = evaluatePoint(list[0] || "", env);
-        const last = evaluatePoint(list[list.length - 1] || "", env);
-        if (!first || !last) { skip = true; break; }
+        const list = splitTopLevel(points.slice(1, -1)).filter(Boolean).map(text => evaluatePoint(text, env));
+        if (!list.length || list.some(point => !point)) { skip = true; break; }
+        const first = list[0];
+        const last = list[list.length - 1];
         if (pointKey(first) !== pointKey(last)) ends.push(first, last); // closed splines add nothing
-      } else if (!["skCircle", "skRectangle", "skRegularPolygon", "skEllipse", "skSolve", "skPolyline", "skConstraint"].includes(call.fn)) {
+        curves.push({ kind: "spline", points: list });
+      } else if (call.fn === "skCircle") {
+        const center = evaluatePoint(mapEntry(call.map, "center") || "", env);
+        const radius = evaluate(mapEntry(call.map, "radius") || "", env);
+        if (center && radius !== null) curves.push({ kind: "circle", center, radius });
+      } else if (!["skRectangle", "skRegularPolygon", "skEllipse", "skSolve", "skPolyline", "skConstraint"].includes(call.fn)) {
         skip = true; // unknown curve type: do not guess
         break;
       }
@@ -203,7 +319,12 @@ function analyseProfiles(code) {
       const key = pointKey(point);
       counts.set(key, { point, count: (counts.get(key)?.count || 0) + 1 });
     }
-    const dangling = [...counts.values()].filter(entry => entry.count % 2 === 1).map(entry => entry.point);
+    // An end is dangling only if NO other curve meets it: degree 1, and it does not land
+    // on another curve's interior (a T-junction such as an axis line ending on the middle
+    // of an arc is connected). Junctions of 3+ ends are connected too.
+    const dangling = [...counts.values()]
+      .filter(entry => entry.count === 1 && !curves.some(curve => touchesInterior(curve, entry.point)))
+      .map(entry => entry.point);
     if (dangling.length) {
       const solve = code.indexOf(`skSolve(${sketchVar})`, mine[mine.length - 1].end);
       results.push({ sketchVar, sketchId, dangling, solveAt: solve });
@@ -342,6 +463,14 @@ export function checkFeatureScriptGeometry(code) {
       text: `skSolve(${profile.sketchVar})`,
     });
   }
+  for (const crossing of revolveCrossings(text)) {
+    issues.push({
+      line: lineOf(text, crossing.at),
+      message: `Revolve "${crossing.revolveId}": its profile sketch "${crossing.sketchId}" spans both sides of the revolve axis (${crossing.coordinate} from ${+crossing.min.toFixed(3)} to ${+crossing.max.toFixed(3)} in), so Onshape fails with "Revolve would create self-intersecting part". Draw only the half-profile on one side of the axis (${crossing.coordinate} >= 0), with a straight edge on the axis.`,
+      text: `opRevolve(context, id + "${crossing.revolveId}", ...)`,
+    });
+  }
+
   for (const sweep of analyseSweeps(text)) {
     const dir = sweep.tangent.slice(0, 2).map(v => +v.toFixed(2)).join(", ");
     issues.push({

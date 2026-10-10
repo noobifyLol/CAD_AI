@@ -3701,27 +3701,32 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
    NEVER write: definition.param * inch. This doubles units and fails.
 4. The file may include real top-level helper functions after the exported feature, but never append prose, backup templates, alternate features, or copied libraries.
 
-═══ SKETCH API ═══
-- skLineSegment(sk, "line1", { "start": vector(0,0) * inch, "end": vector(1,0) * inch });
-- skCircle(sk, "circ1", { "center": vector(0,0) * inch, "radius": definition.radius });
-- skRectangle(sk, "rect1", { "firstCorner": vector(-w/2,-h/2) * inch, "secondCorner": vector(w/2,h/2) * inch });
-  (w and h are plain numbers here — multiply by inch to make them Length vectors)
-- skFitSpline(sk, "spline1", { "points": [vector(x1,y1) * inch, vector(x2,y2) * inch, ...] });
-- For organic profiles, use 4 to 7 control points with meaningful taper and curvature.
-- skRegularPolygon(sk, "poly1", { "center": vector(0,0) * inch, "firstVertex": vector(r,0) * inch, "sides": 6 });
-  ("skPolygon" does NOT exist — always use skRegularPolygon)
-
-═══ ADVANCED OPERATIONS ═══
-Use these when the shape genuinely needs them — do not force them onto simple geometry.
-A matching compile-verified example (with full code) is usually supplied in DATABASE CONTEXT
-when the prompt calls for one of these — follow that example's structure over inventing your own.
-
-- opLoft: each profile is its own solved sketch on its own plane; takes "profileSubqueries" : [qSketchRegion(...), ...] in order along the path. NEVER "sections" or "edges" keys.
-- opSweep: path sketch is a single open wire; profile sketch must be on a plane perpendicular to the path start, e.g. plane(skPlane.origin, skPlane.x). Takes "profiles" and "path" : qCreatedBy(pathId, EntityType.EDGE).
-- opShell: called AFTER the solid body exists; "entities" is the face(s) to remove (e.g. qCapEntity(bodyId, CapType.END, EntityType.FACE)), "thickness" is negative to hollow inward. No excludeFaces key.
-- opFillet/opChamfer: "entities" : qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(bodyId, EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED); opChamfer also needs "chamferType" : ChamferType.EQUAL_OFFSETS.
-- opPattern: there is NO opPatternCircular, opPatternLinear, opCircularPattern, or opLinearPattern — those DO NOT EXIST. Build parallel "transforms" (rotationAround(axis, angle) for circular, transform(direction * spacing) for linear) and "instanceNames" arrays. The ORIGINAL body is preserved, so loop from i = 1 to count - 1. Instance names use only letters, numbers, +, -, /, _, built with the ~ operator. After patterning, union the original and the pattern body together.
-- Offset/side planes: plane(skPlane.origin + skPlane.normal * offset, skPlane.normal) for a parallel plane; plane(skPlane.origin, skPlane.x) for one perpendicular to the sketch plane.
+═══ ONSHAPE TOOL REFERENCE (exact map keys; nothing else exists) ═══
+Pick the simplest tool that makes the shape. A compile-verified example is usually in DATABASE CONTEXT; follow its structure.
+SKETCH (2D, on newSketchOnPlane, coordinates are vector(u, v) * inch, end with skSolve(sk)):
+- skLineSegment(sk, "l1", { "start", "end" })   skArc(sk, "a1", { "start", "mid", "end" })  (3 points ON the arc)
+- skCircle(sk, "c1", { "center", "radius" })   skEllipse(sk, "e1", { "center", "xRadius", "yRadius" })
+- skRectangle(sk, "r1", { "firstCorner", "secondCorner" })   skRegularPolygon(sk, "p1", { "center", "firstVertex", "sides" })
+- skFitSpline(sk, "s1", { "points" : [ ... ] })  (4-7 points for smooth organic curves)
+  No skPolygon/skFillet/skOffset/skMirror/skPattern. Inner closed loops become holes with qSketchRegion(id + "sk", true).
+SOLIDS FROM SKETCHES (each creates a NEW body):
+- opExtrude { "entities" : qSketchRegion(id + "sk"), "direction", "endBound" : BoundingType.BLIND, "endDepth" }
+- opRevolve { "entities", "axis" : line(point, unitDirection), "angleForward" : 2 * PI * radian }  (profile on ONE side of the axis)
+- opSweep { "profiles" : qSketchRegion(...), "path" : qCreatedBy(pathId, EntityType.EDGE) }  (profile plane normal = path start direction)
+- opLoft { "profileSubqueries" : [qSketchRegion(...), ...] }  (one solved sketch per profile, in order)
+PRIMITIVES (no sketch needed; 3D points are vectors with units, e.g. skPlane.origin + skPlane.normal * h):
+- fCuboid { "corner1", "corner2" }   fCylinder { "topCenter", "bottomCenter", "radius" }
+- fCone { "topCenter", "bottomCenter", "topRadius", "bottomRadius" }   fSphere { "center", "radius" }
+3D WIRE: opFitSpline { "points" : [3D points] } then opSweep along qCreatedBy(id + "wire", EntityType.EDGE) for springs, hoses, bent pipes.
+MODIFY (keep querying the body by the id of the op that CREATED it):
+- opBoolean SUBTRACTION { "tools", "targets", "operationType" }; UNION { "tools" : qUnion([...all bodies]), "operationType" } (no "targets")
+- opShell { "entities" : faces to remove (qCapEntity on an EXTRUDE) or the body to hollow closed, "thickness" : -wall }
+- opFillet { "entities" : edges, "radius" }   opChamfer { "entities", "chamferType" : ChamferType.EQUAL_OFFSETS, "width" }
+  edges = qEdgeTopologyFilter(qOwnedByBody(qCreatedBy(bodyId, EntityType.BODY), EntityType.EDGE), EdgeTopology.TWO_SIDED); keep radius < half the thinnest wall.
+- opPattern { "entities" : body, "transforms" : [...], "instanceNames" : [...] }  rotationAround(axisLine, angle) circular, transform(direction * spacing) linear, mirrorAcross(plane) mirror; loop i = 1..count-1 (original kept), then UNION. No opPatternCircular/opPatternLinear/opMirror.
+- opTransform { "bodies", "transform" } moves a body.  opDeleteBodies { "entities" } removes helper bodies.
+QUERIES: qCreatedBy(id + "op", EntityType.BODY|FACE|EDGE), qSketchRegion(id + "sk", filterInnerLoops), qCapEntity(id + "extrude", CapType.START|END, EntityType.FACE), qOwnedByBody(q, EntityType.EDGE|FACE), qGeometry(q, GeometryType.CYLINDER|PLANE), qUnion([...]), qSubtraction(a, b), qNthElement(q, n).
+PLANES: parallel plane(skPlane.origin + skPlane.normal * offset, skPlane.normal); perpendicular plane(skPlane.origin, skPlane.x); third axis cross(skPlane.normal, skPlane.x).
 
 ═══ MECH / MULTI-BODY STRATEGY ═══
 Mechanical assemblies (mechs, robots, vehicles) are multiple separate bodies on one sketch plane.
@@ -7119,7 +7124,9 @@ function validateFeatureScript(code) {
   // Id consistency: a query that references an id nothing created resolves to nothing
   // at regeneration time — the real compiler fails with CANNOT_RESOLVE_ENTITIES.
   const createdSketchIds = new Set([...text.matchAll(/newSketch(?:OnPlane)?\s*\(\s*context\s*,\s*id\s*\+\s*"([^"]+)"/g)].map(match => match[1]));
-  const createdOpIds = new Set([...text.matchAll(/\b(?:op[A-Z]\w*|fCylinder|fSphere)\s*\(\s*context\s*,\s*id\s*\+\s*"([^"]+)"/g)].map(match => match[1]));
+  // op* operations, f* primitives (fCuboid, fCylinder, fCone, fSphere, ...), std features
+  // (extrude, fillet, ...) and helper functions all create geometry under (context, id + "x").
+  const createdOpIds = new Set([...text.matchAll(/\b(?!newSketch)\w+\s*\(\s*context\s*,\s*id\s*\+\s*"([^"]+)"/g)].map(match => match[1]));
   for (const match of text.matchAll(/qSketchRegion\s*\(\s*id\s*\+\s*"([^"]+)"/g)) {
     if (!createdSketchIds.has(match[1])) {
       addIssue(lineNumberAt(text, match.index), `qSketchRegion references sketch id "${match[1]}" but no sketch was created with that exact id. Created sketch ids: ${[...createdSketchIds].join(", ") || "(none)"}. The id strings must match exactly.`, match[0]);
