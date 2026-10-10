@@ -218,31 +218,41 @@ function analyseProfiles(code) {
  * for paths drawn on that plane and profile planes whose normal is one of its axes.
  * Returns [{ planeVar, normalText, fixText, dot, at }] for misaligned sweeps.
  */
-const AXIS_EXPRESSIONS = [
-  [/^skPlane\.x$/, [1, 0, 0]],
-  [/^-\s*skPlane\.x$/, [-1, 0, 0]],
-  [/^skPlane\.normal$/, [0, 0, 1]],
-  [/^-\s*skPlane\.normal$/, [0, 0, -1]],
-  [/^cross\(\s*skPlane\.normal\s*,\s*skPlane\.x\s*\)$/, [0, 1, 0]],
-  [/^-\s*cross\(\s*skPlane\.normal\s*,\s*skPlane\.x\s*\)$/, [0, -1, 0]],
-];
+/** The feature's base plane variable (`var skPlane = isQueryEmpty(context, definition.location) ? ...`). */
+function basePlaneVar(code) {
+  return (code.match(/\bvar\s+(\w+)\s*=\s*isQueryEmpty\s*\(\s*context\s*,\s*definition\.\w+\s*\)/) || [])[1] || "skPlane";
+}
 
-function axisOf(expression, aliases) {
+function axisPatterns(base) {
+  const b = base.replace(/[$]/g, "\\$");
+  return [
+    [new RegExp(`^${b}\\.x$`), [1, 0, 0]],
+    [new RegExp(`^-\\s*${b}\\.x$`), [-1, 0, 0]],
+    [new RegExp(`^${b}\\.normal$`), [0, 0, 1]],
+    [new RegExp(`^-\\s*${b}\\.normal$`), [0, 0, -1]],
+    [new RegExp(`^cross\\(\\s*${b}\\.normal\\s*,\\s*${b}\\.x\\s*\\)$`), [0, 1, 0]],
+    [new RegExp(`^-\\s*cross\\(\\s*${b}\\.normal\\s*,\\s*${b}\\.x\\s*\\)$`), [0, -1, 0]],
+  ];
+}
+
+function axisOf(expression, aliases, base) {
   let text = String(expression || "").trim();
   if (aliases[text]) text = aliases[text];
-  for (const [pattern, vector] of AXIS_EXPRESSIONS) if (pattern.test(text)) return vector;
+  for (const [pattern, vector] of axisPatterns(base)) if (pattern.test(text)) return vector;
   return null;
 }
 
 function analyseSweeps(code) {
   const env = buildEnv(code);
+  const base = basePlaneVar(code);
   const results = [];
   const sketchPlaneOf = {};
   for (const match of code.matchAll(/\bvar\s+(\w+)\s*=\s*newSketchOnPlane\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{\s*"sketchPlane"\s*:\s*(\w+)\s*\}/g)) {
     sketchPlaneOf[match[2]] = { sketchVar: match[1], planeVar: match[3] };
   }
   // var skY = cross(skPlane.normal, skPlane.x); style aliases for axis expressions
-  const aliases = Object.fromEntries([...code.matchAll(/\bvar\s+(\w+)\s*=\s*(-?\s*(?:cross\(\s*skPlane\.normal\s*,\s*skPlane\.x\s*\)|skPlane\.(?:x|normal)))\s*;/g)].map(m => [m[1], m[2]]));
+  const aliasPattern = new RegExp(String.raw`\bvar\s+(\w+)\s*=\s*(-?\s*(?:cross\(\s*${base}\.normal\s*,\s*${base}\.x\s*\)|${base}\.(?:x|normal)))\s*;`, "g");
+  const aliases = Object.fromEntries([...code.matchAll(aliasPattern)].map(m => [m[1], m[2]]));
   const planes = {};
   for (const match of code.matchAll(/\bvar\s+(\w+)\s*=\s*plane\s*\(([^;]+)\)\s*;/g)) {
     const args = splitTopLevel(match[2]);
@@ -254,9 +264,9 @@ function analyseSweeps(code) {
     const pathId = (match[1].match(/"path"\s*:\s*qCreatedBy\s*\(\s*id\s*\+\s*"(\w+)"/) || [])[1];
     const profile = sketchPlaneOf[profileId];
     const path = sketchPlaneOf[pathId];
-    if (!profile || !path || path.planeVar !== "skPlane" || !planes[profile.planeVar]) continue;
+    if (!profile || !path || path.planeVar !== base || !planes[profile.planeVar]) continue;
     const plane = planes[profile.planeVar];
-    const normal = axisOf(plane.normal, aliases);
+    const normal = axisOf(plane.normal, aliases, base);
     if (!normal) continue;
     const first = calls.find(call => call.sketch === path.sketchVar && ["skFitSpline", "skLineSegment", "skArc"].includes(call.fn));
     if (!first) continue;
@@ -279,8 +289,8 @@ function analyseSweeps(code) {
     const dot = Math.abs(tangent[0] * normal[0] + tangent[1] * normal[1]);
     if (dot >= 0.5) continue;
     let fixText = null;
-    if (Math.abs(tangent[0]) > 0.9) fixText = tangent[0] > 0 ? "skPlane.x" : "-skPlane.x";
-    else if (Math.abs(tangent[1]) > 0.9) fixText = tangent[1] > 0 ? "cross(skPlane.normal, skPlane.x)" : "-cross(skPlane.normal, skPlane.x)";
+    if (Math.abs(tangent[0]) > 0.9) fixText = tangent[0] > 0 ? `${base}.x` : `-${base}.x`;
+    else if (Math.abs(tangent[1]) > 0.9) fixText = tangent[1] > 0 ? `cross(${base}.normal, ${base}.x)` : `-cross(${base}.normal, ${base}.x)`;
     results.push({ planeVar: profile.planeVar, plane, fixText, dot, at: match.index, tangent });
   }
   return results;
@@ -338,6 +348,24 @@ export function checkFeatureScriptGeometry(code) {
       line: lineOf(text, sweep.plane.at),
       message: `The sweep profile plane "${sweep.planeVar}" faces along ${sweep.plane.normal}, but the path starts in direction (${dir}) of the sketch plane, so the profile lies along the path instead of across it and opSweep fails. Make the profile plane's normal the path's start direction${sweep.fixText ? ` (${sweep.fixText})` : ""}.`,
       text: sweep.plane.text.trim(),
+    });
+  }
+
+  // Sketch API misuse: skArc needs start/mid/end; some sk* helpers do not exist.
+  for (const call of sketchCalls(text)) {
+    if (call.fn === "skArc" && !(mapEntry(call.map, "start") && mapEntry(call.map, "mid") && mapEntry(call.map, "end"))) {
+      issues.push({
+        line: lineOf(text, call.start),
+        message: `skArc "${call.name}" must be given "start", "mid" and "end" points (three points on the arc); keys like "center", "startPoint", "endPoint" or "direction" do not exist, so the sketch fails.`,
+        text: `skArc(${call.sketch}, "${call.name}", ...)`,
+      });
+    }
+  }
+  for (const match of text.matchAll(/\b(skFillet|skChamfer|skOffset|skMirror|skPattern|skTrim|skPolygon|skSlot|skCircularPattern|skLinearPattern)\s*\(/g)) {
+    issues.push({
+      line: lineOf(text, match.index),
+      message: `${match[1]} does not exist in FeatureScript. Build the profile from skLineSegment / skArc / skCircle / skRectangle / skRegularPolygon / skFitSpline; round 3D edges afterwards with opFillet.`,
+      text: match[0],
     });
   }
 

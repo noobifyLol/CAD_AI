@@ -2812,7 +2812,9 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   // compile-verified cup example references the extrude, not the shell).
   {
     const before = code;
-    const modifierOp = /\bop(?:Shell|Fillet|Chamfer)\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{[^}]*?"entities"\s*:\s*(?:qOwnedByBody\s*\(\s*)?qCreatedBy\s*\(\s*id\s*\+\s*"(\w+)"\s*,\s*EntityType\.BODY\s*\)/g;
+    // The modified body's creator is the id inside "entities": a body query, a face/edge
+    // owned by it, or a cap face of it (qCapEntity(id + "cupBody", CapType.END, ...)).
+    const modifierOp = /\bop(?:Shell|Fillet|Chamfer)\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{[^}]*?"entities"\s*:\s*(?:qOwnedByBody\s*\(\s*|qEdgeTopologyFilter\s*\(\s*qOwnedByBody\s*\(\s*)?(?:qCreatedBy|qCapEntity)\s*\(\s*id\s*\+\s*"(\w+)"/g;
     const creatorOf = {};
     for (const match of code.matchAll(modifierOp)) creatorOf[match[1]] = match[2];
     // Follow chains (shell of a fillet of an extrude) back to the creating operation.
@@ -2824,6 +2826,99 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
       );
     }
     if (code !== before) record("query_body_from_creating_op_not_modifier", before, code);
+  }
+
+  // line(point, direction): models often write line(P, P + D) with a second POINT, which
+  // passes a length vector where a unitless direction is required. Rewrite to line(P, D).
+  try {
+    const before = code;
+    let out = "";
+    let index = 0;
+    for (const match of code.matchAll(/\bline\s*\(/g)) {
+      if (match.index < index) continue;
+      const open = match.index + match[0].length - 1;
+      let depth = 0;
+      let close = open;
+      for (; close < code.length; close += 1) {
+        if (code[close] === "(") depth += 1;
+        else if (code[close] === ")" && --depth === 0) break;
+      }
+      const inner = code.slice(open + 1, close);
+      // split at the top-level comma
+      let d = 0;
+      let comma = -1;
+      for (let i = 0; i < inner.length; i += 1) {
+        if ("([{".includes(inner[i])) d += 1;
+        else if (")]}".includes(inner[i])) d -= 1;
+        else if (inner[i] === "," && d === 0) { comma = i; break; }
+      }
+      if (comma < 0) continue;
+      const point = inner.slice(0, comma).trim();
+      const second = inner.slice(comma + 1).trim();
+      const prefix = new RegExp(`^${point.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\+\\s*`);
+      if (point && prefix.test(second)) {
+        out += code.slice(index, open + 1) + `${point}, ${second.replace(prefix, "")}`;
+        index = close;
+      }
+    }
+    if (index) code = out + code.slice(index);
+    if (code !== before) record("line_point_plus_direction_to_direction", before, code);
+  } catch {
+    // leave as is
+  }
+
+  // qEdgeTopologyFilter / qGeometry filters need EDGES; given bodies they return nothing
+  // and the following fillet/chamfer fails. Wrap the body query in qOwnedByBody(..., EDGE).
+  {
+    const before = code;
+    code = code.replace(
+      /\bqEdgeTopologyFilter\s*\(\s*(qCreatedBy\s*\(\s*id\s*\+\s*"\w+"\s*,\s*EntityType\.BODY\s*\)|qUnion\s*\(\s*\[[^\]]*EntityType\.BODY[^\]]*\]\s*\))\s*,/g,
+      "qEdgeTopologyFilter(qOwnedByBody($1, EntityType.EDGE),",
+    );
+    if (code !== before) record("edge_filter_on_body_wrapped_in_qOwnedByBody", before, code);
+  }
+
+  // opExtrude / opRevolve / opSweep / opLoft only CREATE bodies; an "operationType"
+  // (BooleanOperationType.SUBTRACTION/UNION) plus "targets" inside them is ignored, so the
+  // intended hole becomes an extra solid. Move it into a real opBoolean after the call.
+  try {
+    const before = code;
+    const pattern = /\b(opExtrude|opRevolve|opSweep|opLoft)\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{/g;
+    let out = "";
+    let index = 0;
+    for (const match of code.matchAll(pattern)) {
+      if (match.index < index) continue;
+      const open = match.index + match[0].length - 1;
+      let depth = 0;
+      let close = open;
+      for (; close < code.length; close += 1) {
+        if (code[close] === "{") depth += 1;
+        else if (code[close] === "}" && --depth === 0) break;
+      }
+      const map = code.slice(open, close + 1);
+      const operation = (map.match(/"operationType"\s*:\s*BooleanOperationType\.(SUBTRACTION|UNION|INTERSECTION)/) || [])[1];
+      if (!operation) continue;
+      const targets = (map.match(/"targets"\s*:\s*((?:q\w+\([^;]*?\)\s*)+?)\s*(?:,\s*"\w+"\s*:|\s*\}$)/) || [])[1];
+      if (operation !== "UNION" && !targets) continue;
+      const end = code.indexOf(");", close);
+      if (end < 0) continue;
+      const cleaned = map
+        .replace(/,\s*"operationType"\s*:\s*BooleanOperationType\.\w+/, "")
+        .replace(/"operationType"\s*:\s*BooleanOperationType\.\w+\s*,\s*/, "")
+        .replace(/,\s*"targets"\s*:\s*(?:q\w+\([^;]*?\)\s*)+?(?=\s*(?:,\s*"\w+"\s*:|\}$))/, "")
+        .replace(/"targets"\s*:\s*(?:q\w+\([^;]*?\)\s*)+?,\s*/, "");
+      const indent = (code.slice(code.lastIndexOf("\n", match.index) + 1, match.index).match(/^\s*/) || [""])[0];
+      const tool = `qCreatedBy(id + "${match[2]}", EntityType.BODY)`;
+      const booleanCall = operation === "UNION"
+        ? `\n${indent}opBoolean(context, id + "${match[2]}Join", {\n${indent}    "tools" : qUnion([${targets ? `${targets.trim()}, ` : ""}${tool}]),\n${indent}    "operationType" : BooleanOperationType.UNION\n${indent}});`
+        : `\n${indent}opBoolean(context, id + "${match[2]}Boolean", {\n${indent}    "tools" : ${tool},\n${indent}    "targets" : ${targets.trim()},\n${indent}    "operationType" : BooleanOperationType.${operation}\n${indent}});`;
+      out += code.slice(index, open) + cleaned + code.slice(close + 1, end + 2) + booleanCall;
+      index = end + 2;
+    }
+    if (index) code = out + code.slice(index);
+    if (code !== before) record("op_level_boolean_moved_to_opBoolean", before, code);
+  } catch {
+    // leave as is
   }
 
   // A body referenced by an opBoolean's id (qCreatedBy(id + "cut1", BODY) after a cut)
