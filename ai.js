@@ -3761,6 +3761,15 @@ Ask yourself: "would a person recognize this object from its silhouette?"
 If the answer is no, add the missing components. A box or bare cylinder is only
 acceptable when the prompt itself asks for a box, block, plate, or plain cylinder.
 
+═══ RUNTIME RULES (code that compiles can still fail with "Cannot resolve entities") ═══
+- Every region sketch must form a CLOSED loop: a revolve profile needs its axis line, outer curve, top line AND bottom line.
+- opExtrude/opRevolve/opSweep/opLoft only create bodies: never give them "operationType" or "targets"; cut/join afterwards with opBoolean.
+- opShell/opFillet/opChamfer/opBoolean modify a body; afterwards still query it by the id of the op that CREATED it.
+- skArc takes "start", "mid", "end" points only. skFillet does not exist.
+- line(point, direction): the second argument is a unitless direction (skPlane.normal), never a second point.
+- qCapEntity only works on extrude ids. opShell has no "removeFaces" key.
+- opSweep profile plane normal = the direction the path starts in.
+
 ═══ GOAL ═══
 - Build exactly what the user asked for, with sensible parametric defaults.
 - Every parameter must be editable in the Onshape feature dialog.
@@ -3781,6 +3790,12 @@ function buildSystemPromptForRequest(prompt = "") {
   };
   if (!/\b(robot|mech|assembly|vehicle|android|humanoid|multi[- ]?body|legs?|arms?)\b/i.test(prompt)) {
     stripSection("═══ MECH / MULTI-BODY STRATEGY ═══");
+  }
+  if (!/\b(gears?|sprockets?|pulleys?|pinions?|cogs?|teeth|toothed|rack)\b/i.test(prompt)) {
+    stripSection("═══ GEAR RULE (HARD CONSTRAINT FOR GEAR_SPUR) ═══");
+  }
+  if (!/\b(organic|carrot|root|pod|blob|vegetable|fruit|banana|pepper|horn|tusk|leaf|petal|bean)s?\b/i.test(prompt)) {
+    stripSection("═══ ORGANIC SHAPES (CARROTS, ROOTS, PODS, BLOBS) ═══");
   }
   return system;
 }
