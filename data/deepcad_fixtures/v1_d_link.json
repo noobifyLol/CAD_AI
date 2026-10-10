@@ -1,0 +1,222 @@
+{
+ "format": "cad-sequence/v1",
+ "units": "mm",
+ "steps": [
+  {
+   "plane": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "xAxis": [
+     1,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "faces": [
+    {
+     "loops": [
+      [
+       {
+        "type": "line",
+        "start": [
+         -10,
+         -6
+        ],
+        "end": [
+         10,
+         -6
+        ]
+       },
+       {
+        "type": "line",
+        "start": [
+         10,
+         -6
+        ],
+        "end": [
+         10,
+         6
+        ]
+       },
+       {
+        "type": "arc",
+        "start": [
+         10,
+         6
+        ],
+        "mid": [
+         0,
+         16
+        ],
+        "end": [
+         -10,
+         6
+        ]
+       },
+       {
+        "type": "line",
+        "start": [
+         -10,
+         6
+        ],
+        "end": [
+         -10,
+         -6
+        ]
+       }
+      ],
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         2
+        ],
+        "radius": 3
+       }
+      ]
+     ]
+    }
+   ],
+   "extrude": {
+    "towardsNormal": 4,
+    "oppositeNormal": 4,
+    "operation": "new"
+   }
+  },
+  {
+   "plane": {
+    "origin": [
+     0,
+     0,
+     4
+    ],
+    "xAxis": [
+     1,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "faces": [
+    {
+     "loops": [
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         2
+        ],
+        "radius": 6
+       }
+      ],
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         2
+        ],
+        "radius": 3
+       }
+      ]
+     ]
+    }
+   ],
+   "extrude": {
+    "towardsNormal": 6,
+    "oppositeNormal": 0,
+    "operation": "join"
+   }
+  },
+  {
+   "plane": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "xAxis": [
+     1,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "faces": [
+    {
+     "loops": [
+      [
+       {
+        "type": "line",
+        "start": [
+         -20,
+         -20
+        ],
+        "end": [
+         20,
+         -20
+        ]
+       },
+       {
+        "type": "line",
+        "start": [
+         20,
+         -20
+        ],
+        "end": [
+         20,
+         20
+        ]
+       },
+       {
+        "type": "line",
+        "start": [
+         20,
+         20
+        ],
+        "end": [
+         -20,
+         20
+        ]
+       },
+       {
+        "type": "line",
+        "start": [
+         -20,
+         20
+        ],
+        "end": [
+         -20,
+         -20
+        ]
+       }
+      ]
+     ]
+    }
+   ],
+   "extrude": {
+    "towardsNormal": 8,
+    "oppositeNormal": 2,
+    "operation": "intersect"
+   }
+  }
+ ]
+}

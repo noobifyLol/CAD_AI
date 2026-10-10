@@ -25,7 +25,7 @@ export const bottleWithNeck = defineFeature(function(context is Context, id is I
     }
     {
         // A bottle is a revolved profile with a belly, a curved shoulder, and a
-        // narrower neck — never a plain cylinder.
+        // narrower neck, never a plain cylinder.
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });
@@ -67,7 +67,7 @@ export const bottleWithNeck = defineFeature(function(context is Context, id is I
         });
 
         // Hollow the bottle by subtracting an inner revolve inset by the wall
-        // thickness. (qCapEntity/opShell only work on extruded bodies, not revolves —
+        // thickness. (qCapEntity/opShell only work on extruded bodies, not revolves;
         // the tool profile extends past the top so the neck mouth opens cleanly.)
         var wt = definition.wallThickness / inch;
         var innerSketch = newSketchOnPlane(context, id + "innerSketch", { "sketchPlane" : skPlane });

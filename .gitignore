@@ -33,3 +33,7 @@ old_and_docs/docs
 logs/raw_generations/
 logs/generations_*.json
 .venv/
+__pycache__/
+
+# Local Text2CAD runtime (venv + source + model cache) for testing hf_space/ without Docker
+.text2cad/

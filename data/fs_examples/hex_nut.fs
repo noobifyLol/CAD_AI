@@ -19,7 +19,7 @@ export const hexNut = defineFeature(function(context is Context, id is Id, defin
     }
     {
         // A nut is a hex head with a concentric threaded bore, NOT a bolt: no shaft,
-        // no chamfer — just the hex prism and its center hole in one sketch.
+        // no chamfer, just the hex prism and its center hole in one sketch.
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });

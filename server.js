@@ -11,6 +11,7 @@ import {
 } from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
 import { createLearningService } from "./learning.js";
+import { DeepcadError, generateDeepcadFeature, getDeepcadConfig, verifyFeatureScript } from "./deepcadService.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 10000);
@@ -100,6 +101,7 @@ app.get("/health", (_req, res) => {
     supabaseEnabled: Boolean(supabase),
     supabaseKeyMode,
     models: getModelConfig(),
+    deepcad: getDeepcadConfig(),
   });
 });
 
@@ -264,6 +266,44 @@ app.post("/generate-model", async (req, res) => {
         : " (is the model server running? start it with: npm run model:serve — or set CADFS_MODEL_URL to a deployed cloud URL)";
     console.error("[/generate-model]", err.message);
     res.status(503).json({ error: `${err.message}${hint}` });
+  }
+});
+
+// DeepCAD path: prompt → Text2CAD model (Hugging Face Space, see hf_space/) →
+// sketch/extrude sequence → deterministic FeatureScript compiler → verification.
+// Also accepts { sequence } (cad-sequence/v1, DeepCAD JSON or Text2CAD minimal JSON)
+// to compile a sequence directly without calling the model.
+app.post("/generate-deepcad", async (req, res) => {
+  const prompt = String(req.body.prompt || "").trim();
+  const sequence = req.body.sequence && typeof req.body.sequence === "object" ? req.body.sequence : null;
+  if (!prompt && !sequence) return res.status(400).json({ error: "Provide a prompt or a CAD sequence." });
+  try {
+    console.log(`[/generate-deepcad] prompt=${truncateForLog(prompt, 300)} sequence=${Boolean(sequence)}`);
+    const result = await generateDeepcadFeature({
+      prompt,
+      sequence,
+      sizeInches: req.body.sizeInches,
+      featureLabel: req.body.featureLabel,
+    });
+    console.log(`[/generate-deepcad] mode=${result.generationMode} verdict=${result.verification.verdict} steps=${result.stats.steps}`);
+    res.json(result);
+  } catch (err) {
+    const status = err instanceof DeepcadError ? err.status : 500;
+    console.error("[/generate-deepcad]", err.message);
+    res.status(status).json({ error: err.message, details: err.details || null });
+  }
+});
+
+// Verify any FeatureScript: strict static validation plus, when Onshape API keys
+// are configured, a real execution in an Onshape Part Studio.
+app.post("/verify", async (req, res) => {
+  const code = String(req.body.code || "").trim();
+  if (!code) return res.status(400).json({ error: "No FeatureScript provided." });
+  try {
+    res.json(await verifyFeatureScript(code));
+  } catch (err) {
+    console.error("[/verify]", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

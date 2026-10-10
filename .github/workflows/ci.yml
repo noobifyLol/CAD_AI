@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run test:validator
+      - run: npm run test:plan
+      - run: npm run test:deepcad
+      - run: npm run test:deepcad-e2e
+      - name: Server boots and generates without API keys (fallback path)
+        run: |
+          PORT=10000 node server.js > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:10000/health && break; sleep 1; done
+          curl -sf -X POST localhost:10000/generate -H 'content-type: application/json' \
+            -d '{"prompt":"Create a hex nut"}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);if(!/FeatureScript 2931/.test(r.code||''))process.exit(1);console.log('mode:',r.generationMode)})"
+      - if: failure()
+        run: cat server.log || true
+
+  hf-space:
+    # Text2CAD service: round-trips a DeepCAD fixture through Text2CAD's own token
+    # format and runs the real network (random weights) through the HTTP API.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Fetch Text2CAD at the commit the Space pins
+        run: |
+          git init /tmp/Text2CAD && cd /tmp/Text2CAD
+          git remote add origin https://github.com/SadilKhan/Text2CAD
+          git fetch --depth 1 origin 669a81472ede2269837c22a4d00070eaac360c82 && git checkout FETCH_HEAD
+      - run: pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -r hf_space/requirements.txt
+      - run: python hf_space/tests/test_space.py --text2cad /tmp/Text2CAD --out /tmp/decoded.json
+      - run: node hf_space/tests/roundtrip_compare.mjs /tmp/decoded.json

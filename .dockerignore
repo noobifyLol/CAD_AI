@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+.env
+env
+.venv
+.vscode
+logs
+outputs
+old_and_docs
+model_service
+hf_space
+vcpkg
+*.log

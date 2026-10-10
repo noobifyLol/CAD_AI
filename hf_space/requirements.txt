@@ -1,0 +1,21 @@
+# torch is installed separately in the Dockerfile from the CPU wheel index.
+# Versions are the ones the offline tests (tests/test_space.py) ran against.
+transformers==4.48.3
+tokenizers==0.21.4
+huggingface_hub==0.36.2
+fastapi==0.143.0
+uvicorn==0.54.0
+pydantic==2.14.0
+httpx==0.28.1
+numpy==2.5.3
+scipy==1.18.1
+scikit-learn==1.9.1
+pandas==3.0.6
+matplotlib==3.11.2
+trimesh==5.1.1
+loguru==0.7.3
+rich==15.0.0
+PyYAML==6.0.3
+plyfile==1.1.5
+prettytable==3.18.0
+joblib==1.6.0

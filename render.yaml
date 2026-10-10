@@ -1,0 +1,46 @@
+# Render Blueprint — deploy with: Render dashboard → New → Blueprint → pick this repo.
+# Secrets marked `sync: false` are prompted for on first deploy and never stored in git.
+services:
+  - type: web
+    name: cad-ai
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_API_KEY2
+        sync: false
+      - key: USE_VALIDATED_TEMPLATES
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      # Optional: adaptive memory + accounts
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Optional: real Onshape compile checks (keys from https://dev.onshape.com/keys)
+      - key: ONSHAPE_ACCESS_KEY
+        sync: false
+      - key: ONSHAPE_SECRET_KEY
+        sync: false
+      - key: ONSHAPE_TEST_DOCUMENT_ID
+        sync: false
+      - key: ONSHAPE_TEST_WORKSPACE_ID
+        sync: false
+      - key: ONSHAPE_TEST_PARTSTUDIO_ID
+        sync: false
+      # Optional: DeepCAD/Text2CAD model on a Hugging Face Space (see hf_space/README.md)
+      - key: DEEPCAD_MODEL_URL
+        sync: false
+      - key: DEEPCAD_MODEL_TOKEN
+        sync: false
+      # Optional: cloud CADFS-2B model (see model_service/README.md)
+      - key: CADFS_MODEL_URL
+        sync: false

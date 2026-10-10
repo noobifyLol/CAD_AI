@@ -358,6 +358,37 @@
   .status.error   { background: #200e14; border: 1px solid #4a1828; color: var(--red); }
   .status.ok      { background: #081e18; border: 1px solid #0f3828; color: var(--green); }
 
+  .engine-label { display: block; margin-top: 14px; font-size: 0.8rem; color: var(--muted); }
+  .engine-select {
+    width: 100%;
+    margin-top: 6px;
+    padding: 9px 10px;
+    background: var(--code-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.88rem;
+  }
+  .import-card summary { cursor: pointer; margin-bottom: 0; }
+  .import-card[open] summary { margin-bottom: 12px; }
+  .verify-box {
+    display: none;
+    margin-top: 10px;
+    padding: 10px 13px;
+    border-radius: 8px;
+    font-size: 0.84rem;
+    line-height: 1.45;
+    border: 1px solid var(--border);
+    background: var(--code-bg);
+    color: var(--text);
+  }
+  .verify-box.show { display: block; }
+  .verify-box.works { border-color: #0f3828; background: #081e18; }
+  .verify-box.fails { border-color: #4a1828; background: #200e14; }
+  .verify-box.unchecked { border-color: #1a3558; background: #111d2e; }
+  .verify-box .verify-title { font-weight: 600; margin-bottom: 4px; }
+  .verify-box ul { margin: 4px 0 0 18px; padding: 0; }
+
   /* ── AI Thinking box ── */
   .thinking-wrap {
     margin-bottom: 14px;
@@ -683,10 +714,23 @@
           <textarea id="gen-prompt" rows="5"
             placeholder="Describe the part: shape, dimensions, holes, fillets, materials, and how it should be adjustable."></textarea>
           <div class="hint">Ctrl + Enter to generate. Inches by default; mm is understood.</div>
+          <label class="engine-label" for="gen-engine">Generator</label>
+          <select id="gen-engine" class="engine-select">
+            <option value="parametric">Parametric AI (Groq)</option>
+            <option value="deepcad">DeepCAD model (Text2CAD, Hugging Face)</option>
+          </select>
+          <div class="hint" id="gen-engine-hint"></div>
           <div class="btn-row">
             <button class="btn btn-primary" id="gen-btn" onclick="generate()">Generate FeatureScript</button>
           </div>
         </div>
+        <details class="card import-card">
+          <summary class="card-label">Import a DeepCAD / Text2CAD JSON</summary>
+          <textarea id="deepcad-json" rows="6" placeholder='Paste a DeepCAD cad_json file, a Text2CAD minimal JSON ({"parts": ...}), or a cad-sequence/v1 JSON.'></textarea>
+          <div class="btn-row">
+            <button class="btn btn-ghost" id="deepcad-json-btn" onclick="compileDeepcadJson()">Compile JSON to FeatureScript</button>
+          </div>
+        </details>
       </div>
 
       <div>
@@ -704,8 +748,10 @@
           </div>
 
           <div id="gen-output" class="output-box empty">Your FeatureScript will appear here.</div>
+          <div id="gen-verify" class="verify-box"></div>
           <div class="btn-row">
             <button class="btn btn-success" id="copy-btn" onclick="copyCode('gen-output')" disabled>Copy to Clipboard</button>
+            <button class="btn btn-ghost" id="verify-btn" onclick="verifyGeneratedCode()" disabled>Verify in Onshape</button>
             <button class="btn btn-ghost" onclick="sendToDebug()">Send to Debug</button>
           </div>
         </div>

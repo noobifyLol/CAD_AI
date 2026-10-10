@@ -1,6 +1,6 @@
 # Local CADFS-2B model service
 
-Self-hosts [VladPyatov/CADFS-2B](https://huggingface.co/VladPyatov/CADFS-2B) — a
+Self-hosts [VladPyatov/CADFS-2B](https://huggingface.co/VladPyatov/CADFS-2B), a
 fine-tuned Qwen2-VL-2B (MIT) that turns a text description into FeatureScript,
 trained on 450k real Onshape models. Runs locally on your GPU; no API cost.
 
@@ -23,7 +23,7 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r model_service/requirements.txt
 ```
 
-`transformers` is pinned to **4.51.3** on purpose — Qwen2-VL processor loading is
+`transformers` is pinned to **4.51.3** on purpose: Qwen2-VL processor loading is
 broken in transformers 5.x. The model (~5 GB) downloads automatically on first run
 to your Hugging Face cache.
 
@@ -52,7 +52,7 @@ Env: `CADFS_MODEL_URL` (default `http://127.0.0.1:8765`), `CADFS_MODEL_ID`,
 
 ## Cloud deployment (so your PC doesn't have to stay on)
 
-`modal_app.py` runs the same API on [Modal](https://modal.com) — a serverless GPU
+`modal_app.py` runs the same API on [Modal](https://modal.com), a serverless GPU
 that **scales to zero**: you pay per-second only while a request runs, nothing
 while idle, and it's available 24/7.
 
@@ -69,7 +69,7 @@ Modal prints a URL like `https://<you>--cadfs-2b-web.modal.run`. Point the app a
 CADFS_MODEL_URL=https://<you>--cadfs-2b-web.modal.run
 ```
 
-No app code changes — `/generate-model` just uses the new URL. When it detects a
+No app code changes are needed: `/generate-model` just uses the new URL. When it detects a
 remote URL it automatically allows longer timeouts and retries once, because a
 scaled-to-zero GPU has a **cold start** (~20–40 s) on the first request after
 idling; subsequent requests are fast.
@@ -90,7 +90,7 @@ output looks like valid FeatureScript.
 
 ## Other hosting options
 
-Modal isn't the only choice — the same `cadfs_server.py` runs on any GPU box:
+Modal isn't the only choice. The same `cadfs_server.py` runs on any GPU box:
 RunPod, Vast.ai, Lambda Labs, or a cloud VM with an NVIDIA GPU. Those are usually
 billed **per hour while running** (not scale-to-zero), so they cost more for
 intermittent use but avoid cold starts. Hugging Face Inference Endpoints can also

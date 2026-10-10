@@ -26,8 +26,26 @@ async function loadRuntimeConfig() {
     const textModel = data?.models?.text || 'meta-llama/llama-4-scout-17b-16e-instruct';
     const vision = data?.models?.vision ? ' + Groq Vision' : '';
     label.textContent = `${provider} ${textModel}${vision}`;
+    runtimeConfig = data;
+    updateEngineHint();
   } catch {
     label.textContent = 'Groq text + Groq Vision';
+  }
+}
+
+let runtimeConfig = null;
+
+function updateEngineHint() {
+  const hint = document.getElementById('gen-engine-hint');
+  const engine = document.getElementById('gen-engine')?.value;
+  if (!hint) return;
+  const deepcad = runtimeConfig?.deepcad;
+  if (engine === 'deepcad' && deepcad && !deepcad.configured) {
+    hint.textContent = 'The DeepCAD model is not connected yet: set DEEPCAD_MODEL_URL on the server (see hf_space/README.md). JSON import below still works.';
+  } else if (engine === 'deepcad') {
+    hint.textContent = 'Text2CAD predicts exact sketch + extrude steps; the server compiles them to FeatureScript. The first request after the Space sleeps can take a minute.';
+  } else {
+    hint.textContent = '';
   }
 }
 
@@ -248,6 +266,11 @@ function setOutput(id, code, copyBtnId, generationId = null) {
   if (generationId) outputGenerationIds[id] = generationId;
   else delete outputGenerationIds[id];
   if (copyBtnId) document.getElementById(copyBtnId).disabled = !code;
+  if (id === 'gen-output') {
+    const verifyBtn = document.getElementById('verify-btn');
+    if (verifyBtn) verifyBtn.disabled = !code;
+    renderVerification(null);
+  }
 }
 
 function setThinking(prefix, text) {
@@ -311,9 +334,136 @@ function sendToDebug() {
   }
 }
 
+// ── Verification (static validator + live Onshape execution) ──
+const VERDICT_TEXT = {
+  works_in_onshape: ['works', 'Works in Onshape', 'The feature ran in a real Onshape Part Studio with no errors.'],
+  fails_in_onshape: ['fails', 'Fails in Onshape', 'Onshape reported errors when running this feature.'],
+  static_ok: ['unchecked', 'Passes the static validator', 'Live Onshape check not run'],
+  static_errors: ['fails', 'Static validator found problems', 'Fix these before pasting into Onshape.'],
+};
+
+function renderVerification(result) {
+  const box = document.getElementById('gen-verify');
+  if (!box) return;
+  box.replaceChildren();
+  if (!result) {
+    box.className = 'verify-box';
+    return;
+  }
+  const [tone, title, detail] = VERDICT_TEXT[result.verdict] || ['unchecked', 'Verification', ''];
+  box.className = `verify-box show ${tone}`;
+  const titleEl = document.createElement('div');
+  titleEl.className = 'verify-title';
+  titleEl.textContent = title;
+  const detailEl = document.createElement('div');
+  const skipped = result.onshape?.skippedReason;
+  detailEl.textContent = result.verdict === 'static_ok' && skipped ? `${detail}: ${skipped}` : detail;
+  box.append(titleEl, detailEl);
+  const problems = [
+    ...(result.onshape?.errors || []).map(e => `Onshape: ${e.message}`),
+    ...(result.static?.ok ? [] : (result.static?.issues || []).map(i => `${i.line ? `Line ${i.line}: ` : ''}${i.message}`)),
+  ].slice(0, 8);
+  if (problems.length) {
+    const list = document.createElement('ul');
+    for (const problem of problems) {
+      const item = document.createElement('li');
+      item.textContent = problem;
+      list.append(item);
+    }
+    box.append(list);
+  }
+}
+
+async function verifyGeneratedCode() {
+  const output = document.getElementById('gen-output');
+  if (output.classList.contains('empty')) return;
+  const btn = document.getElementById('verify-btn');
+  btn.disabled = true;
+  btn.textContent = 'Verifying…';
+  try {
+    const r = await fetch('/verify', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ code: output.textContent }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Verification failed');
+    renderVerification(data);
+  } catch (e) {
+    renderVerification({ verdict: 'static_errors', static: { ok: false, issues: [{ message: e.message }] }, onshape: {} });
+  } finally {
+    btn.textContent = 'Verify in Onshape';
+    btn.disabled = false;
+  }
+}
+
+// ── DeepCAD (Text2CAD) generation and JSON import ──
+async function runDeepcad(body, { button, busyLabel, idleLabel, prompt }) {
+  button.innerHTML = `<div class="spinner"></div><span>${busyLabel}</span>`;
+  button.disabled = true;
+  setStatus('gen-status', body.sequence ? 'Compiling the CAD sequence…' : 'Asking the Text2CAD model (a sleeping Space can take a minute to wake)…', 'loading');
+  setThinking('gen', '');
+  try {
+    const r = await fetch('/generate-deepcad', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'DeepCAD generation failed');
+    setOutput('gen-output', data.code, 'copy-btn');
+    renderVerification(data.verification);
+    const steps = `${data.stats.steps} sketch/extrude step${data.stats.steps === 1 ? '' : 's'}`;
+    const notes = data.warnings?.length ? ` ${data.warnings.join(' ')}` : '';
+    setStatus('gen-status', `Generated "${data.featureLabel}" from ${steps}.${notes}`, 'ok');
+    setThinking('gen', JSON.stringify(data.sequence, null, 2));
+  } catch (e) {
+    setStatus('gen-status', `Error: ${e.message}`, 'error');
+    showRunModal({
+      title: 'DeepCAD generation failed',
+      ok: false,
+      message: e.message,
+      createdAt: new Date().toISOString(),
+      prompt,
+      orchestration: null,
+      outputKind: 'generation',
+    });
+  } finally {
+    button.textContent = idleLabel;
+    button.disabled = false;
+  }
+}
+
+async function compileDeepcadJson() {
+  const raw = document.getElementById('deepcad-json').value.trim();
+  if (!raw) return;
+  let sequence;
+  try {
+    sequence = JSON.parse(raw);
+  } catch (e) {
+    setStatus('gen-status', `That is not valid JSON: ${e.message}`, 'error');
+    return;
+  }
+  await runDeepcad({ sequence }, {
+    button: document.getElementById('deepcad-json-btn'),
+    busyLabel: 'Compiling',
+    idleLabel: 'Compile JSON to FeatureScript',
+    prompt: 'Imported CAD sequence',
+  });
+}
+
 async function generate() {
   const prompt = document.getElementById('gen-prompt').value.trim();
   if (!prompt) return;
+  if (document.getElementById('gen-engine')?.value === 'deepcad') {
+    await runDeepcad({ prompt }, {
+      button: document.getElementById('gen-btn'),
+      busyLabel: 'Generating',
+      idleLabel: 'Generate FeatureScript',
+      prompt,
+    });
+    return;
+  }
   const body = { prompt };
 
   const btn = document.getElementById('gen-btn');
@@ -641,6 +791,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const firstSlot = document.querySelector('#image-slots-container .image-slot');
   if (firstSlot) firstSlot.classList.add('slot-visible');
 
+  document.getElementById('gen-engine')?.addEventListener('change', updateEngineHint);
   loadRuntimeConfig();
 
   // Restore auth state on load

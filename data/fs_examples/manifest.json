@@ -96,7 +96,7 @@
       "title": "Pen With Tip And Clip",
       "keywords": ["pen", "pencil", "marker", "stylus", "crayon", "pointer", "writing", "barrel", "clip", "tip", "wand", "handle", "stick"],
       "operations": ["opExtrude", "opLoft", "opBoolean UNION"],
-      "lesson": "Everyday objects decompose into recognizable components — a pen is a barrel cylinder + lofted tapered tip + pocket clip, never one stretched primitive."
+      "lesson": "Everyday objects decompose into recognizable components: a pen is a barrel cylinder + lofted tapered tip + pocket clip, never one stretched primitive."
     },
     {
       "file": "bottle_with_neck.fs",
@@ -117,7 +117,7 @@
       "title": "Hex Nut",
       "keywords": ["nut", "hex nut", "jam nut", "lock nut", "castle nut", "fastener", "threaded hole"],
       "operations": ["skRegularPolygon", "opExtrude"],
-      "lesson": "A nut is a hex polygon with a concentric bore circle in the SAME sketch, extruded once — never a bolt shaft with no head, and never a bolt-with-shaft template reused for a nut."
+      "lesson": "A nut is a hex polygon with a concentric bore circle in the SAME sketch, extruded once. It is never a bolt shaft with no head, and never a bolt-with-shaft template reused for a nut."
     },
     {
       "file": "wheel_with_spokes.fs",

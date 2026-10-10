@@ -78,7 +78,7 @@ export const wheelWithSpokes = defineFeature(function(context is Context, id is 
             "endDepth"  : definition.wheelWidth
         });
 
-        // 4. Circular pattern of the spoke (opPattern — opPatternCircular does NOT exist).
+        // 4. Circular pattern of the spoke (opPattern; opPatternCircular does NOT exist).
         var patternAxis = line(skPlane.origin, skPlane.normal);
         var transforms = [];
         var instanceNames = [];

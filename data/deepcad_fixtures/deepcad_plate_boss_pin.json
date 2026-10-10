@@ -1,0 +1,486 @@
+{
+ "entities": {
+  "S1": {
+   "type": "Sketch",
+   "name": "Sketch 1",
+   "transform": {
+    "origin": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "x_axis": {
+     "x": 1,
+     "y": 0,
+     "z": 0
+    },
+    "y_axis": {
+     "x": 0,
+     "y": 1,
+     "z": 0
+    },
+    "z_axis": {
+     "x": 0,
+     "y": 0,
+     "z": 1
+    }
+   },
+   "profiles": {
+    "P1": {
+     "loops": [
+      {
+       "is_outer": false,
+       "profile_curves": [
+        {
+         "type": "Circle3D",
+         "center_point": {
+          "x": 0.03,
+          "y": 0,
+          "z": 0.0
+         },
+         "radius": 0.008,
+         "normal": {
+          "x": 0,
+          "y": 0,
+          "z": 1
+         },
+         "curve": "e"
+        }
+       ]
+      },
+      {
+       "is_outer": true,
+       "profile_curves": [
+        {
+         "type": "Line3D",
+         "start_point": {
+          "x": -0.05,
+          "y": -0.03,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": 0.05,
+          "y": -0.03,
+          "z": 0.0
+         },
+         "curve": "a"
+        },
+        {
+         "type": "Line3D",
+         "start_point": {
+          "x": 0.05,
+          "y": -0.03,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": 0.05,
+          "y": 0.03,
+          "z": 0.0
+         },
+         "curve": "b"
+        },
+        {
+         "type": "Line3D",
+         "start_point": {
+          "x": 0.05,
+          "y": 0.03,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": -0.05,
+          "y": 0.03,
+          "z": 0.0
+         },
+         "curve": "c"
+        },
+        {
+         "type": "Line3D",
+         "start_point": {
+          "x": -0.05,
+          "y": 0.03,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": -0.05,
+          "y": -0.03,
+          "z": 0.0
+         },
+         "curve": "d"
+        }
+       ]
+      }
+     ],
+     "properties": {}
+    }
+   },
+   "reference_plane": {}
+  },
+  "E1": {
+   "type": "ExtrudeFeature",
+   "name": "Extrude 1",
+   "profiles": [
+    {
+     "profile": "P1",
+     "sketch": "S1"
+    }
+   ],
+   "extent_one": {
+    "distance": {
+     "type": "ModelParameter",
+     "value": 0.01,
+     "name": "none",
+     "role": "AlongDistance"
+    },
+    "taper_angle": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "TaperAngle"
+    },
+    "type": "DistanceExtentDefinition"
+   },
+   "extent_two": {
+    "distance": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "AlongDistance"
+    },
+    "taper_angle": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "TaperAngle"
+    },
+    "type": "DistanceExtentDefinition"
+   },
+   "extent_type": "OneSideFeatureExtentType",
+   "operation": "NewBodyFeatureOperation",
+   "start_extent": {
+    "type": "ProfilePlaneStartDefinition"
+   }
+  },
+  "S2": {
+   "type": "Sketch",
+   "name": "Sketch 2",
+   "transform": {
+    "origin": {
+     "x": -0.02,
+     "y": 0,
+     "z": 0.01
+    },
+    "x_axis": {
+     "x": 1,
+     "y": 0,
+     "z": 0
+    },
+    "y_axis": {
+     "x": 0,
+     "y": 1,
+     "z": 0
+    },
+    "z_axis": {
+     "x": 0,
+     "y": 0,
+     "z": 1
+    }
+   },
+   "profiles": {
+    "P2": {
+     "loops": [
+      {
+       "is_outer": true,
+       "profile_curves": [
+        {
+         "type": "Line3D",
+         "start_point": {
+          "x": -0.01,
+          "y": -0.01,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": 0.01,
+          "y": -0.01,
+          "z": 0.0
+         },
+         "curve": "f"
+        },
+        {
+         "type": "Arc3D",
+         "center_point": {
+          "x": 0.01,
+          "y": 0,
+          "z": 0.0
+         },
+         "radius": 0.01,
+         "start_point": {
+          "x": 0.01,
+          "y": -0.01,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": 0.01,
+          "y": 0.01,
+          "z": 0.0
+         },
+         "start_angle": 0.0,
+         "end_angle": 3.141592653589793,
+         "reference_vector": {
+          "x": 0,
+          "y": -1,
+          "z": 0.0
+         },
+         "normal": {
+          "x": 0,
+          "y": 0,
+          "z": 1
+         },
+         "curve": "g"
+        },
+        {
+         "type": "Line3D",
+         "start_point": {
+          "x": 0.01,
+          "y": 0.01,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": -0.01,
+          "y": 0.01,
+          "z": 0.0
+         },
+         "curve": "h"
+        },
+        {
+         "type": "Arc3D",
+         "center_point": {
+          "x": -0.01,
+          "y": 0,
+          "z": 0.0
+         },
+         "radius": 0.01,
+         "start_point": {
+          "x": -0.01,
+          "y": 0.01,
+          "z": 0.0
+         },
+         "end_point": {
+          "x": -0.01,
+          "y": -0.01,
+          "z": 0.0
+         },
+         "start_angle": 0.0,
+         "end_angle": 3.141592653589793,
+         "reference_vector": {
+          "x": 0,
+          "y": 1,
+          "z": 0.0
+         },
+         "normal": {
+          "x": 0,
+          "y": 0,
+          "z": 1
+         },
+         "curve": "i"
+        }
+       ]
+      }
+     ],
+     "properties": {}
+    }
+   },
+   "reference_plane": {}
+  },
+  "E2": {
+   "type": "ExtrudeFeature",
+   "name": "Extrude 2",
+   "profiles": [
+    {
+     "profile": "P2",
+     "sketch": "S2"
+    }
+   ],
+   "extent_one": {
+    "distance": {
+     "type": "ModelParameter",
+     "value": 0.02,
+     "name": "none",
+     "role": "AlongDistance"
+    },
+    "taper_angle": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "TaperAngle"
+    },
+    "type": "DistanceExtentDefinition"
+   },
+   "extent_two": {
+    "distance": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "AlongDistance"
+    },
+    "taper_angle": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "TaperAngle"
+    },
+    "type": "DistanceExtentDefinition"
+   },
+   "extent_type": "OneSideFeatureExtentType",
+   "operation": "JoinFeatureOperation",
+   "start_extent": {
+    "type": "ProfilePlaneStartDefinition"
+   }
+  },
+  "S3": {
+   "type": "Sketch",
+   "name": "Sketch 3",
+   "transform": {
+    "origin": {
+     "x": 0,
+     "y": -0.03,
+     "z": 0.005
+    },
+    "x_axis": {
+     "x": 1,
+     "y": 0,
+     "z": 0
+    },
+    "y_axis": {
+     "x": 0,
+     "y": 0,
+     "z": -1
+    },
+    "z_axis": {
+     "x": 0,
+     "y": 1,
+     "z": 0
+    }
+   },
+   "profiles": {
+    "P3": {
+     "loops": [
+      {
+       "is_outer": true,
+       "profile_curves": [
+        {
+         "type": "Circle3D",
+         "center_point": {
+          "x": -0.035,
+          "y": 0,
+          "z": 0.0
+         },
+         "radius": 0.003,
+         "normal": {
+          "x": 0,
+          "y": 1,
+          "z": 0
+         },
+         "curve": "j"
+        }
+       ]
+      }
+     ],
+     "properties": {}
+    }
+   },
+   "reference_plane": {}
+  },
+  "E3": {
+   "type": "ExtrudeFeature",
+   "name": "Extrude 3",
+   "profiles": [
+    {
+     "profile": "P3",
+     "sketch": "S3"
+    }
+   ],
+   "extent_one": {
+    "distance": {
+     "type": "ModelParameter",
+     "value": 0.2,
+     "name": "none",
+     "role": "AlongDistance"
+    },
+    "taper_angle": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "TaperAngle"
+    },
+    "type": "DistanceExtentDefinition"
+   },
+   "extent_two": {
+    "distance": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "AlongDistance"
+    },
+    "taper_angle": {
+     "type": "ModelParameter",
+     "value": 0.0,
+     "name": "none",
+     "role": "TaperAngle"
+    },
+    "type": "DistanceExtentDefinition"
+   },
+   "extent_type": "SymmetricFeatureExtentType",
+   "operation": "CutFeatureOperation",
+   "start_extent": {
+    "type": "ProfilePlaneStartDefinition"
+   }
+  }
+ },
+ "properties": {
+  "bounding_box": {
+   "type": "BoundingBox3D",
+   "max_point": {
+    "x": 0.05,
+    "y": 0.03,
+    "z": 0.03
+   },
+   "min_point": {
+    "x": -0.05,
+    "y": -0.03,
+    "z": 0.0
+   }
+  }
+ },
+ "sequence": [
+  {
+   "index": 0,
+   "type": "Sketch",
+   "entity": "S1"
+  },
+  {
+   "index": 1,
+   "type": "ExtrudeFeature",
+   "entity": "E1"
+  },
+  {
+   "index": 2,
+   "type": "Sketch",
+   "entity": "S2"
+  },
+  {
+   "index": 3,
+   "type": "ExtrudeFeature",
+   "entity": "E2"
+  },
+  {
+   "index": 4,
+   "type": "Sketch",
+   "entity": "S3"
+  },
+  {
+   "index": 5,
+   "type": "ExtrudeFeature",
+   "entity": "E3"
+  }
+ ]
+}
