@@ -125,16 +125,23 @@ def _load():
                 (key.split(".", 1)[1] if key.startswith("module.") else key): value
                 for key, value in checkpoint["model_state_dict"].items()
             }
-            # strict=False tolerates naming drift, so report how much actually loaded:
-            # a mismatch would otherwise silently leave random weights in place.
+            # strict=False because the checkpoint deliberately omits the frozen BERT text
+            # encoder (base_text_embedder.model.*, loaded from its own pretrained download).
+            # Anything else missing means the checkpoint does not match and the decoder
+            # would silently run with random weights, so that is an error.
             result = model.load_state_dict(weights, strict=False)
+            missing_trained = [k for k in result.missing_keys if not k.startswith("base_text_embedder.model.")]
             state["weights"] = {
                 "loaded": len(weights) - len(result.unexpected_keys),
-                "missing": len(result.missing_keys),
+                "fromPretrainedBert": len(result.missing_keys) - len(missing_trained),
+                "missing": len(missing_trained),
                 "unexpected": len(result.unexpected_keys),
             }
-            if len(result.missing_keys) > len(weights) // 2:
-                raise RuntimeError(f"Checkpoint does not match the model: {len(result.missing_keys)} weights missing.")
+            if missing_trained or result.unexpected_keys:
+                raise RuntimeError(
+                    f"Checkpoint does not match the model: {len(missing_trained)} trained weights missing "
+                    f"(e.g. {missing_trained[:3]}), {len(result.unexpected_keys)} unexpected."
+                )
 
         model.eval()
         state.update(model=model, status="ready", loadedSec=round(time.time() - started, 1))
