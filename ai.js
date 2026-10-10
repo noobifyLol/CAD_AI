@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
+import { autoCloseOpenProfiles, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
 // llama-3.1-8b-instant and llama-3.3-70b-versatile are gone from Groq entirely as of
@@ -26,7 +27,8 @@ const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || DEFAULT_STRONG_TEXT_MO
 const DEAD_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || DEAD_VISION_MODEL;
 // Extra last-resort code model: separate per-model TPM bucket from llama/gpt-oss.
-const EXTRA_CODE_FALLBACK_MODEL = process.env.GROQ_EXTRA_FALLBACK_MODEL || "qwen/qwen3.6-27b";
+// qwen3.6-27b was retired by Groq (404 model_not_found, 2026-10); its successor is live.
+const EXTRA_CODE_FALLBACK_MODEL = process.env.GROQ_EXTRA_FALLBACK_MODEL || "qwen/qwen3.8-27b";
 const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first").toLowerCase();
 // The live generation path uses a strict validated FeatureScript skeleton by default.
 // Set USE_VALIDATED_TEMPLATES=false only when intentionally testing free-form prompting.
@@ -2822,6 +2824,19 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
       );
     }
     if (code !== before) record("query_body_from_creating_op_not_modifier", before, code);
+  }
+
+  // A region sketch missing exactly one segment (e.g. a revolve profile with no bottom
+  // line) gets that segment added, so qSketchRegion finds the region.
+  try {
+    const before = code;
+    const result = autoCloseOpenProfiles(code);
+    if (result.closed.length) {
+      code = result.code;
+      record("auto_close_open_profile", before, code);
+    }
+  } catch {
+    // leave the code as it was; the validator still reports the open profile
   }
 
   // Array length fix: replace arr.length with size(arr)
@@ -7006,6 +7021,14 @@ function validateFeatureScript(code) {
       }
       nestedDepth = Math.max(0, nestedDepth + (codeOnly.match(/\{/g) || []).length - (codeOnly.match(/\}/g) || []).length);
     }
+  }
+
+  // Runtime geometry failures ("Cannot resolve entities"): open sketch profiles and
+  // queries naming ids nothing creates. Checked offline with default parameter values.
+  try {
+    for (const issue of checkFeatureScriptGeometry(text)) addIssue(issue.line, issue.message, issue.text);
+  } catch {
+    // a checker bug must never break validation
   }
 
   return issues;

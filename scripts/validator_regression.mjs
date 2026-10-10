@@ -134,5 +134,18 @@ expectFlagged('fake RevolveOperationType outside a map', STRICT_FEATURESCRIPT_TE
   else { failures += 1; console.log('FAIL (should be repaired) body queried by shell id'); }
 }
 
+// 8) Open revolve profile (live web failure: spray bottle with no bottom line ->
+//    Onshape "Cannot resolve entities"). The sanitizer must add the missing segment
+//    with the model's own parametric endpoints; a typo'd sketch id must be flagged.
+{
+  const { readFileSync } = await import('node:fs');
+  const vase = readFileSync(new URL('../data/fs_examples/revolved_vase.fs', import.meta.url), 'utf8');
+  const open = vase.replace(/[ \t]*skLineSegment\(profileSketch, "baseClose", \{[\s\S]*?\}\);\r?\n/, '');
+  const strict = validateFeatureScriptStrict(open);
+  if (open !== vase && strict.ok && /"autoClose"/.test(strict.code)) console.log('PASS (repaired) open revolve profile closed automatically');
+  else { failures += 1; console.log(`FAIL (should be repaired) open revolve profile — ok=${strict.ok}`); }
+  expectFlagged('query names a sketch id that does not exist', vase.replace('qSketchRegion(id + "profileSketch")', 'qSketchRegion(id + "profileSketchX")'), ['no operation or sketch']);
+}
+
 console.log(failures === 0 ? '\nALL VALIDATOR CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
