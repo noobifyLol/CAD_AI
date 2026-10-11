@@ -63,7 +63,7 @@ prompt ─► Text2CAD (Hugging Face Space, hf_space/) ─► sketch + extrude s
   `cad-sequence/v1` into *Import a DeepCAD / Text2CAD JSON* to compile them directly.
 
 **DeepCAD part library.** Auto first searches 30,000 real DeepCAD parts
-([data/deepcad_library.json.gz](data/deepcad_library.json.gz), built from the Text2CAD
+([data/deepcad_library_index.json.gz](data/deepcad_library_index.json.gz) + `deepcad_library_shapes.bin`, built from the Text2CAD
 descriptions by [scripts/deepcad_library/](scripts/deepcad_library/)) and, when one matches the
 prompt's main noun, counts and features, compiles it to FeatureScript instantly and for free
 (curved sketches included). True 3D shapes (cones, bottles, springs) go to Parametric AI.

@@ -10,11 +10,15 @@
  *
  * Data license: Text2CAD / DeepCAD, CC BY-NC-SA 4.0 (non-commercial).
  */
-import { existsSync, readFileSync } from "node:fs";
-import { deflateRawSync, gunzipSync, inflateRawSync } from "node:zlib";
+import { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
+import { gunzipSync, inflateRawSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
-const LIBRARY_FILE = fileURLToPath(new URL("./data/deepcad_library.json.gz", import.meta.url));
+// Index (names, keywords, byte offsets) is loaded on the first lookup; shapes stay on disk
+// and only the chosen part's compressed sequence is read. Keeps the server small enough for
+// Render's free tier (512 MB), where loading everything at once crashed it.
+const INDEX_FILE = fileURLToPath(new URL("./data/deepcad_library_index.json.gz", import.meta.url));
+const SHAPES_FILE = fileURLToPath(new URL("./data/deepcad_library_shapes.bin", import.meta.url));
 const MIN_COVERAGE = Number(process.env.DEEPCAD_LIBRARY_MIN_COVERAGE || 0.75);
 
 const STOPWORDS = new Set(("a an the and or of with without to for in on at by from into onto is are be it its this that "
@@ -36,11 +40,11 @@ let index = null;
 
 function load() {
   if (index) return index;
-  if (!existsSync(LIBRARY_FILE)) {
+  if (!existsSync(INDEX_FILE) || !existsSync(SHAPES_FILE)) {
     index = { parts: [], df: new Map(), avgLength: 1 };
     return index;
   }
-  const { parts: raw } = JSON.parse(gunzipSync(readFileSync(LIBRARY_FILE)).toString("utf8"));
+  const { parts: raw } = JSON.parse(gunzipSync(readFileSync(INDEX_FILE)).toString("utf8"));
   const df = new Map();
   let totalLength = 0;
   // Keep only what search needs (Render's free tier has 512 MB): name, counts, sequence string.
@@ -53,7 +57,7 @@ function load() {
     for (const token of Object.keys(termCounts)) df.set(token, (df.get(token) || 0) + 1);
     return {
       uid: part.uid, name: part.name, count: part.count, kinds: part.kinds, ops: part.ops,
-      seq: deflateRawSync(part.seq), // ~4x smaller in memory; inflated only for the chosen part
+      at: part.at, len: part.len, // where the compressed sequence lives in the shapes file
       termCounts, length: tokens.length, nameTokens: [...new Set(nameTokens)], head: headNoun(part.name),
     };
   });
@@ -61,9 +65,20 @@ function load() {
   return index;
 }
 
+/** Cheap status for /health: never loads the index (health checks run constantly). */
 export function libraryInfo() {
-  const { parts } = load();
-  return { available: parts.length > 0, parts: parts.length };
+  return { available: existsSync(INDEX_FILE) && existsSync(SHAPES_FILE), parts: index ? index.parts.length : null };
+}
+
+function readSequence(part) {
+  const buffer = Buffer.alloc(part.len);
+  const fd = openSync(SHAPES_FILE, "r");
+  try {
+    readSync(fd, buffer, 0, part.len, part.at);
+  } finally {
+    closeSync(fd);
+  }
+  return JSON.parse(inflateRawSync(buffer).toString("utf8"));
 }
 
 const COUNT_WORDS = { one: 1, single: 1, two: 2, pair: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12 };
@@ -145,7 +160,7 @@ export function searchLibrary(prompt, k = 12) {
 export function matchLibraryPart(prompt, accept = () => true) {
   for (const candidate of searchLibrary(prompt)) {
     if (candidate.coverage < MIN_COVERAGE) break; // sorted by coverage: nothing better follows
-    const sequence = JSON.parse(inflateRawSync(candidate.part.seq).toString("utf8"));
+    const sequence = readSequence(candidate.part);
     if (!accept(sequence)) continue;
     return { part: candidate.part, sequence, score: candidate.score, coverage: candidate.coverage };
   }

@@ -7,7 +7,7 @@
 // Inputs come from scripts/deepcad_library/download.py and extract.py (in .text2cad/data, git-ignored).
 import { createReadStream, createWriteStream, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { gzipSync } from 'node:zlib';
+import { deflateRawSync, gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { compileCadSequenceToFeatureScript } from '../../deepcadCompiler.js';
@@ -77,22 +77,32 @@ async function select() {
   }
   // Keep the most common descriptions (well-represented shapes) up to the limit.
   const chosen = [...groups.values()].sort((a, b) => b.count - a.count).slice(0, LIBRARY_LIMIT);
-  const library = chosen.map(({ count, best }) => ({
-    uid: best.uid,
-    name: best.abstract,
-    keywords: best.keywords.replace(/[[\]']/g, ''),
-    summary: best.beginner.slice(0, 240),
-    count,
-    kinds: best.kinds,
-    ops: best.ops,
-    // Stored as a string: the server keeps 30k parts in memory and parses only the match.
-    seq: JSON.stringify(best.sequence),
-  }));
-  const json = JSON.stringify({ format: 'deepcad-library/v1', source: 'Text2CAD v1.1 + DeepCAD (CC BY-NC-SA 4.0)', parts: library });
-  const gz = gzipSync(json, { level: 9 });
-  writeFileSync(path.join(ROOT, 'data', 'deepcad_library.json.gz'), gz);
+  // Two files so the server stays small (Render's free tier has 512 MB): a compact search
+  // index loaded into memory, and a blob of individually compressed sequences that is read
+  // from disk (by byte offset) only for the part that matches.
+  const blobs = [];
+  let offset = 0;
+  const library = chosen.map(({ count, best }) => {
+    const blob = deflateRawSync(JSON.stringify(best.sequence), { level: 9 });
+    blobs.push(blob);
+    const entry = {
+      uid: best.uid,
+      name: best.abstract.slice(0, 220),
+      keywords: best.keywords.replace(/[[\]']/g, '').slice(0, 160),
+      count,
+      kinds: best.kinds,
+      ops: best.ops,
+      at: offset,
+      len: blob.length,
+    };
+    offset += blob.length;
+    return entry;
+  });
+  const index = JSON.stringify({ format: 'deepcad-library/v2', source: 'Text2CAD v1.1 + DeepCAD (CC BY-NC-SA 4.0)', parts: library });
+  writeFileSync(path.join(ROOT, 'data', 'deepcad_library_index.json.gz'), gzipSync(index, { level: 9 }));
+  writeFileSync(path.join(ROOT, 'data', 'deepcad_library_shapes.bin'), Buffer.concat(blobs));
   const curved = library.filter(p => p.kinds.some(k => k !== 'line')).length;
-  console.log(`groups ${groups.size}; library ${library.length} parts (${curved} with arcs/circles); ${(json.length / 1e6).toFixed(1)} MB json, ${(gz.length / 1e6).toFixed(1)} MB gz`);
+  console.log(`groups ${groups.size}; library ${library.length} parts (${curved} with arcs/circles); index ${(index.length / 1e6).toFixed(1)} MB json, shapes ${(offset / 1e6).toFixed(1)} MB`);
 }
 
 const mode = process.argv[2] || 'compile';

@@ -41,7 +41,7 @@ function updateEngineHint() {
   if (!hint) return;
   const deepcad = runtimeConfig?.deepcad;
   if (engine === 'auto') {
-    const library = deepcad?.library?.available ? `First it looks for a matching real part among ${deepcad.library.parts.toLocaleString()} DeepCAD parts. ` : '';
+    const library = deepcad?.library?.available ? `First it looks for a matching real part among ${deepcad.library.parts ? deepcad.library.parts.toLocaleString() : '30,000'} DeepCAD parts. ` : '';
     hint.textContent = library + (deepcad?.configured
       ? 'Flat, extruded parts (plates, rings, brackets) go to the DeepCAD model; cones, gears and curved or everyday objects go to Parametric AI.'
       : 'Otherwise Auto uses Parametric AI (the DeepCAD model is not connected on this server).');
