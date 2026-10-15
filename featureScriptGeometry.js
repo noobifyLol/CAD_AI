@@ -463,6 +463,36 @@ export function checkFeatureScriptGeometry(code) {
       text: `skSolve(${profile.sketchVar})`,
     });
   }
+  // A circle revolved about an axis through its own center cannot form a ring
+  // (Onshape: REVOLVE_FAILED; a mug handle whose axis was line(handlePlane.origin, ...)).
+  {
+    const env = buildEnv(text);
+    const calls = sketchCalls(text);
+    const sketchOf = {};
+    for (const m of text.matchAll(/\bvar\s+(\w+)\s*=\s*newSketchOnPlane\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{\s*"sketchPlane"\s*:\s*(\w+)\s*\}/g)) sketchOf[m[2]] = { sketchVar: m[1], planeVar: m[3] };
+    const lineVars = Object.fromEntries([...text.matchAll(/\bvar\s+(\w+)\s*=\s*(line\s*\([^;]+\))\s*;/g)].map(m => [m[1], m[2]]));
+    for (const m of text.matchAll(/\bopRevolve\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{([\s\S]*?)\}\s*\)\s*;/g)) {
+      const sketchId = (m[2].match(/"entities"\s*:\s*qSketchRegion\s*\(\s*id\s*\+\s*"(\w+)"/) || [])[1];
+      let axis = (m[2].match(/"axis"\s*:\s*([^\n]+?)\s*,?\s*\n/) || [])[1] || "";
+      axis = lineVars[axis.trim()] || axis;
+      const sketch = sketchOf[sketchId];
+      if (!sketch) continue;
+      const point = (axis.match(/^line\s*\(\s*([^,]+?)\s*,/) || [])[1];
+      if (point !== `${sketch.planeVar}.origin`) continue;
+      const centered = calls.filter(c => c.sketch === sketch.sketchVar && c.fn === "skCircle").some(c => {
+        const center = evaluatePoint(mapEntry(c.map, "center") || "", env);
+        return center && Math.hypot(center.x, center.y) < 1e-6;
+      });
+      if (centered) {
+        issues.push({
+          line: lineOf(text, m.index),
+          message: `Revolve "${m[1]}": the axis goes through the center of the circle it revolves (axis point ${point}), so the profile crosses the axis and Onshape fails with REVOLVE_FAILED. Place the circle beside the axis: center it at vector(ringRadius, 0) and keep the axis at the sketch origin, or use an extruded ring instead.`,
+          text: `opRevolve(context, id + "${m[1]}", ...)`,
+        });
+      }
+    }
+  }
+
   for (const crossing of revolveCrossings(text)) {
     issues.push({
       line: lineOf(text, crossing.at),
@@ -477,6 +507,31 @@ export function checkFeatureScriptGeometry(code) {
       line: lineOf(text, sweep.plane.at),
       message: `The sweep profile plane "${sweep.planeVar}" faces along ${sweep.plane.normal}, but the path starts in direction (${dir}) of the sketch plane, so the profile lies along the path instead of across it and opSweep fails. Make the profile plane's normal the path's start direction${sweep.fixText ? ` (${sweep.fixText})` : ""}.`,
       text: sweep.plane.text.trim(),
+    });
+  }
+
+  // Syntax and functions FeatureScript does not have (real Onshape errors from generated parts):
+  // "[for ...]" list comprehensions ("no viable alternative at input '[for'"), JS arrow
+  // functions and array methods, and invented ev* evaluators ("evFace ... not found").
+  for (const match of text.matchAll(/\[\s*for\s*\(/g)) {
+    issues.push({
+      line: lineOf(text, match.index),
+      message: `"[for (...) ...]" list syntax does not exist in FeatureScript (Onshape: "no viable alternative at input '[for'"). Build arrays with var list = []; for (var i = 0; i < n; i += 1) { list = append(list, value); }.`,
+      text: match[0],
+    });
+  }
+  for (const match of text.matchAll(/=>|\.(map|forEach|filter|reduce|push)\s*\(/g)) {
+    issues.push({
+      line: lineOf(text, match.index),
+      message: `"${match[0].trim()}" is JavaScript, not FeatureScript: there are no arrow functions or array methods. Use for loops, append(array, value) and size(array).`,
+      text: match[0],
+    });
+  }
+  for (const match of text.matchAll(/\b(evFace|evEdge|evBody|evPoint|evNormal|evCenter|evCentroid|evRadius|evSketchPlane|evFacePlane)\s*\(/g)) {
+    issues.push({
+      line: lineOf(text, match.index),
+      message: `${match[1]} does not exist in FeatureScript (Onshape: "Function ${match[1]} ... not found"). Use evPlane(context, { "face" : q }) for a planar face, evBox3d(context, { "topology" : q }) for extents, evVertexPoint(context, { "vertex" : q }) for a point, or compute positions from the parameters.`,
+      text: match[0],
     });
   }
 
