@@ -343,6 +343,8 @@ function sendToDebug() {
 const VERDICT_TEXT = {
   works_in_onshape: ['works', 'Works in Onshape', 'The feature ran in a real Onshape Part Studio with no errors.'],
   fails_in_onshape: ['fails', 'Fails in Onshape', 'Onshape reported errors when running this feature.'],
+  fails_test_build: ['fails', 'Fails the test build', 'A test build with the same rules as Onshape failed, so Onshape would fail too.'],
+  builds_locally: ['works', 'Builds in the test build', 'Built with its default values using the same rules as Onshape. The live Onshape check was not run.'],
   static_ok: ['unchecked', 'Passes the static validator', 'Live Onshape check not run'],
   static_errors: ['fails', 'Static validator found problems', 'Fix these before pasting into Onshape.'],
 };
@@ -366,6 +368,7 @@ function renderVerification(result) {
   box.append(titleEl, detailEl);
   const problems = [
     ...(result.onshape?.errors || []).map(e => `Onshape: ${e.message}`),
+    ...(result.local?.ok === false && result.local.error ? [`${result.local.line ? `Line ${result.local.line}: ` : ''}${result.local.error}`] : []),
     ...(result.static?.ok ? [] : (result.static?.issues || []).map(i => `${i.line ? `Line ${i.line}: ` : ''}${i.message}`)),
   ].slice(0, 8);
   if (problems.length) {

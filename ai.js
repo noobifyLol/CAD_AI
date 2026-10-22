@@ -5,6 +5,7 @@ import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
+import { localBuildFeatureScript } from "./localBuild.js";
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
 // llama-3.1-8b-instant and llama-3.3-70b-versatile are gone from Groq entirely as of
@@ -2652,9 +2653,6 @@ function _coreFeatureScriptSanitize(code) {
     // Remove "* inch" multiplied onto a parameter already declared with isLength —
     // those params already carry Length type; multiplying by inch doubles the units.
     .replace(/\b(definition\.\w+)\s*\*\s*inch\b/g, '$1')
-    // FeatureScript has no ++ or -- operators. Fix increment/decrement.
-    .replace(/\b(\w+)\s*\+\+\s*([;)\]])/g, '$1 += 1$2')
-    .replace(/\b(\w+)\s*--\s*([;)\]])/g, '$1 -= 1$2')
     // Strip type annotations from lambda parameters inside feature bodies.
     // "const f = function(x is number, y is map)" → "const f = function(x, y)"
     // This covers `is number`, `is vector`, `is map`, `is array`, `is boolean`, `is string`
@@ -2773,6 +2771,78 @@ function _coreFeatureScriptSanitize(code) {
  *
  * Note: keep transformations conservative and log every change for traceability.
  */
+// Apply a text transform only to code, never to // or /* */ comments or "string" literals
+// (a comment like "// Neck -------" is not a decrement operator). With dropOther, comments
+// and strings are replaced by a space instead of kept.
+function mapCodeOutsideCommentsAndStrings(code, transform, dropOther = false) {
+  const other = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g;
+  const text = String(code);
+  let out = "";
+  let last = 0;
+  for (const match of text.matchAll(other)) {
+    out += transform(text.slice(last, match.index)) + (dropOther ? " " : match[0]);
+    last = match.index + match[0].length;
+  }
+  return out + transform(text.slice(last));
+}
+
+// End index (exclusive) of the expression starting at `start`: stops at a top-level , or }.
+function mapValueEnd(text, start) {
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"') {
+      i = text.indexOf('"', i + 1);
+      if (i < 0) return text.length;
+    } else if ("([{".includes(ch)) depth += 1;
+    else if (")]}".includes(ch)) {
+      if (depth === 0) return i;
+      depth -= 1;
+    } else if (ch === "," && depth === 0) return i;
+  }
+  return text.length;
+}
+
+function mergeUnionTargetsIntoTools(code) {
+  return code.replace(/\bopBoolean\s*\(\s*context\s*,[^{]*\{([^;]*?)\}\s*\)\s*;/g, (call, body) => {
+    if (!/BooleanOperationType\.UNION\b/.test(body) || /"targetsAndToolsNeedGrouping"/.test(body)) return call;
+    const targetsKey = body.match(/"targets"\s*:\s*/);
+    if (!targetsKey) return call;
+    const targetsStart = targetsKey.index + targetsKey[0].length;
+    const targetsEnd = mapValueEnd(body, targetsStart);
+    const targets = body.slice(targetsStart, targetsEnd).trim();
+    // Remove the whole "targets" entry with one neighbouring comma.
+    let cutStart = targetsKey.index;
+    let cutEnd = targetsEnd;
+    if (body[cutEnd] === ",") cutEnd += 1;
+    else {
+      const comma = body.slice(0, cutStart).search(/,\s*$/);
+      if (comma >= 0) cutStart = comma;
+    }
+    let rest = body.slice(0, cutStart) + body.slice(cutEnd);
+    const toolsKey = rest.match(/"tools"\s*:\s*/);
+    if (!toolsKey) {
+      rest = rest.replace(/^(\s*)/, `$1"tools" : ${targets},\n`);
+    } else {
+      const toolsStart = toolsKey.index + toolsKey[0].length;
+      const toolsEnd = mapValueEnd(rest, toolsStart);
+      const tools = rest.slice(toolsStart, toolsEnd).trim();
+      const inner = value => (value.match(/^qUnion\s*\(\s*\[([\s\S]*)\]\s*\)$/) || [null, value])[1].trim();
+      rest = `${rest.slice(0, toolsStart)}qUnion([${inner(tools)}, ${inner(targets)}])${rest.slice(toolsEnd)}`;
+    }
+    return call.replace(body, rest);
+  });
+}
+
+// FeatureScript has no ++ or -- operators: i++ / ++i / i-- / --i become i += 1 / i -= 1.
+function fixIncrementOperators(code) {
+  return mapCodeOutsideCommentsAndStrings(code, part => part
+    .replace(/\b([A-Za-z_][\w.]*)\s*\+\+/g, "$1 += 1")
+    .replace(/\b([A-Za-z_][\w.]*)\s*--(?!-)/g, "$1 -= 1")
+    .replace(/(^|[^\w+])\+\+\s*([A-Za-z_][\w.]*)/g, "$1$2 += 1")
+    .replace(/(^|[^\w-])--\s*([A-Za-z_][\w.]*)/g, "$1$2 -= 1"));
+}
+
 function sanitizeFeatureScript(rawCode, opts = {}) {
   const arrFixedIndexMap = opts.arrFixedIndexMap || {}; // optional mapping for known arrays
   const changes = [];
@@ -2789,9 +2859,16 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   // Operator fixes: i++ / i-- (avoid FeatureScript parse errors)
   {
     const before = code;
-    code = code.replace(/\b([A-Za-z_]\w*)\s*\+\+\s*/g, "$1 += 1");
-    code = code.replace(/\b([A-Za-z_]\w*)\s*--\s*/g, "$1 -= 1");
+    code = fixIncrementOperators(code);
     if (code !== before) record("op_inc_dec_fix", before, code);
+  }
+
+  // opBoolean UNION ignores "targets" (Onshape merges only "tools"), so bodies listed there
+  // stay separate parts or the union has too few tools: merge targets into tools.
+  {
+    const before = code;
+    code = mergeUnionTargetsIntoTools(code);
+    if (code !== before) record("union_targets_into_tools", before, code);
   }
 
   // Hallucinated op-level "operationType": ExtrudeOperationType.CUT (and Revolve/Loft/...)
@@ -3137,10 +3214,8 @@ function sanitizeFeatureScriptOption2(rawCode, opts = {}) {
   // Normalize any remaining ++/-- and .length in a stricter pass
   {
     const before = code;
-    code = code
-      .replace(/\b([A-Za-z_]\w*)\s*\+\+\s*/g, "$1 += 1 ")
-      .replace(/\b([A-Za-z_]\w*)\s*--\s*/g, "$1 -= 1 ")
-      .replace(/\b([A-Za-z_]\w*)\.length\b/g, "size($1)");
+    code = mapCodeOutsideCommentsAndStrings(fixIncrementOperators(code), part => part
+      .replace(/\b([A-Za-z_]\w*)\.length\b/g, "size($1)"));
     record("option2_incdec_and_length_normalize", before, code);
   }
 
@@ -3705,7 +3780,7 @@ Every file MUST use this module shape. Helper functions/enums may be placed at m
 Pick the simplest tool that makes the shape. A compile-verified example is usually in DATABASE CONTEXT; follow its structure.
 SKETCH (2D, on newSketchOnPlane, coordinates are vector(u, v) * inch, end with skSolve(sk)):
 - skLineSegment(sk, "l1", { "start", "end" })   skArc(sk, "a1", { "start", "mid", "end" })  (3 points ON the arc)
-- skCircle(sk, "c1", { "center", "radius" })   skEllipse(sk, "e1", { "center", "xRadius", "yRadius" })
+- skCircle(sk, "c1", { "center", "radius" })   skEllipse(sk, "e1", { "center", "majorRadius", "minorRadius", "majorAxis": vector(1, 0) }) (minorRadius <= majorRadius)
 - skRectangle(sk, "r1", { "firstCorner", "secondCorner" })   skRegularPolygon(sk, "p1", { "center", "firstVertex", "sides" })
 - skFitSpline(sk, "s1", { "points" : [ ... ] })  (4-7 points for smooth organic curves)
   No skPolygon/skFillet/skOffset/skMirror/skPattern. Inner closed loops become holes with qSketchRegion(id + "sk", true).
@@ -6036,8 +6111,36 @@ export function validateFeatureScriptStrict(code, opts = {}) {
 // existing downstream consumer (repair gating, scoring, orchestration diagnostics) picks
 // them up automatically without needing its own awareness of Onshape. Fails open: a
 // misconfigured or unreachable Onshape check never blocks generation.
+function describeBuildChecks(strict) {
+  const parts = [];
+  if (strict.localBuild?.ok === true) {
+    const bodies = strict.localBuild.metrics?.bodies;
+    parts.push(`test-built locally${bodies ? `, ${bodies} part${bodies === 1 ? "" : "s"}` : ""}`);
+  }
+  if (strict.onshapeCheck?.ok === true) parts.push("Onshape-verified");
+  else if (strict.onshapeCheck?.attempted) parts.push("Onshape check unavailable");
+  return parts.length ? `, ${parts.join(", ")}` : "";
+}
+
 async function applyOnshapeCompileCheck(strict) {
-  if (!strict.ok || !isOnshapeConfigured()) return strict;
+  if (!strict.ok) return strict;
+
+  // Free local test build first (same verdicts as Onshape on every calibration part); only
+  // candidates that build locally spend an Onshape API call (education plans: 2,500/year).
+  const localBuild = await localBuildFeatureScript(strict.code);
+  if (localBuild.ok === false) {
+    const where = localBuild.line ? ` (line ${localBuild.line})` : "";
+    const extraFatal = [{ message: `Test build failed, as it would in Onshape: ${String(localBuild.error || "").split("\n")[0].slice(0, 300)}${where}`, source: "local_build" }];
+    return {
+      ...strict,
+      ok: false,
+      fatalIssues: [...strict.fatalIssues, ...extraFatal],
+      fatalIssueCount: strict.fatalIssueCount + extraFatal.length,
+      localBuild,
+    };
+  }
+  strict = { ...strict, localBuild };
+  if (!isOnshapeConfigured()) return strict;
 
   const onshapeCheck = await testCompileFeatureScript(strict.code);
   if (onshapeCheck.ok !== false) {
@@ -6128,7 +6231,7 @@ async function generateViaPlanCompiler(prompt, dims, learningContext, requestId)
       }
       const strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(compiled.code));
       if (strict.ok) {
-        console.log(`[AI] Plan compiler: verified candidate on attempt ${attempt + 1} (${plan.steps.length} steps${strict.onshapeCheck?.ok ? ", Onshape-verified" : ""}).`);
+        console.log(`[AI] Plan compiler: verified candidate on attempt ${attempt + 1} (${plan.steps.length} steps${describeBuildChecks(strict)}).`);
         return {
           candidateId: "plan_compiler",
           ok: true,
@@ -6266,10 +6369,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
 
       // Early exit: this candidate is fully clean
       if (strict.ok) {
-        const verified = strict.onshapeCheck?.ok === true
-          ? " (Onshape-verified)"
-          : strict.onshapeCheck?.attempted ? " (Onshape check unavailable)" : "";
-        console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}${verified}`);
+        console.log(`[AI] GTF loop: clean candidate on iteration ${iteration + 1}/${MAX_ITERATIONS}${describeBuildChecks(strict) ? ` (${describeBuildChecks(strict).slice(2)})` : ""}`);
         break;
       }
 
@@ -7024,7 +7124,7 @@ function validateFeatureScript(code) {
       addIssue(lineNo, "Avoid lambda return-type annotations here; use an untyped const lambda.", line);
     }
     // FS has no ++ or -- operators — causes "no viable alternative" parse error
-    if (/\b\w+\s*\+\+|\b\w+\s*--/.test(line) && !/\/\//.test(line.split('//')[0] || line)) {
+    if (/\+\+|--/.test(mapCodeOutsideCommentsAndStrings(line, part => part, true))) {
       addIssue(lineNo, "FeatureScript has no ++ or -- operators. Use += 1 or -= 1.", line);
     }
     // Lambda parameters inside feature body CANNOT be typed — strips silently in sanitize
@@ -7317,7 +7417,8 @@ export function hasFatalFeatureScriptPatterns(code) {
   }
 
   // 4) legacy cylinder creator usage that still needs normalization
-  if (/(?:opCylinder|fCylinder)\s*\(\s*[^,()]+,\s*[^,()]+,\s*[^({][^)]*\)/.test(code)) {
+  // (third argument not a map; [^\s({] so "\s*" can't backtrack onto the space before "{")
+  if (/(?:opCylinder|fCylinder)\s*\(\s*[^,()]+,\s*[^,()]+,\s*[^\s({][^)]*\)/.test(code)) {
     issues.push({ code: 'opCylinder_positional_args', message: 'Cylinder primitive used with positional args; convert to a definition map.' });
   }
 

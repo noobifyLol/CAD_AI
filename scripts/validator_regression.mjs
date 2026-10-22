@@ -147,5 +147,40 @@ expectFlagged('fake RevolveOperationType outside a map', STRICT_FEATURESCRIPT_TE
   expectFlagged('query names a sketch id that does not exist', vase.replace('qSketchRegion(id + "profileSketch")', 'qSketchRegion(id + "profileSketchX")'), ['no operation or sketch']);
 }
 
+// 9) False positives that rejected good candidates (2026-10-22 batch): dashes in comments
+//    were reported as the "--" operator, fCylinder with a map was reported as positional
+//    args. i++ / ++i must still be repaired, and comments/strings must stay untouched.
+{
+  const { readFileSync } = await import('node:fs');
+  const vase = readFileSync(new URL('../data/fs_examples/revolved_vase.fs', import.meta.url), 'utf8');
+  const marker = 'skSolve(profileSketch);';
+  const extras = '\n        // Neck ----------------\n        var label = "Wall -- inner";\n        var n = 0;\n        n++;\n        ++n;\n'
+    + '        fCylinder(context, id + "peg", { "bottomCenter" : vector(0, 0, 0) * inch, "topCenter" : vector(0, 0, 1) * inch, "radius" : 0.1 * inch });\n';
+  const code = vase.replace(marker, marker + extras);
+  expectClean('dashes in comments and fCylinder with a map are not errors', code);
+  const strict = validateFeatureScriptStrict(code);
+  const ok = code !== vase && strict.code.includes('// Neck ----------------') && strict.code.includes('"Wall -- inner"')
+    && !/\+\+/.test(strict.code.replace(/\/\/.*$/gm, ''));
+  if (ok) console.log('PASS (repaired) i++ / ++i fixed, comments and strings untouched');
+  else { failures += 1; console.log('FAIL i++ / ++i repair or comment/string damage'); }
+}
+
+// 10) opBoolean UNION ignores "targets" in Onshape: they must be merged into "tools".
+{
+  const { readFileSync } = await import('node:fs');
+  const vase = readFileSync(new URL('../data/fs_examples/revolved_vase.fs', import.meta.url), 'utf8');
+  const marker = 'skSolve(profileSketch);';
+  const extras = '\n        fCuboid(context, id + "a", { "corner1" : vector(0, 0, 0) * inch, "corner2" : vector(1, 1, 1) * inch });\n'
+    + '        fCuboid(context, id + "b", { "corner1" : vector(0.5, 0, 0) * inch, "corner2" : vector(2, 1, 1) * inch });\n'
+    + '        opBoolean(context, id + "join", {\n            "tools" : qCreatedBy(id + "b", EntityType.BODY),\n'
+    + '            "operationType" : BooleanOperationType.UNION,\n            "targets" : qCreatedBy(id + "a", EntityType.BODY)\n        });\n';
+  const strict = validateFeatureScriptStrict(vase.replace(marker, marker + extras));
+  const call = strict.code.slice(strict.code.indexOf('opBoolean(context, id + "join"'));
+  const fixed = /"tools"\s*:\s*qUnion\(\[qCreatedBy\(id \+ "b", EntityType\.BODY\), qCreatedBy\(id \+ "a", EntityType\.BODY\)\]\)/.test(call)
+    && !/"targets"/.test(call.slice(0, call.indexOf(');')));
+  if (fixed) console.log('PASS (repaired) UNION targets merged into tools');
+  else { failures += 1; console.log('FAIL (should be repaired) UNION targets'); }
+}
+
 console.log(failures === 0 ? '\nALL VALIDATOR CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

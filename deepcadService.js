@@ -12,6 +12,7 @@ import { compileCadSequenceToFeatureScript } from "./deepcadCompiler.js";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { validateFeatureScriptStrict } from "./ai.js";
 import { libraryInfo, matchLibraryPart } from "./deepcadLibrary.js";
+import { localBuildFeatureScript } from "./localBuild.js";
 
 const MODEL_URL = String(process.env.DEEPCAD_MODEL_URL || "").trim().replace(/\/+$/, "");
 const MODEL_TOKEN = String(process.env.DEEPCAD_MODEL_TOKEN || "").trim();
@@ -259,7 +260,8 @@ async function fetchModelSequence(prompt, wakeBudgetMs = MODEL_WAKE_BUDGET_MS) {
 
 /**
  * Static validator + (optional) live Onshape execution.
- * verdict: "works_in_onshape" | "fails_in_onshape" | "static_ok" (Onshape not checked) | "static_errors"
+ * verdict: "works_in_onshape" | "fails_in_onshape" | "fails_test_build" | "builds_locally" (local test build
+ * passed, Onshape not checked) | "static_ok" (nothing built) | "static_errors"
  */
 export async function verifyFeatureScript(code) {
   const strict = validateFeatureScriptStrict(code);
@@ -270,7 +272,18 @@ export async function verifyFeatureScript(code) {
       line: issue.line ?? issue.lineNo ?? null,
     })),
   };
-  const onshape = await testCompileFeatureScript(code);
+  // Free local test build first; the Onshape API (limited calls per year) only for local passes.
+  const local = await localBuildFeatureScript(code);
+  const localResult = {
+    attempted: local.attempted,
+    ok: local.ok,
+    error: local.error || null,
+    line: local.line || null,
+    metrics: local.metrics || null,
+  };
+  const onshape = local.ok === false
+    ? { attempted: false, ok: null, errors: [], skippedReason: "Skipped: the local test build already failed." }
+    : await testCompileFeatureScript(code);
   const onshapeResult = {
     attempted: onshape.attempted,
     ok: onshape.ok,
@@ -281,8 +294,10 @@ export async function verifyFeatureScript(code) {
   let verdict;
   if (onshapeResult.ok === true) verdict = "works_in_onshape";
   else if (onshapeResult.ok === false) verdict = "fails_in_onshape";
+  else if (localResult.ok === false) verdict = "fails_test_build";
+  else if (localResult.ok === true) verdict = "builds_locally";
   else verdict = staticResult.ok ? "static_ok" : "static_errors";
-  return { verdict, static: staticResult, onshape: onshapeResult };
+  return { verdict, static: staticResult, local: localResult, onshape: onshapeResult };
 }
 
 /**

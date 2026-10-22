@@ -151,6 +151,32 @@ python scripts/build_submission_pdf.py --author "Your Name"
 | `npm run test:e2e -- "prompt"` | Full pipeline against real Groq keys; prints generation mode, validation status, and the code |
 | `npm run test:guaranteed` | Checks the deterministic fallback produces valid FeatureScript |
 
+### Local test build (free, no Onshape API calls)
+
+Every candidate the AI writes is test-built on this computer before it is accepted, using the
+FS-Lite FeatureScript interpreter and OpenCascade builder from
+[onshape-fsgen](https://github.com/Lucasfrit/onshape-fsgen) (MIT). It agreed with real Onshape on
+17 of 17 calibration parts (syntax errors, "Cannot resolve entities", failed revolves and missing
+functions included). A failed build is fed back to the AI with its error and line, and the Onshape
+API check (limited calls per year) only runs for candidates that already build locally.
+
+One-time setup (Python 3.12):
+
+```bash
+git clone https://github.com/Lucasfrit/onshape-fsgen .fsgen/onshape-fsgen
+python -m venv .fsgen/venv
+.fsgen/venv/Scripts/python -m pip install build123d matplotlib
+```
+
+(On macOS/Linux the interpreter is `.fsgen/venv/bin/python`.) Check a file by hand, optionally
+saving a 4-view picture of the part:
+
+```bash
+.fsgen/venv/Scripts/python scripts/local_build.py --png out part.fs
+```
+
+If `.fsgen` is missing (for example on Render) the step is skipped. `LOCAL_BUILD_CHECK=0` turns it off.
+
 ## Adding knowledge (the main way to improve output quality)
 
 1. Write a new example in `data/fs_examples/<name>.fs`: a complete FeatureScript

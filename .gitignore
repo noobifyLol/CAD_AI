@@ -37,3 +37,6 @@ __pycache__/
 
 # Local Text2CAD runtime (venv + source + model cache) for testing hf_space/ without Docker
 .text2cad/
+
+# Local FeatureScript test engine (onshape-fsgen fslite, MIT) used to test-build parts without Onshape API calls
+.fsgen/
