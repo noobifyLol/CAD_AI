@@ -107,7 +107,7 @@ function countedNouns(text) {
  * sentence ("A wall shelf bracket with ..." -> bracket; "The object is a curved, L-shaped
  * bracket with two holes" -> bracket). Shape adjectives at the end are skipped.
  */
-function headNoun(text) {
+export function headNoun(text) {
   const firstSentence = String(text || "").toLowerCase().split(/[.;]/)[0];
   const first = firstSentence.split(/\b(?:with|for|that|which|having|where|made|in|on|at|of|and|featuring|consisting)\b/)[0];
   const tokens = tokenize(first).filter(token => !/^(shaped|like|style|type)$/.test(token));

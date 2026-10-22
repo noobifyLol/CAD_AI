@@ -6,6 +6,7 @@ import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.j
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
+import { headNoun } from "./deepcadLibrary.js";
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
 // llama-3.1-8b-instant and llama-3.3-70b-versatile are gone from Groq entirely as of
@@ -5616,6 +5617,14 @@ ${fsRect("baseSketch", "boxProfile", "-halfW", "-halfH", "halfW", "halfH")}
   };
 }
 
+const OBJECT_SYNONYMS = [["mug", "cup"], ["bracket", "mount"], ["disc", "disk", "rotor"], ["rim", "wheel"], ["plate", "panel"], ["housing", "enclosure", "case"], ["nut", "lugnut"]];
+function sameObjectKind(prompt, title) {
+  const a = headNoun(prompt);
+  const b = headNoun(title);
+  if (!a || !b) return false;
+  return a === b || OBJECT_SYNONYMS.some(group => group.includes(a) && group.includes(b));
+}
+
 export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {}, retrieval = null, decomposition = null) {
   // Best worst-case first: if a compile-verified curated example matches the prompt,
   // return THAT instead of a generic primitive. A quota-starved "create a pen" then
@@ -5623,7 +5632,10 @@ export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {},
   // "Pen" — every example in data/fs_examples has passed the real Onshape compiler.
   // minScore 2 = at least one word the user actually typed must match the example;
   // an inferred-shape-only match (score 1) is too weak to substitute a whole design.
-  const matchedExamples = dims?.shape === "GEAR_SPUR" ? [] : selectFsExamplesForPrompt(prompt, dims, 1, 2);
+  // The example must be the same kind of object (2026-10-22 batch: "cable clip" returned the
+  // pen-with-clip example, "soap dish" a mounting plate, "bottle cap" a bottle).
+  const matchedExamples = dims?.shape === "GEAR_SPUR" ? [] : selectFsExamplesForPrompt(prompt, dims, 1, 2)
+    .filter(example => sameObjectKind(prompt, example.title));
   if (matchedExamples.length) {
     const example = matchedExamples[0];
     const strictExample = validateFeatureScriptStrict(example.content);
@@ -5844,10 +5856,12 @@ INSTRUCTIONS:
 - Return only JSON with featureName, featureLabel, reasoning, and code fields
 - Never block — always produce valid, working code even if simplified`;
 
+    // Same prompt budget as the GTF loop (unbudgeted, this 413'd at ~7500 tokens).
+    const fitted = fitGenerationMessages(withLearningContext(buildSystemPromptForRequest(prompt), learningContext), recoveryPrompt);
     const raw = await chat(
       [
-        { role: "system", content: withLearningContext(buildSystemPromptForRequest(prompt), learningContext) },
-        { role: "user", content: recoveryPrompt }
+        { role: "system", content: fitted.system },
+        { role: "user", content: fitted.user }
       ],
       selectCodeGenerationModel(),
       codeGenerationFallbackModels(selectCodeGenerationModel()),
@@ -6111,6 +6125,35 @@ export function validateFeatureScriptStrict(code, opts = {}) {
 // existing downstream consumer (repair gating, scoring, orchestration diagnostics) picks
 // them up automatically without needing its own awareness of Onshape. Fails open: a
 // misconfigured or unreachable Onshape check never blocks generation.
+// A single object (mug, stand, bracket) that the test build shows as several separate
+// solids has pieces floating apart or never merged. Requests for several parts are exempt.
+function looseBodiesFeedback(prompt, strict) {
+  const bodies = strict.localBuild?.metrics?.bodies;
+  if (!bodies || bodies <= 1) return null;
+  if (/(sets?|pairs?|kits?|assembl(y|ies)|parts|pieces|bodies|separate|mechs?|humanoid|android)|and (a|an|two|three|four|its)|(two|three|four|five|six|d+) (gears|wheels|blocks|cubes|plates)/i.test(prompt)) return null;
+  return `The test build made ${bodies} separate solid bodies, but a "${String(prompt).slice(0, 80)}" is one object. `
+    + "Pieces that should be attached are floating apart or were never merged: make each attached piece overlap the main body "
+    + "(e.g. a handle's ends sink into the wall, a base touches the upright), then merge everything with one opBoolean UNION whose "
+    + "\"tools\" is qUnion([...every body id...]). Keep everything else the same.";
+}
+
+// Short fix-it hints for the test-build errors models make most often.
+function localBuildHint(error) {
+  if (/units differ|cannot (add|subtract|compare)[^:]*\b(mm|inch|meter)/i.test(error)) {
+    return ". Every length must carry units: write plain numbers as lengths (2 * inch, 5 * millimeter) or use definition.* parameters; never add a bare number to a length.";
+  }
+  if (/string and number|number and string/i.test(error)) {
+    return '. Join text with ~ not +: id + ("tooth" ~ i), never id + "tooth" + i.';
+  }
+  if (/undefined (variable|name|function)|is not defined|unknown (function|name)/i.test(error)) {
+    return ". Use only functions from the ONSHAPE TOOL REFERENCE and declare every variable before use.";
+  }
+  if (/resolve|empty query|no entities/i.test(error)) {
+    return ". The query selected nothing: query bodies by the id of the operation that created them, and make sure each sketch region is closed.";
+  }
+  return "";
+}
+
 function describeBuildChecks(strict) {
   const parts = [];
   if (strict.localBuild?.ok === true) {
@@ -6129,8 +6172,10 @@ async function applyOnshapeCompileCheck(strict) {
   // candidates that build locally spend an Onshape API call (education plans: 2,500/year).
   const localBuild = await localBuildFeatureScript(strict.code);
   if (localBuild.ok === false) {
-    const where = localBuild.line ? ` (line ${localBuild.line})` : "";
-    const extraFatal = [{ message: `Test build failed, as it would in Onshape: ${String(localBuild.error || "").split("\n")[0].slice(0, 300)}${where}`, source: "local_build" }];
+    const error = String(localBuild.error || "").split("\n")[0].slice(0, 300);
+    const sourceLine = localBuild.line ? String(strict.code.split("\n")[localBuild.line - 1] || "").trim().slice(0, 200) : "";
+    const where = sourceLine ? ` in this line: ${sourceLine}` : "";
+    const extraFatal = [{ message: `Test build failed, as it would in Onshape: ${error}${where}${localBuildHint(error)}`, source: "local_build" }];
     return {
       ...strict,
       ok: false,
@@ -6360,11 +6405,24 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         fatalIssues: strict.fatalIssues,
         strict,
         iteration,
+        looseBodies: strict.ok ? looseBodiesFeedback(prompt, strict) : null,
       };
 
-      // Track the best candidate seen across all iterations
-      if (!bestCandidate || candidate.score > bestCandidate.score) {
+      // Track the best candidate seen across all iterations: clean first, then one
+      // connected solid over loose pieces, then score.
+      const rank = c => [c.ok ? 1 : 0, c.looseBodies ? 0 : 1, c.score];
+      const better = (a, b) => { const ra = rank(a), rb = rank(b); for (let k = 0; k < ra.length; k += 1) if (ra[k] !== rb[k]) return ra[k] > rb[k]; return false; };
+      if (!bestCandidate || better(candidate, bestCandidate)) {
         bestCandidate = candidate;
+      }
+
+      // Builds, but as several loose pieces: one more attempt to connect them (the
+      // working version stays as the fallback).
+      if (strict.ok && candidate.looseBodies && iteration < MAX_ITERATIONS - 1) {
+        priorIssues = [{ message: candidate.looseBodies }];
+        console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: builds but as ${strict.localBuild.metrics.bodies} separate pieces; asking to connect them`);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        continue;
       }
 
       // Early exit: this candidate is fully clean
