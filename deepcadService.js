@@ -174,7 +174,8 @@ export function findMissingFeatures(prompt, sequence) {
   const impliesHole = /\b(holes?|bore|opening|inner diameter|hollow|nut|washer|tube|pipe|collar|bushing|spacer)\b/.test(text);
   const wantedHoles = holes ? Number(holes[1]) || NUMBER_WORDS[holes[1]] : impliesHole ? 1 : 0;
   // An explicit count must match exactly ("two holes" with four is wrong too).
-  if (holes && holeLike !== wantedHoles) missing.push(`asked for ${wantedHoles} hole${wantedHoles > 1 ? "s" : ""}, model made ${holeLike}`);
+  const centerBoreOk = /\b(flange|wheel|pulley|gear|hub|disc|disk|plate|ring|washer|rotor|sprocket|coupling)\b/.test(text) && holeLike === wantedHoles + 1;
+  if (holes && holeLike !== wantedHoles && !centerBoreOk) missing.push(`asked for ${wantedHoles} hole${wantedHoles > 1 ? "s" : ""}, model made ${holeLike}`);
   else if (!holes && wantedHoles && holeLike < wantedHoles) missing.push(`asked for a hole, model made none`);
   if (/\b(slots?|cut-?outs?|pockets?|recess(es)?|notch(es)?|window)\b/.test(text) && !holes && !impliesHole && holeLike === 0) {
     missing.push("asked for a slot/cutout/pocket, model cut nothing");

@@ -70,7 +70,7 @@ export function libraryInfo() {
   return { available: existsSync(INDEX_FILE) && existsSync(SHAPES_FILE), parts: index ? index.parts.length : null };
 }
 
-function readSequence(part) {
+export function readSequence(part) {
   const buffer = Buffer.alloc(part.len);
   const fd = openSync(SHAPES_FILE, "r");
   try {
@@ -84,6 +84,12 @@ function readSequence(part) {
 const COUNT_WORDS = { one: 1, single: 1, two: 2, pair: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12 };
 
 /** "four bolt holes" -> Map { "hole" => 4 } (count before a noun, up to two words apart). */
+// Words that sit between a count and its noun ("three radial spokes", "four evenly spaced holes").
+const COUNT_ADJECTIVES = new Set(["evenly", "spaced", "equally", "small", "large", "circular", "round", "bolt", "screw",
+  "mounting", "radial", "straight", "curved", "thin", "thick", "short", "long", "flat", "raised", "rectangular", "square",
+  "triangular", "cylindrical", "hexagonal", "identical", "parallel", "vertical", "horizontal", "symmetrical", "outer",
+  "inner", "protruding", "rounded", "smaller", "larger", "equal", "similar", "distinct", "separate", "additional", "lug"]);
+
 function countedNouns(text) {
   const counts = new Map();
   const words = String(text || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/);
@@ -93,7 +99,7 @@ function countedNouns(text) {
     for (const next of words.slice(i + 1, i + 4)) {
       if (/^(mm|cm|in|inch|inches|ft)$/.test(next)) return; // a size, not a count
       const noun = stem(next);
-      if (!STOPWORDS.has(next) && /^[a-z]{3,}$/.test(next) && !["evenly", "spaced", "equally", "small", "large", "circular", "round", "bolt", "screw", "mounting"].includes(next)) {
+      if (!STOPWORDS.has(next) && /^[a-z]{3,}$/.test(next) && !COUNT_ADJECTIVES.has(next)) {
         counts.set(noun, value);
         return;
       }
@@ -157,9 +163,29 @@ export function searchLibrary(prompt, k = 12) {
  * Best library part that covers the prompt and passes `accept(sequence)` (the caller's
  * missing-feature check). Returns { part, sequence, score, coverage } or null.
  */
+// Geometry words: if the prompt asks for one, the part's description must have it too.
+// (Use-context words such as "coat", "cable", "pipe" or "desk" never appear in the
+// dataset's geometric descriptions, so they are not required.)
+const FEATURE_WORDS = new Set(["hole", "teeth", "tooth", "slot", "compartment", "spoke", "prong", "groove", "boss", "rib",
+  "fin", "notch", "keyway", "thread", "tab", "leg", "step", "channel", "cutout", "recess", "pocket", "flange", "hub",
+  "arm", "post", "peg", "lip", "rim", "dome", "taper", "chamfer", "fillet", "hexagonal", "hex", "square", "round", "circular",
+  "triangular", "curved", "l", "u", "t", "s", "z"]);
+const FEATURE_ALIASES = { hex: "hexagonal", round: "circular" };
+const MIN_HEAD_COVERAGE = Number(process.env.DEEPCAD_LIBRARY_MIN_HEAD_COVERAGE || 0.25);
+
+function featureWordsCovered(prompt, part) {
+  const words = tokenize(String(prompt).replace(/\b([lutsz])-shaped\b/gi, "$1shaped")).filter(token => FEATURE_WORDS.has(token));
+  const have = new Set([...Object.keys(part.termCounts), ...tokenize(String(part.name).replace(/\b([lutsz])-shaped\b/gi, "$1shaped"))]);
+  return words.every(word => have.has(word) || have.has(FEATURE_ALIASES[word]) || (word === "teeth" && have.has("tooth")) || (word === "tooth" && have.has("teeth")));
+}
+
 export function matchLibraryPart(prompt, accept = () => true) {
+  const headMatched = Boolean(headNoun(prompt));
   for (const candidate of searchLibrary(prompt)) {
-    if (candidate.coverage < MIN_COVERAGE) break; // sorted by coverage: nothing better follows
+    // With the object noun already matched (searchLibrary requires it), only the requested
+    // geometry features must be described; without it, most of the prompt must be covered.
+    if (candidate.coverage < (headMatched ? MIN_HEAD_COVERAGE : MIN_COVERAGE)) break; // sorted by coverage
+    if (headMatched && !featureWordsCovered(prompt, candidate.part)) continue;
     const sequence = readSequence(candidate.part);
     if (!accept(sequence)) continue;
     return { part: candidate.part, sequence, score: candidate.score, coverage: candidate.coverage };

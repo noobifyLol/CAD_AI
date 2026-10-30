@@ -11,10 +11,16 @@ import { deflateRawSync, gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { compileCadSequenceToFeatureScript } from '../../deepcadCompiler.js';
+import { headNoun } from '../../deepcadLibrary.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DATA = path.join(ROOT, '.text2cad', 'data');
 const LIBRARY_LIMIT = Number(process.env.DEEPCAD_LIBRARY_LIMIT || 12000);
+const NAMED_LIMIT = Number(process.env.DEEPCAD_LIBRARY_NAMED_LIMIT || 30000);
+// Descriptions whose main noun is only a shape word, not an object someone would ask for.
+const GENERIC_HEADS = new Set(['object', 'block', 'prism', 'cube', 'cylinder', 'shape', 'model', 'structure', 'component',
+  'solid', 'piece', 'part', 'design', 'body', 'form', 'element', 'section', 'segment', 'surface', 'geometry', 'feature',
+  'unit', 'item', 'thing', 'assembly', 'construction', 'configuration', 'arrangement', 'cad', 'one', 'top', 'bottom', 'side', 'end']);
 
 async function* lines(file) {
   const reader = createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity });
@@ -76,7 +82,16 @@ async function select() {
     }
   }
   // Keep the most common descriptions (well-represented shapes) up to the limit.
-  const chosen = [...groups.values()].sort((a, b) => b.count - a.count).slice(0, LIBRARY_LIMIT);
+  // The most common descriptions (well-represented shapes) up to the limit, plus every
+  // description that names a real object (pulley, clip, hook, knob, ...), even if rare:
+  // those are what people type, and they used to be cut off by the limit.
+  const ranked = [...groups.values()].sort((a, b) => b.count - a.count);
+  const named = ranked.slice(LIBRARY_LIMIT).filter(group => {
+    const head = headNoun(group.best.abstract);
+    return head && !GENERIC_HEADS.has(head);
+  }).slice(0, NAMED_LIMIT);
+  const chosen = [...ranked.slice(0, LIBRARY_LIMIT), ...named];
+  console.log(`kept ${Math.min(LIBRARY_LIMIT, ranked.length)} common descriptions + ${named.length} rarer named objects`);
   // Two files so the server stays small (Render's free tier has 512 MB): a compact search
   // index loaded into memory, and a blob of individually compressed sequences that is read
   // from disk (by byte offset) only for the part that matches.
