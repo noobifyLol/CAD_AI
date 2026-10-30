@@ -132,6 +132,11 @@ def build(source, name, png_dir=None):
         if not out["metrics"].get("bodies"):
             out["ok"] = False
             out["error"] = "the feature ran but produced no solid body"
+        elif (out["metrics"].get("volume_mm3") or 0) < 1e-3:
+            # FS-Lite can return a flat, zero-volume body where Onshape fails, e.g. a revolve
+            # about the sketch normal ("Revolved face is perpendicular to axis").
+            out["ok"] = False
+            out["error"] = "the feature produced a flat body with no volume (a revolve axis perpendicular to its sketch, or a zero-depth extrude); Onshape fails on this"
         elif png_dir:
             try:
                 out["png"] = str(render_png(result, pathlib.Path(png_dir) / (pathlib.Path(name).stem + ".png"), name))

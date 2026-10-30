@@ -185,5 +185,44 @@ expectFlagged('fake RevolveOperationType outside a map', STRICT_FEATURESCRIPT_TE
   else { failures += 1; console.log('FAIL (should be repaired) UNION targets'); }
 }
 
+// 11) Revolve about the sketch normal (user's "Simple Cone": Onshape "Revolved face is
+//     perpendicular to axis"): flagged by the geometry check and rewritten to the in-plane y axis.
+{
+  const cone = `FeatureScript 2931;
+import(path : "onshape/std/geometry.fs", version : "2931.0");
+
+annotation { "Feature Type Name" : "Simple Cone" }
+export const simpleCone = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
+        definition.location is Query;
+        annotation { "Name" : "Base Radius" }
+        isLength(definition.baseRadius, { (inch) : [0.1, 1, 10] } as LengthBoundSpec);
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.1, 2, 20] } as LengthBoundSpec);
+    }
+    {
+        var skPlane = isQueryEmpty(context, definition.location) ? plane(vector(0, 0, 0) * inch, vector(0, 0, 1), vector(1, 0, 0)) : evPlane(context, { "face" : definition.location });
+        var sk = newSketchOnPlane(context, id + "sk", { "sketchPlane" : skPlane });
+        skLineSegment(sk, "base", { "start" : vector(0, 0) * inch, "end" : vector(definition.baseRadius / inch, 0) * inch });
+        skLineSegment(sk, "slant", { "start" : vector(definition.baseRadius / inch, 0) * inch, "end" : vector(0, definition.height / inch) * inch });
+        skLineSegment(sk, "axisLine", { "start" : vector(0, definition.height / inch) * inch, "end" : vector(0, 0) * inch });
+        skSolve(sk);
+        opRevolve(context, id + "revolve", {
+            "entities" : qSketchRegion(id + "sk"),
+            "axis" : line(skPlane.origin, skPlane.normal),
+            "angleForward" : 2 * PI * radian
+        });
+    });
+`;
+  const { checkFeatureScriptGeometry } = await import('../featureScriptGeometry.js');
+  const flagged = checkFeatureScriptGeometry(cone).some(issue => /perpendicular to axis/.test(issue.message));
+  const strict = validateFeatureScriptStrict(cone);
+  const fixed = strict.ok && strict.code.includes('line(skPlane.origin, cross(skPlane.normal, skPlane.x))');
+  if (flagged && fixed) console.log('PASS (repaired) revolve axis along the sketch normal');
+  else { failures += 1; console.log(`FAIL revolve axis along the sketch normal — flagged=${flagged} fixed=${fixed}`); }
+}
+
 console.log(failures === 0 ? '\nALL VALIDATOR CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -452,6 +452,49 @@ function inlineIdAliases(code) {
 }
 
 /** Issues in the validator's shape: { line, message, text }. */
+// Revolves whose axis direction is the profile sketch plane's normal. Onshape: "Revolved face is
+// perpendicular to axis" (a "Simple Cone" sketched on Top and revolved about Top's normal).
+function revolveAxesAlongNormal(text) {
+  const sketchPlane = {};
+  for (const m of text.matchAll(/\bnewSketchOnPlane\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{\s*"sketchPlane"\s*:\s*(\w+)\s*\}/g)) sketchPlane[m[1]] = m[2];
+  const lineVars = Object.fromEntries([...text.matchAll(/\bvar\s+(\w+)\s*=\s*(line\s*\([^;]+\))\s*;/g)].map(m => [m[1], { expr: m[2], at: m.index }]));
+  const found = [];
+  for (const m of text.matchAll(/\bopRevolve\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,\s*\{([\s\S]*?)\}\s*\)\s*;/g)) {
+    const sketchId = (m[2].match(/"entities"\s*:\s*qSketchRegion\s*\(\s*id\s*\+\s*"(\w+)"/) || [])[1];
+    const planeVar = sketchPlane[sketchId];
+    if (!planeVar) continue;
+    const axisRaw = ((m[2].match(/"axis"\s*:\s*([^\n]+?)\s*,?\s*(\n|$)/) || [])[1] || "").trim();
+    const axisExpr = lineVars[axisRaw]?.expr || axisRaw;
+    const direction = (axisExpr.match(/^line\s*\(\s*[^,]+?\s*,\s*(.+)\)\s*$/) || [])[1];
+    if (!direction) continue;
+    const normal = new RegExp(`^-?\\s*${planeVar}\\.normal(\\s*\\*\\s*-?[\\w.]+)?$`);
+    if (normal.test(direction.trim())) {
+      found.push({ revolveId: m[1], sketchId, planeVar, direction: direction.trim(), at: m.index, axisVar: lineVars[axisRaw] ? axisRaw : null });
+    }
+  }
+  return found;
+}
+
+/** Rewrites a revolve axis that points along the sketch normal to the sketch's own y axis. */
+export function autoFixRevolveAxisAlongNormal(code) {
+  let text = String(code || "");
+  for (const bad of revolveAxesAlongNormal(text).reverse()) {
+    const inPlane = `cross(${bad.planeVar}.normal, ${bad.planeVar}.x)`;
+    if (bad.axisVar) {
+      text = text.replace(new RegExp(`(\\bvar\\s+${bad.axisVar}\\s*=\\s*line\\s*\\([^,;]+?,\\s*)${escapeRegExp(bad.direction)}(\\s*\\))`), `$1${inPlane}$2`);
+    } else {
+      const head = text.slice(0, bad.at);
+      const tail = text.slice(bad.at).replace(new RegExp(`("axis"\\s*:\\s*line\\s*\\([^,\\n]+?,\\s*)${escapeRegExp(bad.direction)}(\\s*\\))`), `$1${inPlane}$2`);
+      text = head + tail;
+    }
+  }
+  return text;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function checkFeatureScriptGeometry(code) {
   const text = inlineIdAliases(String(code || ""));
   const issues = [];
@@ -491,6 +534,14 @@ export function checkFeatureScriptGeometry(code) {
         });
       }
     }
+  }
+
+  for (const bad of revolveAxesAlongNormal(text)) {
+    issues.push({
+      line: lineOf(text, bad.at),
+      message: `Revolve "${bad.revolveId}": the axis points along the sketch plane's normal (${bad.direction}), so it is perpendicular to the profile and Onshape fails with "Revolved face is perpendicular to axis". The axis must lie IN the sketch plane: use line(${bad.planeVar}.origin, cross(${bad.planeVar}.normal, ${bad.planeVar}.x)) (the sketch's vertical y axis) and draw the half-profile at x >= 0 with one edge on x = 0.`,
+      text: `opRevolve(context, id + "${bad.revolveId}", ...)`,
+    });
   }
 
   for (const crossing of revolveCrossings(text)) {

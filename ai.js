@@ -6,7 +6,7 @@ import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { simulateFeatureScript } from "./simulatorClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
-import { autoAlignSweepProfiles, autoCloseOpenProfiles, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
+import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFixRevolveAxisAlongNormal, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { headNoun } from "./deepcadLibrary.js";
 
@@ -3076,6 +3076,15 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
 
   // A region sketch missing exactly one segment (e.g. a revolve profile with no bottom
   // line) gets that segment added, so qSketchRegion finds the region.
+  // A revolve axis along the sketch normal ("Revolved face is perpendicular to axis"):
+  // turn it into the sketch's in-plane y axis.
+  try {
+    const before = code;
+    code = autoFixRevolveAxisAlongNormal(code);
+    if (code !== before) record("revolve_axis_in_sketch_plane", before, code);
+  } catch {
+    // keep the code; the geometry check still reports it
+  }
   try {
     const before = code;
     const result = autoCloseOpenProfiles(code);
