@@ -81,7 +81,7 @@ try {
   check('mode is deepcad_text2cad_model', gen.data.generationMode === 'deepcad_text2cad_model', gen.data.generationMode);
   check('verification attached and static validator passes', gen.data.verification?.static?.ok === true, JSON.stringify(gen.data.verification));
   check('Onshape check honestly reported as not run', Boolean(gen.data.verification?.onshape?.skippedReason));
-  if (process.env.FS_SIM_PYTHON) {
+  if (gen.data.verification?.simulation?.available) {
     // With the FeatureScript simulator installed, generated parts are executed and rendered.
     check('simulator builds the generated part', gen.data.verification?.verdict === 'works_in_simulator', gen.data.verification?.verdict);
     check('simulator returns a preview image', String(gen.data.verification?.simulation?.image || '').startsWith('data:image/png;base64,'));

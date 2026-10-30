@@ -17,7 +17,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const PYTHON = process.env.FS_SIM_PYTHON || "python3";
+// Default: the local test-build virtualenv (.fsgen/venv, see README) when present, since it
+// already has OCP, numpy and matplotlib; otherwise python3.
+const LOCAL_VENV_PYTHON = [join(ROOT, ".fsgen", "venv", "Scripts", "python.exe"), join(ROOT, ".fsgen", "venv", "bin", "python")]
+  .find(candidate => existsSync(candidate));
+const PYTHON = process.env.FS_SIM_PYTHON || LOCAL_VENV_PYTHON || "python3";
 const ENABLED = String(process.env.FS_SIM_ENABLED || "true").toLowerCase() !== "false";
 const TIMEOUT_MS = Number(process.env.FS_SIM_TIMEOUT_MS || 60000);
 const STD_DIR = process.env.FS_STD_DIR || join(ROOT, "fs_sim", "std");
