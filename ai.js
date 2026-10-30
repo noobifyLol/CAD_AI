@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+import { applyPromptToExample, promptDimsFallback, promptFeatureNames } from "./promptDimensions.js";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
@@ -293,8 +294,11 @@ function loadFsExampleLibrary() {
     }
   }
 
+  // Only manifest-listed files are vetted examples. Other .fs files in the folder
+  // (e.g. drafts) must never be injected into prompts or returned as a fallback.
+  const listed = Object.keys(manifest).length > 0;
   cachedFsExampleLibrary = readdirSync(FS_EXAMPLES_DIR)
-    .filter(fileName => fileName.endsWith(".fs"))
+    .filter(fileName => fileName.endsWith(".fs") && (!listed || manifest[fileName]))
     .map(fileName => {
       const fullPath = join(FS_EXAMPLES_DIR, fileName);
       const meta = manifest[fileName] || {};
@@ -321,20 +325,42 @@ function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1, minScore =
   // shape, so "create a pen" picks the pen example over a generic cylinder.
   const promptText = String(prompt || "").toLowerCase();
   const shapeText = String(dims.shape || "").toLowerCase().replace(/_/g, " ");
-  const scored = loadFsExampleLibrary()
+  const library = loadFsExampleLibrary();
+  // How many examples share a keyword: a keyword unique to one example ("torus")
+  // breaks a tie against a common one ("ring") without outweighing a real match.
+  const keywordSpread = new Map();
+  for (const example of library) {
+    for (const keyword of new Set(example.keywords)) keywordSpread.set(keyword, (keywordSpread.get(keyword) || 0) + 1);
+  }
+  const scored = library
     .map(example => {
       let score = 0;
+      let earliest = Infinity;
+      const countedWords = new Set(); // "hole" and "holes" must not both score "holes"
       for (const keyword of example.keywords) {
         if (!keyword) continue;
+        const rarity = 0.5 / (keywordSpread.get(keyword) || 1);
         if (keyword.includes(" ")) {
-          if (promptText.includes(keyword)) score += 4;
-          else if (shapeText.includes(keyword)) score += 1;
+          const at = promptText.indexOf(keyword);
+          if (at >= 0) {
+            score += 4 + rarity;
+            earliest = Math.min(earliest, at);
+          } else if (shapeText.includes(keyword)) score += 1;
           continue;
         }
-        const wordPattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-        if (wordPattern.test(promptText)) score += 2;
-        else if (wordPattern.test(shapeText)) score += 1;
+        // Allow simple inflections: knurl → knurling/knurled, spoke → spokes.
+        const wordPattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:s|es|ed|ing|ling)?\\b`);
+        const match = promptText.match(wordPattern);
+        if (match) {
+          if (countedWords.has(`${match.index}:${match[0]}`)) continue;
+          countedWords.add(`${match.index}:${match[0]}`);
+          score += 2 + rarity;
+          earliest = Math.min(earliest, match.index);
+        } else if (wordPattern.test(shapeText)) score += 1;
       }
+      // People name the object first ("a flange with bolt holes"): an earlier
+      // match breaks ties, but is worth less than one more matching word.
+      if (Number.isFinite(earliest)) score += 0.3 * (1 - earliest / Math.max(promptText.length, 1));
       return { example, score };
     })
     .filter(entry => entry.score >= Math.max(1, minScore))
@@ -3420,11 +3446,13 @@ async function extractDims(prompt, learningContext = {}, history = [], options =
     return d;
   } catch (err) {
     console.warn(`[AI] Dimension extraction fallback used: ${err.message}`);
+    // No LLM: read explicit sizes/counts from the prompt deterministically.
     return normalizeDims({
-      featureName:"customFeature", featureLabel:"Custom Feature", shape:"CUSTOM", confidence:"LOW",
-      widthInches:2, heightInches:2, depthInches:2, radiusInches:1,
+      ...promptFeatureNames(prompt), shape:"CUSTOM", confidence:"LOW",
+      widthInches:2, heightInches:2, depthInches:0.25, radiusInches:1,
       holeRadiusInches:0, filletRadiusInches:0, sides:6,
       wallThicknessInches:0.25, shaftLengthInches:4, holeSpacingInches:1.5, numHoles:4, numTeeth:20,
+      ...promptDimsFallback(prompt),
       parseFailed: true,
     });
   }
@@ -5638,11 +5666,19 @@ export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {},
     .filter(example => sameObjectKind(prompt, example.title));
   if (matchedExamples.length) {
     const example = matchedExamples[0];
-    const strictExample = validateFeatureScriptStrict(example.content);
+    // Put the sizes and counts the prompt asked for into the example's dialog
+    // defaults; keep the stock example if that would not validate.
+    const customized = applyPromptToExample(example.content, prompt);
+    const useCustomized = customized.applied.length > 0 && validateFeatureScriptStrict(customized.code).ok;
+    const exampleCode = useCustomized ? customized.code : example.content;
+    const strictExample = validateFeatureScriptStrict(exampleCode);
     if (strictExample.ok) {
-      const warning = `AI generation was unavailable, so the compile-verified "${example.title}" example was returned; edit its dialog parameters to fit your dimensions.`;
+      const fromPrompt = useCustomized ? customized.applied.filter(entry => entry.source === "prompt") : [];
+      const warning = fromPrompt.length
+        ? `AI generation was unavailable, so the compile-verified "${example.title}" example was returned with your sizes applied (${fromPrompt.map(entry => `${entry.name} = ${entry.value}`).join(", ")}${useCustomized && customized.applied.length > fromPrompt.length ? "; other sizes scaled to match" : ""}). Check the dialog parameters.`
+        : `AI generation was unavailable, so the compile-verified "${example.title}" example was returned; edit its dialog parameters to fit your dimensions.`;
       return {
-        code: example.content,
+        code: exampleCode,
         featureName: example.id.replace(/[^a-zA-Z0-9_]/g, ""),
         featureLabel: example.title,
         reasoning: `Returned the curated ${example.title} example as the guaranteed result. ${example.lesson || ""}`.trim(),
@@ -7553,7 +7589,7 @@ export async function debugFeatureScript(code, errors, options = {}) {
     return { fixed, explanation: parsed?.explanation || "Fixed." };
   } catch (err) {
     console.warn(`[AI] Debug fallback used: ${err.message}`);
-    return { fixed: sanitizedInput, explanation: `Debug assistant unavailable. Returned sanitized original code unchanged. Reason: ${err.message}` };
+    return { fixed: sanitizedInput, explanation: `Debug assistant unavailable. Returned sanitized original code unchanged. Reason: ${err.message}`, assistantUnavailable: true };
   }
 }
 
@@ -7697,9 +7733,11 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
   });
 
   let descRaw = "";
+  let visionUnavailable = false;
   try {
     descRaw = await callGroqVisionLLM([{ role: "user", content }], VISION_MODEL);
   } catch (err) {
+    visionUnavailable = true;
     console.warn(`[AI] Vision analysis fallback used: ${err.message}`);
     if (!String(extraPrompt || "").trim()) {
       descRaw = "Vision analysis unavailable. Falling back to a conservative placeholder interpretation of the uploaded reference images.";
@@ -7711,8 +7749,12 @@ Describe: part name and function, shape type, all visible dimensions in inches, 
   // Cap the description so the downstream generateFeatureScript calls stay within TPM limits.
   // Vision descriptions can be very long; 600 chars is plenty for dimension extraction.
   const descForGen = descRaw.length > 600 ? descRaw.slice(0, 600) + "…" : descRaw;
-  const combinedPrompt = extraPrompt ? `${extraPrompt}. From images: ${descForGen}` : descForGen;
+  // When vision failed, the description is only an error note: generate from the
+  // user's own words, so the error text cannot steer example or size selection.
+  const combinedPrompt = visionUnavailable
+    ? (String(extraPrompt || "").trim() || "a simple placeholder part")
+    : extraPrompt ? `${extraPrompt}. From images: ${descForGen}` : descForGen;
 
   const generated = await generateFeatureScript(combinedPrompt, options);
-  return { description: descRaw, ...generated };
+  return { description: descRaw, visionUnavailable, ...generated };
 }

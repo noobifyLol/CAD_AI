@@ -143,7 +143,7 @@
     {
       "file": "torus_ring.fs",
       "title": "Torus",
-      "keywords": ["torus", "donut", "doughnut", "o-ring", "bagel", "tube ring", "inner tube", "ring toroid"],
+      "keywords": ["torus", "donut", "doughnut", "o-ring", "bagel", "tube ring", "inner tube", "ring toroid", "torus ring", "toroid", "donut ring"],
       "operations": ["opRevolve"],
       "lesson": "A torus is a circle offset from (never touching) the revolve axis, revolved 360 degrees."
     },
@@ -157,7 +157,7 @@
     {
       "file": "knurled_knob.fs",
       "title": "Knurled Knob",
-      "keywords": ["knurled", "knurl", "grip", "textured knob", "fluted knob", "ridged dial", "grooved handle", "finger grip", "dial knob", "adjustment knob"],
+      "keywords": ["knurled", "knurl", "grip", "textured knob", "fluted knob", "ridged dial", "grooved handle", "finger grip", "dial knob", "adjustment knob", "knob", "knurling"],
       "operations": ["opExtrude", "opPattern", "rotationAround", "opBoolean SUBTRACTION"],
       "lesson": "Knurling is a thin radial groove tool circular-patterned with opPattern around the knob axis, then boolean-subtracted from the base cylinder (not unioned, since it removes material)."
     },

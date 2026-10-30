@@ -7,6 +7,7 @@ import {
   analyzeLearningOutcome,
   debugFeatureScript,
   generateFeatureScript,
+  validateFeatureScriptStrict,
   getModelConfig,
 } from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
@@ -66,6 +67,7 @@ function generationResponse(result, generationLog, learningContext, diagnostics 
     featureName: result.featureName,
     featureLabel: result.featureLabel,
     description: result.description,
+    visionUnavailable: Boolean(result.visionUnavailable),
     thinking: result.thinking,
     generationMode: result.generationMode,
     completionLevel: result.completionLevel,
@@ -351,7 +353,15 @@ app.post("/debug", async (req, res) => {
     // debugFeatureScript always returns a usable { fixed, explanation } — it has its
     // own internal fallback to the sanitized original code. A DB logging failure below
     // must not discard that and hand the caller a bare error instead of their fix.
-    const { fixed, explanation } = await debugFeatureScript(code, errors, { learningContext });
+    const { fixed, explanation, assistantUnavailable = false } = await debugFeatureScript(code, errors, { learningContext });
+    // Tell the page what actually happened: was the code changed, and does the
+    // result pass the strict validator (with its problems listed if not)?
+    const strict = validateFeatureScriptStrict(fixed);
+    const validation = {
+      ok: strict.ok,
+      issues: [...strict.fatalIssues, ...strict.blockingIssues].slice(0, 10).map(issue => ({ line: issue.line ?? null, message: issue.message })),
+    };
+    const changed = String(fixed).trim() !== code.trim();
 
     let debugLog = null;
     try {
@@ -373,7 +383,15 @@ app.post("/debug", async (req, res) => {
       console.error("[/debug] logging/feedback failed, returning fix anyway:", logErr.message);
     }
 
-    res.json({ fixed, explanation, createdAt: debugLog?.createdAt || new Date().toISOString(), database: debugLog });
+    res.json({
+      fixed,
+      explanation,
+      assistantUnavailable,
+      changed,
+      validation,
+      createdAt: debugLog?.createdAt || new Date().toISOString(),
+      database: debugLog,
+    });
   } catch (err) {
     console.error("[/debug]", err.message);
     res.status(500).json({ error: err.message });

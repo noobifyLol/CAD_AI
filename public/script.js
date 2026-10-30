@@ -574,15 +574,32 @@ async function debugCode() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Debug failed');
 
+    const issues = data.validation?.issues || [];
+    const issueText = issues.length
+      ? `\n\nThe validator found ${issues.length} problem${issues.length === 1 ? '' : 's'}:\n${issues.map(i => `• ${i.line ? `Line ${i.line}: ` : ''}${i.message}`).join('\n')}`
+      : '';
     const expEl = document.getElementById('debug-explanation');
-    expEl.textContent = data.explanation;
+    expEl.textContent = `${data.explanation || ''}${issueText}`;
     expEl.classList.add('show');
 
     setOutput('debug-output', data.fixed, 'debug-copy-btn');
-    setStatus('debug-status', `Fixed - ${databaseStatusText(data.database)}`, 'ok');
+    const valid = data.validation?.ok !== false;
+    let statusText;
+    let statusTone;
+    if (data.assistantUnavailable) {
+      statusText = `Debug assistant unavailable — code returned unchanged${issues.length ? `; ${issues.length} problem(s) listed below` : ''}`;
+      statusTone = 'error';
+    } else if (!data.changed) {
+      statusText = valid ? 'No changes needed — passes the validator' : 'No changes made — the validator still finds problems (see below)';
+      statusTone = valid ? 'ok' : 'error';
+    } else {
+      statusText = valid ? 'Fixed — passes the validator' : 'Changed, but the validator still finds problems (see below)';
+      statusTone = valid ? 'ok' : 'error';
+    }
+    setStatus('debug-status', `${statusText} - ${databaseStatusText(data.database)}`, statusTone);
     showRunModal({
-      title: 'Debug complete',
-      ok: true,
+      title: data.assistantUnavailable ? 'Debug assistant unavailable' : valid ? 'Debug complete' : 'Debug incomplete',
+      ok: !data.assistantUnavailable && valid,
       message: data.explanation || 'FeatureScript was analyzed and fixed.',
       createdAt: data.createdAt,
       database: data.database,
@@ -782,11 +799,20 @@ async function analyzeMultiImg() {
     updateAnalyzeDescription(data.description);
     setOutput('analyze-output', data.code, 'analyze-copy-btn', data.generationId);
     setThinking('analyze', data.thinking || '');
-    setStatus('analyze-status', `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`, 'ok');
+    const visionNote = data.visionUnavailable
+      ? (globalPrompt ? 'Image analysis is unavailable, so this was generated from your text only.' : 'Image analysis is unavailable, so this is only a placeholder part. Add a text description, or configure the vision model.')
+      : '';
+    setStatus(
+      'analyze-status',
+      data.visionUnavailable
+        ? `${visionNote} "${data.featureLabel}" - ${databaseStatusText(data.database)}`
+        : `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`,
+      data.visionUnavailable ? 'error' : 'ok',
+    );
     showRunModal({
-      title: 'Image generation complete',
-      ok: true,
-      message: `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
+      title: data.visionUnavailable ? 'Image analysis unavailable' : 'Image generation complete',
+      ok: !data.visionUnavailable,
+      message: data.visionUnavailable ? `${visionNote} Returned "${data.featureLabel}".` : `Generated "${data.featureLabel}". ${databaseStatusText(data.database)}.`,
       createdAt: data.createdAt,
       database: data.database,
       generationId: data.generationId,
@@ -832,7 +858,7 @@ let _authMode = 'login'; // 'login' | 'signup'
 function authInit() {
   const token = localStorage.getItem('cad_token');
   const username = localStorage.getItem('cad_username');
-  if (token && username) updateUserBar(username);
+  updateUserBar(token && username ? username : null);
 }
 
 function getAuthToken() { return localStorage.getItem('cad_token') || null; }

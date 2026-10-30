@@ -201,6 +201,13 @@ const jsonOutputPath = resolve(process.argv[3] || "data/cadDatasetSummaries.json
 const deepCadSamples = walkFiles(deepCadJsonRoot, 160, path => path.endsWith(".json"));
 const omniCaptionShards = walkFiles(omniTxtRoot, 20, path => path.endsWith(".json"));
 
+// Without the raw archives every row would describe 0 samples. Stop instead of
+// overwriting the committed summaries (which other scripts merge extra rows into).
+if (!deepCadSamples.length && !omniCaptionShards.length) {
+  console.error(`No raw dataset found (expected ${deepCadJsonRoot} or ${omniTxtRoot}). Leaving ${csvOutputPath} and ${jsonOutputPath} unchanged.`);
+  process.exit(1);
+}
+
 const deepCadSummary = summarizeDeepCadSamples(deepCadSamples);
 const omniSummary = summarizeOmniCaptions(omniCaptionShards);
 

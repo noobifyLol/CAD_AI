@@ -23,6 +23,9 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r model_service/requirements.txt
 ```
 
+On Mac/Linux use `./.venv/bin/python` instead of `./.venv/Scripts/python.exe`.
+`npm run model:serve` and `npm run model:deploy` pick the right one automatically.
+
 `transformers` is pinned to **4.51.3** on purpose: Qwen2-VL processor loading is
 broken in transformers 5.x. The model (~5 GB) downloads automatically on first run
 to your Hugging Face cache.

@@ -1,7 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hasFatalFeatureScriptPatterns, validateFeatureScript } from "../ai.js";
+import { hasFatalFeatureScriptPatterns, validateFeatureScriptStrict } from "../ai.js";
+
+// Blocking problems as a flat [{ line, message }] list (what the old validateFeatureScript returned).
+function validateFeatureScript(code) {
+  const strict = validateFeatureScriptStrict(code);
+  return [...strict.fatalIssues, ...strict.blockingIssues];
+}
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const LOG_DIR = join(ROOT, "logs");

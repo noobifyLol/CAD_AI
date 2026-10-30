@@ -14,10 +14,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npm run test:validator
-      - run: npm run test:plan
-      - run: npm run test:deepcad
-      - run: npm run test:deepcad-e2e
+      - run: npm test   # validator, plan compiler, no-AI fallback, DeepCAD compiler + e2e
       - name: Server boots and generates without API keys (fallback path)
         run: |
           PORT=10000 node server.js > server.log 2>&1 &

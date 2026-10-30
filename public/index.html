@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CAD AI Generator</title>
+<link rel="icon" href="data:,">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -555,18 +556,12 @@
          background: var(--code-bg); padding: 2px 6px; border-radius: 4px; color: #a0b8d8; }
 
   /* ── User bar ── */
+  /* Lives in the header, so it is always at the top right of the page. */
   #user-bar {
-    position: fixed;
-    z-index: 1500;
     display: flex;
-    gap: 12px;
-
-    background: rgba(13, 16, 17, 0.95);
-    padding: 8px 14px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    backdrop-filter: blur(4px);
-
+    align-items: center;
+    gap: 10px;
+    margin-left: 16px;
   }
 
   #user-bar-name {
@@ -596,13 +591,11 @@
     color: #fff;
   }
 
+  @media (max-width: 560px) {
+    .powered-by { display: none; }
+    #user-bar { margin-left: auto; gap: 8px; }
+  }
   @media (max-width: 480px) {
-    #user-bar {
-      top: 8px;
-      right: 8px;
-      padding: 6px 10px;
-      gap: 8px;
-    }
     #history-btn, #user-bar-btn {
       padding: 6px 12px;
       font-size: 0.78rem;
@@ -694,6 +687,11 @@
   <div class="logo-mark">fs</div>
   <h1>CAD <span>AI</span> Generator</h1>
   <span class="powered-by" id="powered-by-label">Groq text + Groq Vision</span>
+  <div id="user-bar">
+    <span id="user-bar-name"></span>
+    <button id="history-btn" onclick="openHistory()">History</button>
+    <button id="user-bar-btn" onclick="userBarClick()">Sign In</button>
+  </div>
 </header>
 
 <div class="container">
@@ -979,11 +977,6 @@
 </div>
 
 <!-- User status bar (top-right corner) -->
-<div id="user-bar">
-  <span id="user-bar-name"></span>
-  <button id="history-btn" onclick="openHistory()">History</button>
-  <button id="user-bar-btn" onclick="userBarClick()">Sign In</button>
-</div>
 
 <div id="copy-toast">✓ Copied to clipboard</div>
 

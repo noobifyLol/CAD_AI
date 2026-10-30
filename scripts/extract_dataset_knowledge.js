@@ -186,6 +186,13 @@ for (const filePath of deepFiles) {
 console.log(`[extract] DeepCAD sample: ${JSON.stringify(deepTotals)}`);
 
 // ── Write outputs ───────────────────────────────────────────────────────────
+// Without the raw archives there is nothing new to write. Bail out instead of
+// overwriting the committed retrieval files with empty results.
+if (!totalCaptions && !deepTotals.files) {
+  console.error(`[extract] No raw dataset found (expected ${OMNI_TXT_DIR} or ${DEEPCAD_JSON_DIR}). Leaving ${SUMMARY_PATH} and ${PAIRS_PATH} unchanged.`);
+  process.exit(1);
+}
+
 const bucketRows = BUCKETS.filter(b => bucketStats[b.key].count > 0).map(bucket => ({
   title: `Omni-CAD ${bucket.label} Captions`,
   summary: `${bucketStats[bucket.key].count} Omni-CAD captions describe ${bucket.label.toLowerCase()}. Example: ${bucketStats[bucket.key].samples[0] || ""}`,
@@ -226,6 +233,10 @@ const merged = [
 writeFileSync(SUMMARY_PATH, JSON.stringify(merged, null, 2));
 console.log(`[extract] Wrote ${merged.length} rows to ${SUMMARY_PATH} (${bucketRows.length + deepRows.length} new/refreshed).`);
 
-writeFileSync(PAIRS_PATH, JSON.stringify(pairs, null, 1));
-console.log(`[extract] Wrote ${pairs.length} caption-geometry pairs to ${PAIRS_PATH}.`);
+if (pairs.length) {
+  writeFileSync(PAIRS_PATH, JSON.stringify(pairs, null, 1));
+  console.log(`[extract] Wrote ${pairs.length} caption-geometry pairs to ${PAIRS_PATH}.`);
+} else {
+  console.log(`[extract] No caption-geometry pairs resolved (Omni-CAD json missing?); left ${PAIRS_PATH} unchanged.`);
+}
 console.log("[extract] Done. The raw archives are no longer needed for retrieval.");

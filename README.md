@@ -96,6 +96,7 @@ CC BY-NC-SA 4.0 (non-commercial).
 | [learning.js](learning.js) | Retrieval, FS-doc indexing, Supabase memory, adaptive reranker |
 | [adaptiveNetwork.js](adaptiveNetwork.js) | Small neural reranker used by learning.js |
 | [Auth.js](Auth.js) | Auth middleware + Supabase auth routes |
+| [promptDimensions.js](promptDimensions.js) | Reads sizes/counts from a prompt without an LLM; applies them to library examples when the AI is unavailable |
 | [deepcadCompiler.js](deepcadCompiler.js) | DeepCAD / Text2CAD / `cad-sequence/v1` → FeatureScript compiler |
 | [deepcadService.js](deepcadService.js) | Calls the Text2CAD Space, compiles, verifies (`/generate-deepcad`, `/verify`) |
 | [hf_space/](hf_space/) | Hugging Face Docker Space serving Text2CAD |
@@ -143,13 +144,15 @@ python scripts/build_submission_pdf.py --author "Your Name"
 
 | Command | What it does |
 | --- | --- |
+| `npm test` | Runs every offline suite below in one go (no API keys needed) |
+| `npm run test:fallback` | Offline: with the AI unavailable, the right library example is chosen and the prompt's sizes/counts land in its parameters |
 | `npm run test:validator` | Offline regression: templates/examples must validate clean; known-bad code must be flagged. **Run after touching the sanitizer, validator, or examples.** |
 | `npm run test:deepcad` | Offline: DeepCAD/Text2CAD/v1 sequences compile to valid FeatureScript; bad sequences are rejected |
 | `npm run test:deepcad-e2e` | Offline: the website's calls (`/generate-deepcad`, `/verify`, JSON import) against a stand-in model service |
 | `npm run test:deepcad-live` | Real Text2CAD model (start it with `npm run deepcad:serve`): 8 prompts through the model, the compiler and live Onshape |
 | `npm run model:check` | Real CADFS-2B model (start it with `npm run model:serve`): one generation, checks it looks like FeatureScript |
 | `npm run test:e2e -- "prompt"` | Full pipeline against real Groq keys; prints generation mode, validation status, and the code |
-| `npm run test:guaranteed` | Checks the deterministic fallback produces valid FeatureScript |
+| `npm run test:guaranteed` | Same as `test:fallback` (kept for old habits) |
 
 ### Local test build (free, no Onshape API calls)
 

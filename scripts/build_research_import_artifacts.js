@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const DATA = join(ROOT, "data");
 const LOGS = join(ROOT, "logs");
-const FS_DIR = join(DATA, "fs_examples");
+// Research draft samples. Kept OUT of data/fs_examples, which only holds examples
+// that pass the strict validator and are listed in its manifest.
+const FS_DIR = join(DATA, "research_fs_samples");
 
 const csvColumns = [
   "title",
@@ -385,14 +387,14 @@ export const organicRevolveCarrot = defineFeature(function(context is Context, i
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Base Radius", "Default" : "0.75 * inch" }
-        isLength(definition.baseRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Height", "Default" : "4 * inch" }
-        isLength(definition.height, LENGTH_BOUNDS);
-        annotation { "Name" : "Tip Radius", "Default" : "0.06 * inch" }
-        isLength(definition.tipRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Curvature Factor", "Default" : "100" }
-        isInteger(definition.curvatureFactor, {(unitless) : [60, 100, 140]});
+        annotation { "Name" : "Base Radius" }
+        isLength(definition.baseRadius, { (inch) : [0.075, 0.75, 7.5] } as LengthBoundSpec);
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.4, 4, 40] } as LengthBoundSpec);
+        annotation { "Name" : "Tip Radius" }
+        isLength(definition.tipRadius, { (inch) : [0.006, 0.06, 0.6] } as LengthBoundSpec);
+        annotation { "Name" : "Curvature Factor" }
+        isInteger(definition.curvatureFactor, { (unitless) : [60, 100, 140] } as IntegerBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)
@@ -430,14 +432,14 @@ export const loftSquareToCircle = defineFeature(function(context is Context, id 
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Square Size", "Default" : "2 * inch" }
-        isLength(definition.squareSize, LENGTH_BOUNDS);
-        annotation { "Name" : "Circle Radius", "Default" : "0.5 * inch" }
-        isLength(definition.circleRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Height", "Default" : "3 * inch" }
-        isLength(definition.height, LENGTH_BOUNDS);
-        annotation { "Name" : "Profile Offset", "Default" : "0 * inch" }
-        isLength(definition.profileOffset, NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS);
+        annotation { "Name" : "Square Size" }
+        isLength(definition.squareSize, { (inch) : [0.2, 2, 20] } as LengthBoundSpec);
+        annotation { "Name" : "Circle Radius" }
+        isLength(definition.circleRadius, { (inch) : [0.05, 0.5, 5] } as LengthBoundSpec);
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.3, 3, 30] } as LengthBoundSpec);
+        annotation { "Name" : "Profile Offset" }
+        isLength(definition.profileOffset, { (inch) : [0, 0, 10] } as LengthBoundSpec);
     }
     {
         var basePlane = isQueryEmpty(context, definition.location)
@@ -467,10 +469,10 @@ export const sweepPipeElbow = defineFeature(function(context is Context, id is I
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Outer Radius", "Default" : "0.5 * inch" }
-        isLength(definition.outerRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Bend Radius", "Default" : "2 * inch" }
-        isLength(definition.bendRadius, LENGTH_BOUNDS);
+        annotation { "Name" : "Outer Radius" }
+        isLength(definition.outerRadius, { (inch) : [0.05, 0.5, 5] } as LengthBoundSpec);
+        annotation { "Name" : "Bend Radius" }
+        isLength(definition.bendRadius, { (inch) : [0.2, 2, 20] } as LengthBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)
@@ -504,14 +506,14 @@ export const openTopShellEnclosure = defineFeature(function(context is Context, 
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Width", "Default" : "4 * inch" }
-        isLength(definition.width, LENGTH_BOUNDS);
-        annotation { "Name" : "Depth", "Default" : "3 * inch" }
-        isLength(definition.depth, LENGTH_BOUNDS);
-        annotation { "Name" : "Height", "Default" : "1.5 * inch" }
-        isLength(definition.height, LENGTH_BOUNDS);
-        annotation { "Name" : "Wall Thickness", "Default" : "0.1 * inch" }
-        isLength(definition.wallThickness, LENGTH_BOUNDS);
+        annotation { "Name" : "Width" }
+        isLength(definition.width, { (inch) : [0.4, 4, 40] } as LengthBoundSpec);
+        annotation { "Name" : "Depth" }
+        isLength(definition.depth, { (inch) : [0.3, 3, 30] } as LengthBoundSpec);
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.15, 1.5, 15] } as LengthBoundSpec);
+        annotation { "Name" : "Wall Thickness" }
+        isLength(definition.wallThickness, { (inch) : [0.01, 0.1, 1] } as LengthBoundSpec);
         annotation { "Name" : "Open Top" }
         definition.openTop is boolean;
     }
@@ -550,16 +552,16 @@ export const filletAndChamferBlock = defineFeature(function(context is Context, 
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Width", "Default" : "2 * inch" }
-        isLength(definition.width, LENGTH_BOUNDS);
-        annotation { "Name" : "Depth", "Default" : "1.25 * inch" }
-        isLength(definition.depth, LENGTH_BOUNDS);
-        annotation { "Name" : "Height", "Default" : "0.5 * inch" }
-        isLength(definition.height, LENGTH_BOUNDS);
-        annotation { "Name" : "Fillet Radius", "Default" : "0.08 * inch" }
-        isLength(definition.filletRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Chamfer Width", "Default" : "0.04 * inch" }
-        isLength(definition.chamferWidth, LENGTH_BOUNDS);
+        annotation { "Name" : "Width" }
+        isLength(definition.width, { (inch) : [0.2, 2, 20] } as LengthBoundSpec);
+        annotation { "Name" : "Depth" }
+        isLength(definition.depth, { (inch) : [0.125, 1.25, 12.5] } as LengthBoundSpec);
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.05, 0.5, 5] } as LengthBoundSpec);
+        annotation { "Name" : "Fillet Radius" }
+        isLength(definition.filletRadius, { (inch) : [0.008, 0.08, 0.8] } as LengthBoundSpec);
+        annotation { "Name" : "Chamfer Width" }
+        isLength(definition.chamferWidth, { (inch) : [0.004, 0.04, 0.4] } as LengthBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)
@@ -595,20 +597,20 @@ export const hybridOrganicFlange = defineFeature(function(context is Context, id
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Base Radius", "Default" : "0.65 * inch" }
-        isLength(definition.baseRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Height", "Default" : "3.5 * inch" }
-        isLength(definition.height, LENGTH_BOUNDS);
-        annotation { "Name" : "Tip Radius", "Default" : "0.08 * inch" }
-        isLength(definition.tipRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Flange Radius", "Default" : "1.25 * inch" }
-        isLength(definition.flangeRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Bolt Circle Radius", "Default" : "0.9 * inch" }
-        isLength(definition.boltCircleRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Bolt Radius", "Default" : "0.09 * inch" }
-        isLength(definition.boltRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Flange Thickness", "Default" : "0.2 * inch" }
-        isLength(definition.flangeThickness, LENGTH_BOUNDS);
+        annotation { "Name" : "Base Radius" }
+        isLength(definition.baseRadius, { (inch) : [0.065, 0.65, 6.5] } as LengthBoundSpec);
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.35, 3.5, 35] } as LengthBoundSpec);
+        annotation { "Name" : "Tip Radius" }
+        isLength(definition.tipRadius, { (inch) : [0.008, 0.08, 0.8] } as LengthBoundSpec);
+        annotation { "Name" : "Flange Radius" }
+        isLength(definition.flangeRadius, { (inch) : [0.125, 1.25, 12.5] } as LengthBoundSpec);
+        annotation { "Name" : "Bolt Circle Radius" }
+        isLength(definition.boltCircleRadius, { (inch) : [0.09, 0.9, 9] } as LengthBoundSpec);
+        annotation { "Name" : "Bolt Radius" }
+        isLength(definition.boltRadius, { (inch) : [0.009, 0.09, 0.9] } as LengthBoundSpec);
+        annotation { "Name" : "Flange Thickness" }
+        isLength(definition.flangeThickness, { (inch) : [0.02, 0.2, 2] } as LengthBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)
@@ -652,8 +654,10 @@ export const hybridOrganicFlange = defineFeature(function(context is Context, id
             "endDepth" : definition.flangeThickness
         });
         opBoolean(context, id + "join", {
-            "tools" : qCreatedBy(id + "flange", EntityType.BODY),
-            "targets" : qCreatedBy(id + "organicBody", EntityType.BODY),
+            "tools" : qUnion([
+                qCreatedBy(id + "organicBody", EntityType.BODY),
+                qCreatedBy(id + "flange", EntityType.BODY)
+            ]),
             "operationType" : BooleanOperationType.UNION
         });
     });`,
@@ -666,14 +670,14 @@ export const vaseMultiProfileLoft = defineFeature(function(context is Context, i
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Height", "Default" : "5 * inch" }
-        isLength(definition.height, LENGTH_BOUNDS);
-        annotation { "Name" : "Base Radius", "Default" : "0.8 * inch" }
-        isLength(definition.baseRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Belly Radius", "Default" : "1.25 * inch" }
-        isLength(definition.bellyRadius, LENGTH_BOUNDS);
-        annotation { "Name" : "Neck Radius", "Default" : "0.45 * inch" }
-        isLength(definition.neckRadius, LENGTH_BOUNDS);
+        annotation { "Name" : "Height" }
+        isLength(definition.height, { (inch) : [0.5, 5, 50] } as LengthBoundSpec);
+        annotation { "Name" : "Base Radius" }
+        isLength(definition.baseRadius, { (inch) : [0.08, 0.8, 8] } as LengthBoundSpec);
+        annotation { "Name" : "Belly Radius" }
+        isLength(definition.bellyRadius, { (inch) : [0.125, 1.25, 12.5] } as LengthBoundSpec);
+        annotation { "Name" : "Neck Radius" }
+        isLength(definition.neckRadius, { (inch) : [0.045, 0.45, 4.5] } as LengthBoundSpec);
     }
     {
         var basePlane = isQueryEmpty(context, definition.location)
@@ -703,14 +707,14 @@ export const loftedAirfoil = defineFeature(function(context is Context, id is Id
     {
         annotation { "Name" : "Plane", "Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1 }
         definition.location is Query;
-        annotation { "Name" : "Root Chord", "Default" : "3 * inch" }
-        isLength(definition.rootChord, LENGTH_BOUNDS);
-        annotation { "Name" : "Tip Chord", "Default" : "1.5 * inch" }
-        isLength(definition.tipChord, LENGTH_BOUNDS);
-        annotation { "Name" : "Span", "Default" : "8 * inch" }
-        isLength(definition.span, LENGTH_BOUNDS);
-        annotation { "Name" : "Thickness Percent", "Default" : "12" }
-        isInteger(definition.thicknessPercent, {(unitless) : [6, 12, 18]});
+        annotation { "Name" : "Root Chord" }
+        isLength(definition.rootChord, { (inch) : [0.3, 3, 30] } as LengthBoundSpec);
+        annotation { "Name" : "Tip Chord" }
+        isLength(definition.tipChord, { (inch) : [0.15, 1.5, 15] } as LengthBoundSpec);
+        annotation { "Name" : "Span" }
+        isLength(definition.span, { (inch) : [0.8, 8, 80] } as LengthBoundSpec);
+        annotation { "Name" : "Thickness Percent" }
+        isInteger(definition.thicknessPercent, { (unitless) : [6, 12, 18] } as IntegerBoundSpec);
     }
     {
         var rootPlane = isQueryEmpty(context, definition.location)
@@ -968,9 +972,23 @@ async function appendTrainingExamples(memoryRows) {
     title: source.title,
     timestamp: new Date().toISOString(),
   }));
-  const lines = [...good, ...bad].map(item => JSON.stringify(item)).join("\n") + "\n";
-  await appendFile(join(DATA, "adaptive_training.jsonl"), lines);
-  return good.length + bad.length;
+  // Skip rows already in the file (same source + title + target) so re-running
+  // the import does not duplicate training data.
+  const trainingPath = join(DATA, "adaptive_training.jsonl");
+  const seen = new Set();
+  if (existsSync(trainingPath)) {
+    for (const line of (await readFile(trainingPath, "utf8")).split("\n")) {
+      try {
+        const row = JSON.parse(line);
+        seen.add(`${row.source}|${row.title}|${row.target}`);
+      } catch {
+        // blank or malformed line
+      }
+    }
+  }
+  const fresh = [...good, ...bad].filter(item => !seen.has(`${item.source}|${item.title}|${item.target}`));
+  if (fresh.length) await appendFile(trainingPath, fresh.map(item => JSON.stringify(item)).join("\n") + "\n");
+  return fresh.length;
 }
 
 async function main() {
@@ -986,8 +1004,14 @@ async function main() {
   const memoryRows = [...fsMemoryRows(), ...datasetRows];
   await writeFile(join(DATA, "cadKnowledge.new.csv"), csv(knowledgeRows));
   await writeFile(join(DATA, "cadPruningTable.new.csv"), csv(pruningRows));
-  await writeFile(join(DATA, "cadMemoryExamples.new.csv"), csv(memoryRows));
-  await writeFile(join(DATA, "cadMemoryExamples.dataset.csv"), csv(datasetRows));
+  if (datasetRows.length) {
+    await writeFile(join(DATA, "cadMemoryExamples.new.csv"), csv(memoryRows));
+    await writeFile(join(DATA, "cadMemoryExamples.dataset.csv"), csv(datasetRows));
+  } else {
+    // No raw dataset on this machine: keep the committed memory rows instead of
+    // replacing them with the FeatureScript templates alone.
+    console.log("No raw dataset found (data/Omni-CAD/json); left cadMemoryExamples.new.csv and cadMemoryExamples.dataset.csv unchanged.");
+  }
   await writeFile(join(DATA, "cadKnowledge.new.json"), JSON.stringify(knowledgeRows, null, 2));
   const trainingCount = await appendTrainingExamples(memoryRows);
 

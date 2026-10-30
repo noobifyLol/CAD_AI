@@ -40,3 +40,6 @@ __pycache__/
 
 # Local FeatureScript test engine (onshape-fsgen fslite, MIT) used to test-build parts without Onshape API calls
 .fsgen/
+logs/
+data/cadKnowledge.new.json
+data/research_fs_samples/
