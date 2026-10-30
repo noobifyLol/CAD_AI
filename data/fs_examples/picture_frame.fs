@@ -9,13 +9,13 @@ export const pictureFrame = defineFeature(function(context is Context, id is Id,
         definition.location is Query;
 
         annotation { "Name" : "Outer Width" }
-        isLength(definition.outerWidth, { (inch) : [1.0, 6.0, 36.0] } as LengthBoundSpec);
+        isLength(definition.outerWidth, { (inch) : [1.2, 6.0, 36.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Outer Height" }
-        isLength(definition.outerHeight, { (inch) : [1.0, 4.0, 36.0] } as LengthBoundSpec);
+        isLength(definition.outerHeight, { (inch) : [1.2, 4.0, 36.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Border Width" }
-        isLength(definition.borderWidth, { (inch) : [0.1, 0.5, 4.0] } as LengthBoundSpec);
+        isLength(definition.borderWidth, { (inch) : [0.1, 0.5, 1.5] } as LengthBoundSpec);
 
         annotation { "Name" : "Frame Depth" }
         isLength(definition.frameDepth, { (inch) : [0.05, 0.3, 2.0] } as LengthBoundSpec);
@@ -23,6 +23,10 @@ export const pictureFrame = defineFeature(function(context is Context, id is Id,
     {
         // A frame is a rectangular RING: outer and inner rectangles in the SAME
         // sketch, so one extrude produces the border with the middle open.
+        if (definition.borderWidth * 2 >= min(definition.outerWidth, definition.outerHeight))
+        {
+            throw regenError("Border Width must be less than half the frame's width and height", ["borderWidth"]);
+        }
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });

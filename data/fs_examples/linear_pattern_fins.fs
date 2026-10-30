@@ -27,7 +27,7 @@ export const heatsinkWithLinearFins = defineFeature(function(context is Context,
         isInteger(definition.finCount, { (unitless) : [2, 8, 40] } as IntegerBoundSpec);
 
         annotation { "Name" : "Fin Spacing" }
-        isLength(definition.finSpacing, { (inch) : [0.05, 0.3, 2.0] } as LengthBoundSpec);
+        isLength(definition.finSpacing, { (inch) : [0.05, 0.4, 2.0] } as LengthBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)

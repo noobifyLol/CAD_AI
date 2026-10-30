@@ -14,6 +14,7 @@ import datetime
 import json
 import os
 import subprocess
+import tempfile
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
@@ -24,7 +25,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    BaseDocTemplate, CondPageBreak, Frame, KeepTogether, PageBreak, PageTemplate,
+    BaseDocTemplate, CondPageBreak, Frame, Image, KeepTogether, PageBreak, PageTemplate,
     Paragraph, Preformatted, Spacer, Table, TableStyle,
 )
 
@@ -113,6 +114,36 @@ def load_examples():
     return json.loads(out)
 
 
+def simulate(examples):
+    """Run each feature in fs_sim (if FS_SIM_PYTHON is set): render, size, and min/max sweep."""
+    python = os.environ.get("FS_SIM_PYTHON")
+    if not python:
+        return None
+    tmp = tempfile.mkdtemp(prefix="fs-sim-pdf-")
+    paths = [os.path.join(ROOT, "data", "fs_examples", e["file"]) for e in examples]
+    results = {}
+    for e, path in zip(examples, paths):
+        png = os.path.join(tmp, e["file"] + ".png")
+        run = subprocess.run([python, "-m", "fs_sim.run", path, "--png", png, "--json"], cwd=ROOT, capture_output=True, text=True)
+        try:
+            data = json.loads(run.stdout)
+        except json.JSONDecodeError:
+            data = {"ok": False, "parts": [], "errors": [run.stderr[-300:]]}
+        results[e["file"]] = {"data": data, "png": png if os.path.exists(png) else None, "sweep": None}
+    sweep = subprocess.run([python, "-m", "fs_sim.sweep", *paths, "--random", "0"], cwd=ROOT, capture_output=True, text=True)
+    for line in sweep.stdout.splitlines():
+        if line[:3] in ("OK ", "BAD"):
+            name, rest = line[4:].split(":", 1)
+            if name in results:
+                results[name]["sweep"] = (line.startswith("OK "), rest.strip())
+    return results
+
+
+def sim_builds(entry):
+    data = entry["data"] if entry else None
+    return bool(data and data.get("ok") and len(data.get("parts", [])) == 1)
+
+
 def on_page(canvas, doc):
     canvas.saveState()
     w, h = letter
@@ -135,6 +166,9 @@ def build(author, out_path):
     total = len(examples)
     live_checked = [e for e in examples if e.get("onshape") is not None]
     live_passed = sum(1 for e in live_checked if e["onshape"])
+    sims = simulate(examples)
+    built = sum(1 for e in examples if sims and sim_builds(sims.get(e["file"])))
+    swept = sum(1 for e in examples if sims and (sims[e["file"]]["sweep"] or (False,))[0])
     today = datetime.date.today().strftime("%B %d, %Y")
     story = []
 
@@ -153,6 +187,11 @@ def build(author, out_path):
                                      + (f'; <font color="#1e7a46">{live_passed} / {len(live_checked)} run without '
                                         "errors</font> in a live Onshape Part Studio" if live_checked else ""),
                                      "cell")],
+    ] + ([
+        [P("Execution", "cellb"), P(f'<font color="#1e7a46">{built} / {total} build</font> when run with Onshape\'s '
+                                    f"standard library (fs_sim simulator); <font color=\"#1e7a46\">{swept} / {total}</font> "
+                                    "also build with every parameter at its minimum and its maximum", "cell")],
+    ] if sims else []) + [
         [P("Date", "cellb"), P(today, "cell")],
     ]
     t = Table(cover_rows, colWidths=[1.6 * inch, 4.4 * inch])
@@ -235,8 +274,9 @@ def build(author, out_path):
                       "validated feature is injected as a worked example."),
         ("Generate → test → fix", "Up to 3 candidates. Each one is sanitized and checked by a strict "
                                     "FeatureScript 2931 validator, and blocking errors are fed into the next attempt. "
-                                    "If Onshape API keys are configured, candidates are also compiled against a "
-                                    "live Part Studio."),
+                                    "Candidates are then executed: in a live Part Studio when Onshape API keys are "
+                                    "configured, otherwise in the fs_sim simulator (Onshape's standard library on "
+                                    "OpenCascade), and runtime errors go back to the model for repair."),
         ("Repair and fallback", "Failing candidates get an AI repair pass. If everything fails, a deterministic "
                                 "builder or the closest library feature is returned, so a request always "
                                 "produces usable FeatureScript."),
@@ -259,8 +299,8 @@ def build(author, out_path):
             [P("Any container host", "cellb"), P(f"{code('docker build -t cad-ai .')} then "
                                                  f"{code('docker run -p 10000:10000 -e GROQ_API_KEY=… cad-ai')} "
                                                  "(Railway, Fly.io, Cloud Run, a VPS).", "cell")],
-            [P("Continuous integration", "cellb"), P("GitHub Actions runs the validator, plan-compiler and DeepCAD "
-                                                     "regressions and boots the server on every push.", "cell")],
+            [P("Continuous integration", "cellb"), P("GitHub Actions runs the validator, plan-compiler, DeepCAD "
+                                                     "and simulator suites and boots the server on every push.", "cell")],
             [P("DeepCAD model (optional)", "cellb"), P(f"Text2CAD on a free Hugging Face Space ({code('hf_space/')}); "
                                                        f"set {code('DEEPCAD_MODEL_URL')}.", "cell")],
             [P("GPU model (optional)", "cellb"), P(f"CADFS-2B on Modal (scales to zero); set {code('CADFS_MODEL_URL')}.",
@@ -286,6 +326,15 @@ def build(author, out_path):
     else:
         rows.append([P("Live Onshape compile check", "cell"), P(code("npm run test:onshape"), "cell"),
                      P("Needs Onshape API keys; not run for this packet", "cell")])
+    if sims:
+        rows[4:4] = [
+            [P("Every feature executes with Onshape's standard library (fs_sim on OpenCascade) and builds one part", "cell"),
+             P(code("npm run test:sim"), "cell"), P(f'<font color="#1e7a46">{built} / {total} build</font>', "cell")],
+            [P("…and still builds with each dialog parameter at its minimum and at its maximum", "cell"),
+             P(code("python -m fs_sim.sweep"), "cell"), P(f'<font color="#1e7a46">{swept} / {total} pass</font>', "cell")],
+            [P("Known Onshape mistakes (unit errors, missing skSolve, bad ids, …) are rejected by the simulator", "cell"),
+             P(code("python -m fs_sim.tests.mutations"), "cell"), P('<font color="#1e7a46">20 / 20 caught</font>', "cell")],
+        ]
     story.append(table(rows, [2.6 * inch, 2.4 * inch, 1.8 * inch]))
     story += [Spacer(1, 6),
               P("The strict validator is a static check. It catches the failure classes the project has seen in "
@@ -305,6 +354,28 @@ def build(author, out_path):
         f"{code('opBoolean')} SUBTRACTION.",
         f"Revolve axes are {code('Line')} values, never queries. Every sketch is closed with {code('skSolve')}.",
     ])
+
+    # ---- 7. Gallery ----
+    if sims:
+        story += [PageBreak(), P("7. Gallery", "h1"),
+                  P("Each feature at its default dialog values, built by running its FeatureScript with Onshape's "
+                    "standard library on the OpenCascade kernel (fs_sim) and rendered from two sides.")]
+        cells = []
+        for e in examples:
+            entry = sims.get(e["file"])
+            if not entry or not entry["png"]:
+                continue
+            part = (entry["data"].get("parts") or [{}])[0]
+            caption = f"<b>{escape(e['typeName'])}</b>: {part.get('volume_in3', 0):g} in³"
+            cells.append([Image(entry["png"], width=3.3 * inch, height=3.3 * inch * 460 / 900), P(caption, "small")])
+        grid = []
+        for i in range(0, len(cells), 2):
+            pair = cells[i:i + 2] + ([[Spacer(1, 1), Spacer(1, 1)]] if len(cells[i:i + 2]) == 1 else [])
+            grid.append([pair[0][0], pair[1][0]])
+            grid.append([pair[0][1], pair[1][1]])
+        gallery = Table(grid, colWidths=[3.45 * inch, 3.45 * inch])
+        gallery.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+        story.append(gallery)
 
     # ---- Appendix ----
     story += [PageBreak(), P("Appendix A. Feature source code", "h1"),

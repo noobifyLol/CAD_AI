@@ -29,6 +29,10 @@ export const bottleWithNeck = defineFeature(function(context is Context, id is I
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });
+        // Sketch the profile on the vertical plane through the placement plane's x axis
+        // (sketch y = the placement normal) and revolve around that normal, so the part
+        // stands upright on the selected plane instead of lying on its side.
+        var profilePlane = plane(skPlane.origin, cross(skPlane.x, skPlane.normal), skPlane.x);
 
         var bodyR = definition.bodyRadius / inch;
         var bodyH = definition.bodyHeight / inch;
@@ -36,7 +40,7 @@ export const bottleWithNeck = defineFeature(function(context is Context, id is I
         var neckH = definition.neckHeight / inch;
         var totalH = bodyH + neckH;
 
-        var profileSketch = newSketchOnPlane(context, id + "profileSketch", { "sketchPlane" : skPlane });
+        var profileSketch = newSketchOnPlane(context, id + "profileSketch", { "sketchPlane" : profilePlane });
         skLineSegment(profileSketch, "axisLine", {
             "start" : vector(0, 0) * inch,
             "end"   : vector(0, totalH) * inch
@@ -59,7 +63,7 @@ export const bottleWithNeck = defineFeature(function(context is Context, id is I
         });
         skSolve(profileSketch);
 
-        var revolveAxis = line(skPlane.origin, cross(skPlane.normal, skPlane.x));
+        var revolveAxis = line(skPlane.origin, skPlane.normal);
         opRevolve(context, id + "bottleBody", {
             "entities"     : qSketchRegion(id + "profileSketch"),
             "axis"         : revolveAxis,
@@ -70,7 +74,7 @@ export const bottleWithNeck = defineFeature(function(context is Context, id is I
         // thickness. (qCapEntity/opShell only work on extruded bodies, not revolves;
         // the tool profile extends past the top so the neck mouth opens cleanly.)
         var wt = definition.wallThickness / inch;
-        var innerSketch = newSketchOnPlane(context, id + "innerSketch", { "sketchPlane" : skPlane });
+        var innerSketch = newSketchOnPlane(context, id + "innerSketch", { "sketchPlane" : profilePlane });
         skLineSegment(innerSketch, "innerAxis", {
             "start" : vector(0, wt) * inch,
             "end"   : vector(0, totalH + wt) * inch

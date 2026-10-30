@@ -47,3 +47,28 @@ jobs:
       - run: pip install -r hf_space/requirements.txt
       - run: python hf_space/tests/test_space.py --text2cad /tmp/Text2CAD --out /tmp/decoded.json
       - run: node hf_space/tests/roundtrip_compare.mjs /tmp/decoded.json
+
+  simulator:
+    # Executes every library example and every generator output in fs_sim (the real
+    # Onshape std library on an OpenCascade kernel), including each parameter's
+    # min/max, plus mutation tests of known Onshape mistakes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y libgl1 libx11-6
+      - run: npm ci --no-audit --no-fund
+      - run: pip install -r fs_sim/requirements.txt
+      - run: bash fs_sim/fetch_std.sh
+      - run: npm run test:sim
+        env:
+          FS_SIM_PYTHON: python
+      - run: npm run test:deepcad-e2e
+        env:
+          FS_SIM_PYTHON: python

@@ -1,6 +1,7 @@
 // Regression harness for deepcadCompiler.js (DeepCAD / Text2CAD sequences → FeatureScript).
 // Run with: npm run test:deepcad   (offline; no API keys needed)
 import { readFileSync } from 'node:fs';
+import { dumpFs } from './lib/dumpFs.mjs';
 import {
   compileCadSequenceToFeatureScript,
   deepcadJsonToCadSequence,
@@ -20,6 +21,7 @@ const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
 function expectCompiles(label, input, checks = []) {
   const result = compileCadSequenceToFeatureScript(input, { featureName: 'testPart' });
   if (!result.ok) return fail(label, result.errors.join('; '));
+  dumpFs(`deepcad_${label}`, result.code);
   const strict = validateFeatureScriptStrict(result.code);
   if (!strict.ok) {
     return fail(label, [...strict.blockingIssues, ...strict.fatalIssues].map(i => i.message).slice(0, 4).join('; '));
@@ -82,6 +84,12 @@ expectCompiles('v1 d-link (two-sided + join + intersect)', fixture('v1_d_link.js
   // The 4 mm + 4 mm two-sided extrude starts 4 mm below the base plane; the material
   // bodies span 22 mm (y -6..16), so the start is -4 / 22 = -0.181818.
   has('skPlane.normal * (-0.181818))', 'two-sided extrude plane shifted back by the opposite depth'),
+]);
+
+// 3b) Arbitrarily rotated sketch planes (Onshape needs x ⟂ normal within 1e-11,
+// so the compiler re-orthogonalizes at runtime instead of trusting rounded literals).
+expectCompiles('v1 rotated planes', fixture('v1_rotated_planes.json'), [
+  has('normalize(x1 - n1 * dot(x1, n1))', 'runtime re-orthogonalization of the plane x axis'),
 ]);
 
 // 4) Size override + placement plane.

@@ -1,0 +1,156 @@
+{
+ "format": "cad-sequence/v1",
+ "units": "mm",
+ "steps": [
+  {
+   "plane": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "xAxis": [
+     0.8020246528124291,
+     -0.24520354365098945,
+     -0.5446390350150271
+    ],
+    "normal": [
+     0.5239488937887629,
+     0.7266096509078452,
+     0.4444276902996832
+    ]
+   },
+   "faces": [
+    {
+     "loops": [
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         0
+        ],
+        "radius": 4
+       }
+      ],
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         0
+        ],
+        "radius": 1.5
+       }
+      ]
+     ]
+    }
+   ],
+   "extrude": {
+    "towardsNormal": 6,
+    "oppositeNormal": 1,
+    "operation": "new"
+   }
+  },
+  {
+   "plane": {
+    "origin": [
+     3,
+     2,
+     1
+    ],
+    "xAxis": [
+     0.31845370915760096,
+     -0.9248567261717171,
+     0.20791169081775931
+    ],
+    "normal": [
+     -0.5559145168847994,
+     -0.3598635367823094,
+     -0.7493045340922925
+    ]
+   },
+   "faces": [
+    {
+     "loops": [
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         0
+        ],
+        "radius": 4
+       }
+      ],
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         0
+        ],
+        "radius": 1.5
+       }
+      ]
+     ]
+    }
+   ],
+   "extrude": {
+    "towardsNormal": 6,
+    "oppositeNormal": 1,
+    "operation": "join"
+   }
+  },
+  {
+   "plane": {
+    "origin": [
+     6,
+     4,
+     2
+    ],
+    "xAxis": [
+     0.1573786956242627,
+     0.07338689100003827,
+     0.984807753012208
+    ],
+    "normal": [
+     -0.9259761636761181,
+     -0.33562405433261894,
+     0.17298739392508952
+    ]
+   },
+   "faces": [
+    {
+     "loops": [
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         0
+        ],
+        "radius": 4
+       }
+      ],
+      [
+       {
+        "type": "circle",
+        "center": [
+         0,
+         0
+        ],
+        "radius": 1.5
+       }
+      ]
+     ]
+    }
+   ],
+   "extrude": {
+    "towardsNormal": 6,
+    "oppositeNormal": 1,
+    "operation": "join"
+   }
+  }
+ ]
+}

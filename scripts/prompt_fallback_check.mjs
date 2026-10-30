@@ -3,6 +3,7 @@
 // example's dialog defaults (promptDimensions.js). Offline; no API keys needed.
 // Run with: npm run test:fallback
 import { parsePromptMeasurements, promptDimsFallback, promptFeatureNames } from '../promptDimensions.js';
+import { dumpFs } from './lib/dumpFs.mjs';
 
 const { buildGuaranteedFeatureScript, validateFeatureScriptStrict } = await import('../ai.js');
 
@@ -15,6 +16,7 @@ const defaults = code => Object.fromEntries(
 function expectExample(prompt, title, expected = {}) {
   const dims = { featureName: 'part', featureLabel: 'Part', shape: 'CUSTOM', confidence: 'LOW', ...promptDimsFallback(prompt) };
   const result = buildGuaranteedFeatureScript(prompt, dims, {}, null, {});
+  dumpFs(`fallback_${prompt}`, result.code);
   const values = defaults(result.code || '');
   const problems = [];
   if (result.featureLabel !== title) problems.push(`example "${result.featureLabel}" (want "${title}")`);
@@ -35,7 +37,11 @@ expectExample('M10 hex bolt 40 mm long', 'Hex Bolt', { shaftRadius: 0.19685, sha
 expectExample('a cylinder 2 inch diameter 3 inch tall', 'Cylinder With Bore', { outerRadius: 1, height: 3 });
 expectExample('a box 50mm x 30mm x 20mm', 'Open Top Box', { width: 1.9685, depth: 1.1811, height: 0.7874 });
 expectExample('an L bracket 3 inch tall', 'L Bracket With Fillet', { legHeight: 3 });
-expectExample('a washer with 1 inch outer diameter and 0.5 inch hole', 'Cylinder With Bore', { outerRadius: 0.5, boreRadius: 0.25 });
+expectExample('a washer with 1 inch outer diameter and 0.5 inch hole', 'Flat Washer', { outerRadius: 0.5, holeRadius: 0.25, thickness: (t) => t < 0.2 });
+expectExample('a cube with a 1 inch hole', 'Block With Through Hole', { holeRadius: 0.5, width: (w, v) => w >= 2 && v.depth >= 2 && v.height >= 2 });
+expectExample('a plate with 0.75 inch holes', 'Plate With Mounting Holes', {
+  holeRadius: (r, v) => r > 0 && v.holeInset >= r * 1.5 && v.holeInset * 2 < Math.min(v.width, v.height),
+});
 expectExample('a picture frame 8x10 inch', 'Picture Frame', { outerWidth: 8, outerHeight: 10 });
 expectExample('a heatsink with 20 fins', 'Heatsink With Linear Patterned Fins', {
   finCount: 20,

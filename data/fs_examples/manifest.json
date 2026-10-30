@@ -10,7 +10,7 @@
     {
       "file": "cylinder_with_bore.fs",
       "title": "Cylinder With Bore",
-      "keywords": ["cylinder", "tube", "bushing", "washer", "spacer", "ring", "bore", "sleeve", "standoff", "pipe", "hollow", "shaft", "collar", "magnet"],
+      "keywords": ["cylinder", "tube", "bushing", "spacer", "ring", "bore", "sleeve", "standoff", "pipe", "hollow", "shaft", "collar", "magnet"],
       "operations": ["opExtrude"],
       "lesson": "Concentric circles in one sketch extrude directly into a tube, no boolean needed."
     },
@@ -167,6 +167,20 @@
       "keywords": ["ramp", "wedge", "incline", "doorstop", "chock", "angled block", "kerb ramp", "threshold ramp", "sloped block"],
       "operations": ["opExtrude"],
       "lesson": "A ramp/wedge is a closed right-triangle profile (base, vertical back, sloped hypotenuse) extruded once."
+    },
+    {
+      "file": "flat_washer.fs",
+      "title": "Flat Washer",
+      "keywords": ["washer", "shim", "flat washer", "thin ring", "gasket ring"],
+      "operations": ["opExtrude"],
+      "lesson": "Two concentric circles in one sketch + filterInnerLoops = a ring with a hole."
+    },
+    {
+      "file": "block_with_hole.fs",
+      "title": "Block With Through Hole",
+      "keywords": ["cube", "block", "cuboid", "die", "cube with hole", "block with hole"],
+      "operations": ["opExtrude"],
+      "lesson": "Outer square and hole circle in one sketch; filterInnerLoops keeps the hole open."
     }
   ]
 }

@@ -24,6 +24,10 @@ export const revolvedVase = defineFeature(function(context is Context, id is Id,
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });
+        // Sketch the profile on the vertical plane through the placement plane's x axis
+        // (sketch y = the placement normal) and revolve around that normal, so the part
+        // stands upright on the selected plane instead of lying on its side.
+        var profilePlane = plane(skPlane.origin, cross(skPlane.x, skPlane.normal), skPlane.x);
 
         var baseR = definition.baseRadius / inch;
         var bellyR = definition.bellyRadius / inch;
@@ -32,7 +36,7 @@ export const revolvedVase = defineFeature(function(context is Context, id is Id,
 
         // Closed revolve profile: axis on x = 0, smooth spline on the outside,
         // straight lines closing the region back to the axis.
-        var profileSketch = newSketchOnPlane(context, id + "profileSketch", { "sketchPlane" : skPlane });
+        var profileSketch = newSketchOnPlane(context, id + "profileSketch", { "sketchPlane" : profilePlane });
         skLineSegment(profileSketch, "axisLine", {
             "start" : vector(0, 0) * inch,
             "end"   : vector(0, ht) * inch
@@ -56,7 +60,7 @@ export const revolvedVase = defineFeature(function(context is Context, id is Id,
         skSolve(profileSketch);
 
         // The revolve axis must be a Line value, never a query.
-        var revolveAxis = line(skPlane.origin, cross(skPlane.normal, skPlane.x));
+        var revolveAxis = line(skPlane.origin, skPlane.normal);
         opRevolve(context, id + "vaseBody", {
             "entities"     : qSketchRegion(id + "profileSketch"),
             "axis"         : revolveAxis,

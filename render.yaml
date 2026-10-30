@@ -3,15 +3,13 @@
 services:
   - type: web
     name: cad-ai
-    runtime: node
+    # Docker so the FeatureScript simulator (Python + OpenCascade) ships with the app.
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     plan: free
-    buildCommand: npm ci --omit=dev
-    startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: NODE_VERSION
-        value: "22"
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_API_KEY2

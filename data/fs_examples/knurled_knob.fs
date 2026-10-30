@@ -9,7 +9,7 @@ export const knurledKnob = defineFeature(function(context is Context, id is Id, 
         definition.location is Query;
 
         annotation { "Name" : "Knob Radius" }
-        isLength(definition.knobRadius, { (inch) : [0.15, 0.5, 4.0] } as LengthBoundSpec);
+        isLength(definition.knobRadius, { (inch) : [0.3, 0.5, 4.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Knob Height" }
         isLength(definition.knobHeight, { (inch) : [0.1, 0.4, 4.0] } as LengthBoundSpec);
@@ -18,12 +18,20 @@ export const knurledKnob = defineFeature(function(context is Context, id is Id, 
         isLength(definition.grooveDepth, { (inch) : [0.005, 0.03, 0.2] } as LengthBoundSpec);
 
         annotation { "Name" : "Groove Width" }
-        isLength(definition.grooveWidth, { (inch) : [0.01, 0.05, 0.3] } as LengthBoundSpec);
+        isLength(definition.grooveWidth, { (inch) : [0.01, 0.05, 0.09] } as LengthBoundSpec);
 
         annotation { "Name" : "Groove Count" }
-        isInteger(definition.grooveCount, { (unitless) : [6, 24, 60] } as IntegerBoundSpec);
+        isInteger(definition.grooveCount, { (unitless) : [6, 24, 48] } as IntegerBoundSpec);
     }
     {
+        if (definition.grooveCount * definition.grooveWidth >= 1.6 * PI * definition.knobRadius)
+        {
+            throw regenError("Too many or too wide grooves for the knob's circumference", ["grooveCount", "grooveWidth"]);
+        }
+        if (definition.grooveDepth * 2 >= definition.knobRadius)
+        {
+            throw regenError("Groove Depth must be less than half the Knob Radius", ["grooveDepth"]);
+        }
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });

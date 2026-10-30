@@ -43,3 +43,4 @@ __pycache__/
 logs/
 data/cadKnowledge.new.json
 data/research_fs_samples/
+fs_sim/std

@@ -12,7 +12,8 @@ import {
 } from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
 import { createLearningService } from "./learning.js";
-import { DeepcadError, assessDeepcadFit, generateDeepcadFeature, generateFromLibrary, getDeepcadConfig, verifyFeatureScript } from "./deepcadService.js";
+import { DeepcadError, assessDeepcadFit, generateDeepcadFeature, generateFromLibrary, getDeepcadConfig, getVerificationConfig, verifyFeatureScript } from "./deepcadService.js";
+import { probeSimulator } from "./simulatorClient.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 10000);
@@ -104,6 +105,7 @@ app.get("/health", (_req, res) => {
     supabaseKeyMode,
     models: getModelConfig(),
     deepcad: getDeepcadConfig(),
+    verification: getVerificationConfig(),
   });
 });
 
@@ -570,6 +572,10 @@ app.post("/learning/analyze", async (req, res) => {
     console.error("[/learning/analyze]", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+probeSimulator().then((state) => {
+  console.log(state.available ? "[Simulator] FeatureScript simulator ready (Onshape std + OpenCascade)" : `[Simulator] ${state.reason}`);
 });
 
 app.listen(PORT, () => {

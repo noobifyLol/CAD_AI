@@ -405,7 +405,12 @@ export function compileCadSequenceToFeatureScript(input, options = {}) {
     const operation = step.extrude.operation;
 
     body.push(`        // Step ${n}: ${operation} extrude, depth ${fmt(depth * k)} × size`);
-    body.push(`        var pl${n} = plane(skPlane.origin + ${dir(origin)} * s * inch, ${dir(frame.normal)}, ${dir(frame.xAxis)});`);
+    // Onshape requires the plane's x axis to be perpendicular to its normal within
+    // 1e-11, so re-orthogonalize at runtime instead of trusting rounded literals.
+    body.push(`        var n${n} = normalize(${dir(frame.normal)});`);
+    body.push(`        var x${n} = ${dir(frame.xAxis)};`);
+    body.push(`        x${n} = normalize(x${n} - n${n} * dot(x${n}, n${n}));`);
+    body.push(`        var pl${n} = plane(skPlane.origin + ${dir(origin)} * s * inch, n${n}, x${n});`);
 
     const regions = [];
     step.faces.forEach((face, faceIndex) => {

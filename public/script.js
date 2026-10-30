@@ -345,7 +345,9 @@ const VERDICT_TEXT = {
   fails_in_onshape: ['fails', 'Fails in Onshape', 'Onshape reported errors when running this feature.'],
   fails_test_build: ['fails', 'Fails the test build', 'A test build with the same rules as Onshape failed, so Onshape would fail too.'],
   builds_locally: ['works', 'Builds in the test build', 'Built with its default values using the same rules as Onshape. The live Onshape check was not run.'],
-  static_ok: ['unchecked', 'Passes the static validator', 'Live Onshape check not run'],
+  works_in_simulator: ['works', 'Builds in the FeatureScript simulator', "Ran Onshape's own standard library on an OpenCascade kernel and produced the part below."],
+  fails_in_simulator: ['fails', 'Fails in the FeatureScript simulator', "Running it with Onshape's standard library hit the errors below; Onshape would report the same."],
+  static_ok: ['unchecked', 'Passes the static validator', 'Not executed'],
   static_errors: ['fails', 'Static validator found problems', 'Fix these before pasting into Onshape.'],
 };
 
@@ -363,12 +365,29 @@ function renderVerification(result) {
   titleEl.className = 'verify-title';
   titleEl.textContent = title;
   const detailEl = document.createElement('div');
-  const skipped = result.onshape?.skippedReason;
+  const skipped = result.simulation?.available === false ? result.simulation.reason : result.onshape?.skippedReason;
   detailEl.textContent = result.verdict === 'static_ok' && skipped ? `${detail}: ${skipped}` : detail;
   box.append(titleEl, detailEl);
+  const sim = result.simulation;
+  if (sim?.available && sim.parts?.length) {
+    const parts = document.createElement('div');
+    parts.className = 'verify-parts';
+    parts.textContent = sim.parts.map((p, i) => `Part ${i + 1}: ${p.size_in.map(v => +v.toFixed(3)).join(' × ')} in, ${+p.volume_in3.toFixed(4)} in³`).join(' · ');
+    box.append(parts);
+  }
+  if (sim?.image) {
+    const img = document.createElement('img');
+    img.className = 'verify-preview';
+    img.alt = 'Simulated part preview';
+    img.src = sim.image;
+    box.append(img);
+  }
   const problems = [
     ...(result.onshape?.errors || []).map(e => `Onshape: ${e.message}`),
     ...(result.local?.ok === false && result.local.error ? [`${result.local.line ? `Line ${result.local.line}: ` : ''}${result.local.error}`] : []),
+    ...(sim?.errors || []).map(e => `Simulator: ${e}`),
+    ...(sim?.warnings || []).map(w => `Note: ${w}`),
+    ...(sim?.gaps || []).map(g => `Not simulated: ${g}`),
     ...(result.static?.ok ? [] : (result.static?.issues || []).map(i => `${i.line ? `Line ${i.line}: ` : ''}${i.message}`)),
   ].slice(0, 8);
   if (problems.length) {
@@ -510,6 +529,7 @@ async function generate() {
     if (!r.ok) throw new Error(data.error || 'Generation failed');
     setOutput('gen-output', data.code, 'copy-btn', data.generationId);
     setThinking('gen', data.thinking || '');
+    if (data.code) verifyGeneratedCode();
     const simplified = data.completionLevel === 'simplified' || data.generationMode === 'multi_key_simplified' || data.generationMode === 'gear_template_fallback';
     const repaired = data.completionLevel === 'repaired' || data.generationMode === 'multi_key_repaired';
     const partial = data.completionLevel === 'partial';

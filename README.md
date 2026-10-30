@@ -87,6 +87,22 @@ CC BY-NC-SA 4.0 (non-commercial).
 | `POST /generate-deepcad` | `{ prompt }` or `{ sequence }` | Model (or supplied sequence) → FeatureScript + `verification` |
 | `POST /verify` | `{ code }` | Static validator + live Onshape run → `verdict` |
 
+## Testing FeatureScript without Onshape (fs_sim)
+
+[fs_sim/](fs_sim/README.md) is an offline FeatureScript simulator. It runs Onshape's
+own standard library on an OpenCascade geometry kernel, so generated features
+actually *execute*. Unit errors, failed preconditions, empty sketch regions and
+failing booleans/fillets/shells show up with Onshape's own messages, and each
+built part is rendered.
+
+- The website's verification shows **Builds in the FeatureScript simulator** with
+  the part's size, volume and a preview image (requires `FS_SIM_PYTHON`; the
+  Dockerfile sets it).
+- Without Onshape keys, the AI repair loop gets simulator errors as feedback.
+- `npm run test:sim` runs the suite: every library example and every generator
+  output must build one part, also with each dialog parameter at its min and max,
+  and 20 known Onshape mistakes must be rejected.
+
 ## Repository layout
 
 | Path | Purpose |
@@ -96,6 +112,8 @@ CC BY-NC-SA 4.0 (non-commercial).
 | [learning.js](learning.js) | Retrieval, FS-doc indexing, Supabase memory, adaptive reranker |
 | [adaptiveNetwork.js](adaptiveNetwork.js) | Small neural reranker used by learning.js |
 | [Auth.js](Auth.js) | Auth middleware + Supabase auth routes |
+| [fs_sim/](fs_sim/) | Offline FeatureScript simulator (Onshape std library + OpenCascade) |
+| [simulatorClient.js](simulatorClient.js) | Node client for the simulator worker (`/verify`, AI repair loop) |
 | [promptDimensions.js](promptDimensions.js) | Reads sizes/counts from a prompt without an LLM; applies them to library examples when the AI is unavailable |
 | [deepcadCompiler.js](deepcadCompiler.js) | DeepCAD / Text2CAD / `cad-sequence/v1` → FeatureScript compiler |
 | [deepcadService.js](deepcadService.js) | Calls the Text2CAD Space, compiles, verifies (`/generate-deepcad`, `/verify`) |
@@ -145,6 +163,7 @@ python scripts/build_submission_pdf.py --author "Your Name"
 | Command | What it does |
 | --- | --- |
 | `npm test` | Runs every offline suite below in one go (no API keys needed) |
+| `npm run test:sim` | Executes every example and generator output in the FeatureScript simulator, at each parameter's min/max, plus mutation tests (needs `pip install -r fs_sim/requirements.txt` and `npm run sim:fetch-std`) |
 | `npm run test:fallback` | Offline: with the AI unavailable, the right library example is chosen and the prompt's sizes/counts land in its parameters |
 | `npm run test:validator` | Offline regression: templates/examples must validate clean; known-bad code must be flagged. **Run after touching the sanitizer, validator, or examples.** |
 | `npm run test:deepcad` | Offline: DeepCAD/Text2CAD/v1 sequences compile to valid FeatureScript; bad sequences are rejected |

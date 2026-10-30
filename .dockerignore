@@ -12,3 +12,5 @@ model_service
 hf_space
 vcpkg
 *.log
+fs_sim/std
+**/__pycache__

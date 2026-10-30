@@ -9,16 +9,16 @@ export const wheelWithSpokes = defineFeature(function(context is Context, id is 
         definition.location is Query;
 
         annotation { "Name" : "Rim Radius" }
-        isLength(definition.rimRadius, { (inch) : [0.5, 2.0, 12.0] } as LengthBoundSpec);
+        isLength(definition.rimRadius, { (inch) : [0.8, 2.0, 12.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Rim Thickness" }
-        isLength(definition.rimThickness, { (inch) : [0.05, 0.25, 2.0] } as LengthBoundSpec);
+        isLength(definition.rimThickness, { (inch) : [0.05, 0.25, 1.5] } as LengthBoundSpec);
 
         annotation { "Name" : "Hub Radius" }
-        isLength(definition.hubRadius, { (inch) : [0.1, 0.4, 4.0] } as LengthBoundSpec);
+        isLength(definition.hubRadius, { (inch) : [0.15, 0.4, 1.5] } as LengthBoundSpec);
 
         annotation { "Name" : "Axle Radius" }
-        isLength(definition.axleRadius, { (inch) : [0.02, 0.125, 2.0] } as LengthBoundSpec);
+        isLength(definition.axleRadius, { (inch) : [0.02, 0.125, 0.35] } as LengthBoundSpec);
 
         annotation { "Name" : "Wheel Width" }
         isLength(definition.wheelWidth, { (inch) : [0.05, 0.4, 3.0] } as LengthBoundSpec);
@@ -31,6 +31,14 @@ export const wheelWithSpokes = defineFeature(function(context is Context, id is 
     }
     {
         // A wheel = rim ring + center hub with axle bore + patterned spokes.
+        if (definition.rimThickness + definition.hubRadius >= definition.rimRadius)
+        {
+            throw regenError("Rim Thickness plus Hub Radius must be smaller than Rim Radius (no room for spokes)", ["rimThickness", "hubRadius"]);
+        }
+        if (definition.axleRadius >= definition.hubRadius)
+        {
+            throw regenError("Axle Radius must be smaller than Hub Radius", ["axleRadius"]);
+        }
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });

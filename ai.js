@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
+import { simulateFeatureScript } from "./simulatorClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
@@ -5645,9 +5646,16 @@ ${fsRect("baseSketch", "boxProfile", "-halfW", "-halfH", "halfW", "halfH")}
   };
 }
 
-const OBJECT_SYNONYMS = [["mug", "cup"], ["bracket", "mount"], ["disc", "disk", "rotor"], ["rim", "wheel"], ["plate", "panel"], ["housing", "enclosure", "case"], ["nut", "lugnut"]];
+const OBJECT_SYNONYMS = [["mug", "cup"], ["bracket", "mount"], ["disc", "disk", "rotor"], ["rim", "wheel"], ["plate", "panel"], ["housing", "enclosure", "case"], ["nut", "lugnut"], ["cube", "block"], ["torus", "toru", "ring", "donut", "doughnut"], ["box", "container", "tray"]];
+// The thing asked for, ignoring sizes: "a box 50mm x 30mm x 20mm" -> box, "hex nut 1 inch across flats" -> nut.
+function promptObjectNoun(prompt) {
+  const cleaned = String(prompt || "")
+    .replace(/\d+(\.\d+)?\s*(inches|inch|mm|cm|ft|in|m|")?/gi, " ")
+    .replace(/\b(x|by|mm|cm|inch|inches|in|wide|tall|long|thick|high|deep|diameter|dia|across|flats|od|id|size|sized|big|small|large|create|make|design|model|build)\b/gi, " ");
+  return headNoun(cleaned);
+}
 function sameObjectKind(prompt, title) {
-  const a = headNoun(prompt);
+  const a = promptObjectNoun(prompt);
   const b = headNoun(title);
   if (!a || !b) return false;
   return a === b || OBJECT_SYNONYMS.some(group => group.includes(a) && group.includes(b));
@@ -6166,7 +6174,7 @@ export function validateFeatureScriptStrict(code, opts = {}) {
 function looseBodiesFeedback(prompt, strict) {
   const bodies = strict.localBuild?.metrics?.bodies;
   if (!bodies || bodies <= 1) return null;
-  if (/(sets?|pairs?|kits?|assembl(y|ies)|parts|pieces|bodies|separate|mechs?|humanoid|android)|and (a|an|two|three|four|its)|(two|three|four|five|six|d+) (gears|wheels|blocks|cubes|plates)/i.test(prompt)) return null;
+  if (/\b(sets?|pairs?|kits?|assembl(y|ies)|parts|pieces|bodies|separate|mechs?|humanoid|android)\b|\band (a|an|two|three|four|its)\b|\b(two|three|four|five|six|\d+) (gears|wheels|blocks|cubes|plates)\b/i.test(prompt)) return null;
   return `The test build made ${bodies} separate solid bodies, but a "${String(prompt).slice(0, 80)}" is one object. `
     + "Pieces that should be attached are floating apart or were never merged: make each attached piece overlap the main body "
     + "(e.g. a handle's ends sink into the wall, a base touches the upright), then merge everything with one opBoolean UNION whose "
@@ -6221,7 +6229,9 @@ async function applyOnshapeCompileCheck(strict) {
     };
   }
   strict = { ...strict, localBuild };
-  if (!isOnshapeConfigured()) return strict;
+  // Then the fs_sim simulator (Onshape's real std library on OpenCascade) when installed.
+  strict = await applySimulatorCheck(strict);
+  if (!strict.ok || !isOnshapeConfigured()) return strict;
 
   const onshapeCheck = await testCompileFeatureScript(strict.code);
   if (onshapeCheck.ok !== false) {
@@ -6248,6 +6258,30 @@ async function applyOnshapeCompileCheck(strict) {
     fatalIssues: [...strict.fatalIssues, ...extraFatal],
     fatalIssueCount: strict.fatalIssueCount + extraFatal.length,
     onshapeCheck,
+  };
+}
+
+// Without Onshape keys, execute the candidate in fs_sim (the real Onshape std library on
+// an OpenCascade kernel). Runtime errors — unit mismatches, failed preconditions, empty
+// region queries, booleans or fillets that fail — become fatal issues so the repair pass
+// sees them. Fails open: no simulator, a timeout or a simulator gap never blocks generation.
+async function applySimulatorCheck(strict) {
+  let sim;
+  try {
+    sim = await simulateFeatureScript(strict.code);
+  } catch {
+    return strict;
+  }
+  if (!sim.available || !sim.errors?.length || sim.gaps?.length) {
+    return sim.available ? { ...strict, simulatorCheck: sim } : strict;
+  }
+  const extraFatal = sim.errors.map(message => ({ message: `Onshape std simulator: ${message}`, source: "simulator" }));
+  return {
+    ...strict,
+    ok: false,
+    fatalIssues: [...strict.fatalIssues, ...extraFatal],
+    fatalIssueCount: strict.fatalIssueCount + extraFatal.length,
+    simulatorCheck: sim,
   };
 }
 

@@ -10,6 +10,7 @@
  */
 import { compileCadSequenceToFeatureScript } from "./deepcadCompiler.js";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
+import { simulateFeatureScript, simulatorStatus } from "./simulatorClient.js";
 import { validateFeatureScriptStrict } from "./ai.js";
 import { libraryInfo, matchLibraryPart } from "./deepcadLibrary.js";
 import { localBuildFeatureScript } from "./localBuild.js";
@@ -22,6 +23,11 @@ const MODEL_WAKE_BUDGET_MS = Number(process.env.DEEPCAD_MODEL_WAKE_MS || 240000)
 
 export function getDeepcadConfig() {
   return { configured: Boolean(MODEL_URL), url: MODEL_URL || null, onshapeCompileCheck: isOnshapeConfigured(), library: libraryInfo() };
+}
+
+export function getVerificationConfig() {
+  const sim = simulatorStatus();
+  return { onshape: isOnshapeConfigured(), simulator: sim.available, simulatorReason: sim.reason };
 }
 
 export class DeepcadError extends Error {
@@ -259,11 +265,13 @@ async function fetchModelSequence(prompt, wakeBudgetMs = MODEL_WAKE_BUDGET_MS) {
 }
 
 /**
- * Static validator + (optional) live Onshape execution.
- * verdict: "works_in_onshape" | "fails_in_onshape" | "fails_test_build" | "builds_locally" (local test build
- * passed, Onshape not checked) | "static_ok" (nothing built) | "static_errors"
+ * Static validator + local test build (onshape-fsgen FS-Lite) + the fs_sim simulator (real
+ * Onshape std library on OpenCascade, when installed) + live Onshape (when keys are set; only
+ * after the local test build passes).
+ * verdict: "works_in_onshape" | "fails_in_onshape" | "fails_test_build" | "fails_in_simulator"
+ *        | "works_in_simulator" | "builds_locally" | "static_ok" (nothing executed it) | "static_errors"
  */
-export async function verifyFeatureScript(code) {
+export async function verifyFeatureScript(code, { render = true } = {}) {
   const strict = validateFeatureScriptStrict(code);
   const staticResult = {
     ok: strict.ok,
@@ -291,13 +299,28 @@ export async function verifyFeatureScript(code) {
     warnings: (onshape.warnings || []).slice(0, 8),
     skippedReason: onshape.skippedReason || null,
   };
+  const sim = await simulateFeatureScript(code, { render });
+  const simulation = sim.available
+    ? {
+        available: true,
+        builds: sim.builds,
+        parts: sim.parts,
+        errors: sim.errors,
+        warnings: sim.warnings,
+        gaps: sim.gaps,
+        elapsedMs: sim.elapsedMs,
+        image: sim.png ? `data:image/png;base64,${sim.png}` : null,
+      }
+    : { available: false, reason: sim.reason };
   let verdict;
   if (onshapeResult.ok === true) verdict = "works_in_onshape";
   else if (onshapeResult.ok === false) verdict = "fails_in_onshape";
   else if (localResult.ok === false) verdict = "fails_test_build";
+  else if (simulation.available && simulation.errors?.length && !simulation.gaps?.length) verdict = "fails_in_simulator";
+  else if (simulation.available && simulation.builds) verdict = "works_in_simulator";
   else if (localResult.ok === true) verdict = "builds_locally";
   else verdict = staticResult.ok ? "static_ok" : "static_errors";
-  return { verdict, static: staticResult, local: localResult, onshape: onshapeResult };
+  return { verdict, static: staticResult, local: localResult, onshape: onshapeResult, simulation };
 }
 
 /**

@@ -1,4 +1,5 @@
 // Regression harness for the Tier-2 plan compiler.
+import { dumpFs } from './lib/dumpFs.mjs';
 // Run with: npm run test:plan
 // Offline part: hand-written plans must compile into validator-clean FeatureScript
 // with zero sanitizer changes, and bad plans must produce precise plan-level errors.
@@ -123,6 +124,7 @@ for (const [name, plan] of plans) {
     continue;
   }
   const compiled = compilePlanToFeatureScript(plan);
+  dumpFs(`plan_${name}`, compiled.code);
   if (!compiled.ok) { failures += 1; console.log(`FAIL compile ${name}:`, compiled.errors.slice(0, 4)); continue; }
   const strict = validateFeatureScriptStrict(compiled.code);
   const changes = (strict.sanitizerChanges || []).map(change => change.rule);

@@ -15,15 +15,23 @@ export const lBracketFilletChamfer = defineFeature(function(context is Context, 
         isLength(definition.legHeight, { (inch) : [0.5, 2.0, 12.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Leg Thickness" }
-        isLength(definition.legThickness, { (inch) : [0.05, 0.25, 2.0] } as LengthBoundSpec);
+        isLength(definition.legThickness, { (inch) : [0.15, 0.25, 1.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Bracket Width" }
         isLength(definition.bracketWidth, { (inch) : [0.25, 1.5, 12.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Fillet Radius" }
-        isLength(definition.filletRadius, { (inch) : [0.01, 0.06, 0.5] } as LengthBoundSpec);
+        isLength(definition.filletRadius, { (inch) : [0.01, 0.06, 0.1] } as LengthBoundSpec);
     }
     {
+        if (definition.legThickness >= min(definition.legLength, definition.legHeight))
+        {
+            throw regenError("Leg Thickness must be smaller than Leg Length and Leg Height", ["legThickness"]);
+        }
+        if (definition.filletRadius * 2 >= min(definition.legThickness, definition.bracketWidth))
+        {
+            throw regenError("Fillet Radius must be less than half the Leg Thickness and Bracket Width", ["filletRadius"]);
+        }
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });

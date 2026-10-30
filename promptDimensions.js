@@ -34,7 +34,7 @@ const COUNT_NOUNS = [
 // Words after (or just before) a measurement that say what it measures.
 const ROLE_WORDS = [
   { role: "acrossFlats", pattern: /\bacross[\s-]*flats?\b|\bAF\b/i },
-  { role: "innerDiameter", pattern: /\b(inner|inside|internal)\s+(diameter|dia)\b|\bI\.?D\.?\b|\b(hole|bore|opening|center hole|centre hole)\b/i },
+  { role: "innerDiameter", pattern: /\b(inner|inside|internal)\s+(diameter|dia)\b|\bI\.?D\.?\b|\b(holes?|bores?|openings?|center hole|centre hole)\b/i },
   { role: "innerRadius", pattern: /\b(inner|inside|hole|bore)\s+radius\b/i },
   { role: "diameter", pattern: /\b(outer|outside|overall)?\s*(diameter|dia)\b|\bO\.?D\.?\b|\bØ/i },
   { role: "radius", pattern: /\bradius\b/i },
@@ -268,6 +268,55 @@ export function applyPromptToExample(code, prompt) {
     }
   }
 
+  const boundFloor = new Map(); // name -> minimum bound the dialog must not go below
+  // A hole the prompt sized must fit in sizes the prompt did not give: grow those
+  // (keeping their proportions) so the hole is at most half the smallest of them.
+  const promptHole = params.find(p => p.kind === "length" && /hole.*radius|bore.*radius/i.test(p.name) && applied.some(a => a.name === p.name && a.source === "prompt"));
+  if (promptHole) {
+    const free = params.filter(p => p.kind === "length" && /^(width|depth|height|length)$/i.test(p.name) && !applied.some(a => a.name === p.name && a.source === "prompt"));
+    const holeValue = values.get(promptHole.name);
+    const smallest = free.length ? Math.min(...free.map(p => values.get(p.name) ?? p.def)) : Infinity;
+    if (free.length) {
+      // Their minimums must also leave room for the hole when the user edits them.
+      for (const p of free) boundFloor.set(p.name, holeValue * 2.2);
+    }
+    if (free.length && smallest < holeValue * 4) {
+      const factor = (holeValue * 4) / smallest;
+      for (const p of free) {
+        const next = (values.get(p.name) ?? p.def) * factor;
+        values.set(p.name, next);
+        const entry = applied.find(a => a.name === p.name);
+        if (entry) Object.assign(entry, { value: round(next), source: "enlarged to fit the hole" });
+        else applied.push({ name: p.name, value: round(next), source: "enlarged to fit the hole" });
+      }
+    }
+  }
+
+  // Holes placed `inset` from the edges must stay inside the part: keep at least
+  // half a hole radius of material around each hole, shrinking the hole if needed.
+  const insetParam = params.find(p => p.kind === "length" && /inset/i.test(p.name));
+  const holeParam = params.find(p => p.kind === "length" && /hole.*radius/i.test(p.name));
+  if (insetParam && holeParam && (values.has(holeParam.name) || values.has(insetParam.name))) {
+    const value = p => values.get(p.name) ?? p.def;
+    const sizes = params.filter(p => p.kind === "length" && /^(width|height|depth|length)$/i.test(p.name)).map(value);
+    const smallest = sizes.length ? Math.min(...sizes) : Infinity;
+    let hole = value(holeParam);
+    let inset = value(insetParam);
+    if (inset < hole * 1.5) inset = hole * 1.5;
+    if (inset * 2 > smallest * 0.9) {
+      inset = smallest * 0.3;
+      hole = Math.min(hole, inset / 1.5);
+    }
+    for (const [param, next] of [[insetParam, inset], [holeParam, hole]]) {
+      if (Math.abs(next - value(param)) > 1e-12) {
+        values.set(param.name, next);
+        const entry = applied.find(a => a.name === param.name);
+        if (entry) Object.assign(entry, { value: round(next), source: "adjusted to fit" });
+        else applied.push({ name: param.name, value: round(next), source: "adjusted to fit" });
+      }
+    }
+  }
+
   // Linear patterns: n items at `spacing` steps from one edge must stay on the base.
   const countParam = params.find(p => p.kind === "integer" && /count/i.test(p.name));
   const spacingParam = params.find(p => p.kind === "length" && /spacing/i.test(p.name));
@@ -288,11 +337,17 @@ export function applyPromptToExample(code, prompt) {
     }
   }
 
+  // When the whole part was scaled, scale every length bound by the same factor so
+  // the example's tuned limits (e.g. leg thickness vs leg length) keep their meaning.
+  const ratio = primary && Math.abs(primary.ratio - 1) > 1e-6 ? primary.ratio : 1;
   const updated = code.replace(PARAM_RE, (whole, call, _kind, name, unit, min, def, max, spec) => {
     if (!values.has(name)) return whole;
     const value = unit === "unitless" ? Math.round(values.get(name)) : round(values.get(name));
-    const lo = Math.min(Number(min), unit === "unitless" ? value : round(value / 2));
-    const hi = Math.max(Number(max), unit === "unitless" ? value : round(value * 2));
+    const scale = unit === "unitless" ? 1 : ratio;
+    // Extend the (scaled) limits only as far as needed to include the new default.
+    let lo = Math.min(round(Number(min) * scale), value);
+    const hi = Math.max(round(Number(max) * scale), value);
+    if (boundFloor.has(name)) lo = Math.min(value, Math.max(lo, round(boundFloor.get(name))));
     return `${call}(definition.${name}, { (${unit}) : [${lo}, ${value}, ${hi}] } as ${spec})`;
   });
   return { code: updated, applied };

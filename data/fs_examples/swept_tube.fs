@@ -9,13 +9,13 @@ export const sweptCurvedTube = defineFeature(function(context is Context, id is 
         definition.location is Query;
 
         annotation { "Name" : "Tube Radius" }
-        isLength(definition.tubeRadius, { (inch) : [0.05, 0.25, 3.0] } as LengthBoundSpec);
+        isLength(definition.tubeRadius, { (inch) : [0.05, 0.25, 0.43] } as LengthBoundSpec);
 
         annotation { "Name" : "Run Length" }
-        isLength(definition.runLength, { (inch) : [0.5, 4.0, 24.0] } as LengthBoundSpec);
+        isLength(definition.runLength, { (inch) : [3.25, 4.0, 24.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Rise Height" }
-        isLength(definition.riseHeight, { (inch) : [0.1, 1.0, 12.0] } as LengthBoundSpec);
+        isLength(definition.riseHeight, { (inch) : [0.1, 1.0, 1.6] } as LengthBoundSpec);
     }
     {
         var skPlane = isQueryEmpty(context, definition.location)
@@ -34,6 +34,23 @@ export const sweptCurvedTube = defineFeature(function(context is Context, id is 
             vector(run, 0) * inch
         ] });
         skSolve(pathSketch);
+
+        // The tube cannot be wider than the path's tightest bend radius, or the
+        // swept surface folds over itself. Measure the path's curvature to check.
+        var samples = [];
+        for (var i = 0; i <= 64; i += 1)
+        {
+            samples = append(samples, i / 64);
+        }
+        var maxCurvature = 0 / meter;
+        for (var sample in evEdgeCurvatures(context, { "edge" : qCreatedBy(id + "pathSketch", EntityType.EDGE), "parameters" : samples }))
+        {
+            maxCurvature = max(maxCurvature, sample.curvature);
+        }
+        if (definition.tubeRadius * maxCurvature >= 0.95)
+        {
+            throw regenError("Tube Radius is larger than the path's tightest bend; lower it or lengthen the path", ["tubeRadius"]);
+        }
 
         // Profile: circle on a plane perpendicular to the path start.
         var profilePlane = plane(skPlane.origin, skPlane.x);

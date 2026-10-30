@@ -47,6 +47,7 @@ const server = spawn(process.execPath, ['server.js'], {
     DEEPCAD_MODEL_TOKEN: 'test-token',
     DEEPCAD_MODEL_WAKE_MS: '30000',
     ONSHAPE_COMPILE_CHECK_ENABLED: 'false',
+    FS_SIM_TIMEOUT_MS: '120000',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -79,7 +80,14 @@ try {
   check('size taken from the prompt (60 mm → 2.362205 in)', (gen.data.code || '').includes('[0.05, 2.362205, 200]'));
   check('mode is deepcad_text2cad_model', gen.data.generationMode === 'deepcad_text2cad_model', gen.data.generationMode);
   check('verification attached and static validator passes', gen.data.verification?.static?.ok === true, JSON.stringify(gen.data.verification));
-  check('Onshape check honestly reported as not run', ['static_ok', 'builds_locally'].includes(gen.data.verification?.verdict) && Boolean(gen.data.verification?.onshape?.skippedReason), gen.data.verification?.verdict);
+  check('Onshape check honestly reported as not run', Boolean(gen.data.verification?.onshape?.skippedReason));
+  if (process.env.FS_SIM_PYTHON) {
+    // With the FeatureScript simulator installed, generated parts are executed and rendered.
+    check('simulator builds the generated part', gen.data.verification?.verdict === 'works_in_simulator', gen.data.verification?.verdict);
+    check('simulator returns a preview image', String(gen.data.verification?.simulation?.image || '').startsWith('data:image/png;base64,'));
+  } else {
+    check('without the simulator the verdict is static_ok or builds_locally', ['static_ok', 'builds_locally'].includes(gen.data.verification?.verdict), gen.data.verification?.verdict);
+  }
 
   // 2) model answers but output is unusable → clean 422 for the page to show
   const bad = await post('/generate-deepcad', { prompt: 'garbage' });
@@ -97,7 +105,7 @@ try {
   const verified = await post('/verify', { code: gen.data.code });
   check('/verify on generated code', verified.status === 200 && verified.data.static?.ok === true, JSON.stringify(verified.data).slice(0, 300));
   const badCode = await post('/verify', { code: 'FeatureScript 2931;\nexport const x = defineFeature(function(context is Context, id is Id, definition is map)\n{\n opPatternCircular(context, id, {});\n' });
-  check('/verify flags broken FeatureScript', badCode.status === 200 && ['static_errors', 'fails_test_build'].includes(badCode.data.verdict), JSON.stringify(badCode.data).slice(0, 300));
+  check('/verify flags broken FeatureScript', badCode.status === 200 && ['static_errors', 'fails_test_build', 'fails_in_simulator'].includes(badCode.data.verdict), JSON.stringify(badCode.data).slice(0, 300));
 } finally {
   server.kill();
   model.close();

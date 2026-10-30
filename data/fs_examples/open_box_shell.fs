@@ -21,6 +21,10 @@ export const openTopBox = defineFeature(function(context is Context, id is Id, d
         isLength(definition.wallThickness, { (inch) : [0.02, 0.1, 1.0] } as LengthBoundSpec);
     }
     {
+        if (definition.wallThickness * 2 >= min(definition.width, definition.depth) || definition.wallThickness >= definition.height)
+        {
+            throw regenError("Wall Thickness is too large for the box", ["wallThickness"]);
+        }
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });

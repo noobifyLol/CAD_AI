@@ -9,15 +9,19 @@ export const dShaftKeyed = defineFeature(function(context is Context, id is Id, 
         definition.location is Query;
 
         annotation { "Name" : "Shaft Radius" }
-        isLength(definition.shaftRadius, { (inch) : [0.05, 0.375, 3.0] } as LengthBoundSpec);
+        isLength(definition.shaftRadius, { (inch) : [0.1, 0.375, 3.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Shaft Length" }
         isLength(definition.shaftLength, { (inch) : [0.2, 1.5, 24.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Flat Depth" }
-        isLength(definition.flatDepth, { (inch) : [0.01, 0.08, 1.0] } as LengthBoundSpec);
+        isLength(definition.flatDepth, { (inch) : [0.01, 0.08, 0.3] } as LengthBoundSpec);
     }
     {
+        if (definition.flatDepth >= definition.shaftRadius)
+        {
+            throw regenError("Flat Depth must be smaller than Shaft Radius", ["flatDepth"]);
+        }
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });

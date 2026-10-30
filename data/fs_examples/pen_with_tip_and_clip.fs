@@ -59,10 +59,12 @@ export const penWithTipAndClip = defineFeature(function(context is Context, id i
         });
 
         // 3. Pocket clip: thin bar lying along the barrel side near the top end.
+        // It starts slightly inside the barrel (r * 0.85) so the union really fuses
+        // it on; a clip that only touches the barrel tangentially stays a separate part.
         var cw = definition.clipWidth / inch;
         var clipSketch = newSketchOnPlane(context, id + "clipSketch", { "sketchPlane" : skPlane });
         skRectangle(clipSketch, "clip", {
-            "firstCorner" : vector(r, -cw / 2) * inch,
+            "firstCorner" : vector(r * 0.85, -cw / 2) * inch,
             "secondCorner" : vector(r + cw, cw / 2) * inch
         });
         skSolve(clipSketch);

@@ -1,5 +1,6 @@
 // Regression harness for the FeatureScript validator + sanitizer.
 // Run with: npm run test:validator
+import { dumpFs } from './lib/dumpFs.mjs';
 // - Own templates and guaranteed builders must validate clean (no false positives,
 //   and the sanitizer must not corrupt valid code).
 // - Known-bad FeatureScript patterns must be flagged.
@@ -29,6 +30,7 @@ function expectFlagged(label, code, mustMention) {
 }
 
 // 1) Own template must stay clean
+dumpFs('strict_template', STRICT_FEATURESCRIPT_TEMPLATE);
 expectClean('STRICT_FEATURESCRIPT_TEMPLATE', STRICT_FEATURESCRIPT_TEMPLATE);
 
 // 2) Guaranteed builders across shapes must stay clean
@@ -45,6 +47,7 @@ for (const [name, dims] of shapes) {
     featureName: `${name.replace(/[^a-z]/g, '')}Feature`, featureLabel: `${name} feature`, confidence: 'LOW', ...dims,
   }, {}, null, {});
   if (!result?.code) { failures += 1; console.log(`FAIL guaranteed builder returned no code for ${name}`); continue; }
+  dumpFs(`guaranteed_${name}`, result.code);
   expectClean(`guaranteed:${name}`, result.code);
 }
 

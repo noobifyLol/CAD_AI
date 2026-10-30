@@ -18,12 +18,20 @@ export const cupWithHandle = defineFeature(function(context is Context, id is Id
         isLength(definition.wallThickness, { (inch) : [0.03, 0.12, 0.5] } as LengthBoundSpec);
 
         annotation { "Name" : "Handle Radius" }
-        isLength(definition.handleRadius, { (inch) : [0.1, 0.8, 4.0] } as LengthBoundSpec);
+        isLength(definition.handleRadius, { (inch) : [0.3, 0.8, 4.0] } as LengthBoundSpec);
 
         annotation { "Name" : "Handle Thickness" }
-        isLength(definition.handleThickness, { (inch) : [0.05, 0.2, 1.0] } as LengthBoundSpec);
+        isLength(definition.handleThickness, { (inch) : [0.05, 0.2, 0.6] } as LengthBoundSpec);
     }
     {
+        if (definition.wallThickness * 2 >= definition.cupRadius || definition.wallThickness >= definition.cupHeight / 2)
+        {
+            throw regenError("Wall Thickness is too large for the cup's radius or height", ["wallThickness"]);
+        }
+        if (definition.handleThickness >= definition.handleRadius)
+        {
+            throw regenError("Handle Thickness must be smaller than Handle Radius", ["handleThickness"]);
+        }
         var skPlane = isQueryEmpty(context, definition.location)
             ? plane(WORLD_ORIGIN, Z_DIRECTION)
             : evPlane(context, { "face" : definition.location });
@@ -51,7 +59,8 @@ export const cupWithHandle = defineFeature(function(context is Context, id is Id
         var r = definition.cupRadius / inch;
         var hh = definition.cupHeight / inch;
         var hr = definition.handleRadius / inch;
-        var handlePlane = plane(skPlane.origin + skPlane.normal * (hh / 2 * inch), skPlane.x);
+        // Centre the handle's thickness on the cup's mid-plane.
+        var handlePlane = plane(skPlane.origin + skPlane.normal * (hh / 2 * inch) - skPlane.x * (definition.handleThickness / 2), skPlane.x);
         var handleSketch = newSketchOnPlane(context, id + "handleSketch", { "sketchPlane" : handlePlane });
         skCircle(handleSketch, "handleOuter", {
             "center" : vector(r + hr * 0.6, 0) * inch,
@@ -74,5 +83,29 @@ export const cupWithHandle = defineFeature(function(context is Context, id is Id
                 qCreatedBy(id + "cupBody", EntityType.BODY)
             ]),
             "operationType" : BooleanOperationType.UNION
+        });
+
+        // Re-cut the cavity: the handle ring overlaps the wall to fuse with it, and any
+        // part of the ring inside the cup would otherwise poke into the drinking space.
+        var cavityPlane = plane(skPlane.origin + skPlane.normal * definition.wallThickness, skPlane.normal, skPlane.x);
+        var cavitySketch = newSketchOnPlane(context, id + "cavitySketch", { "sketchPlane" : cavityPlane });
+        skCircle(cavitySketch, "cavity", {
+            "center" : vector(0, 0) * inch,
+            "radius" : definition.cupRadius - definition.wallThickness
+        });
+        skSolve(cavitySketch);
+        opExtrude(context, id + "cavityTool", {
+            "entities"  : qSketchRegion(id + "cavitySketch"),
+            "direction" : cavityPlane.normal,
+            "endBound"  : BoundingType.BLIND,
+            "endDepth"  : definition.cupHeight
+        });
+        opBoolean(context, id + "recutCavity", {
+            "tools" : qCreatedBy(id + "cavityTool", EntityType.BODY),
+            "targets" : qUnion([
+                qCreatedBy(id + "cupBody", EntityType.BODY),
+                qCreatedBy(id + "joinHandle", EntityType.BODY)
+            ]),
+            "operationType" : BooleanOperationType.SUBTRACTION
         });
     });

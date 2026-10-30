@@ -1,0 +1,4 @@
+# FeatureScript simulator (fs_sim). Versions the test suite ran against.
+cadquery-ocp==8.0.1.1.0
+numpy==2.5.3
+matplotlib==3.11.2

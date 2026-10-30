@@ -117,7 +117,7 @@ OPERATIONS:
 - {"op":"sketch","id":"torsoSk","plane":"base","entities":[...]} — plane is "base", "offset:<expr>" (parallel plane raised by expr inches), or "vertical:<expr>" (perpendicular plane for handles/side features).
   Entities: {"type":"circle","id":"c1","center":[x,y],"radius":r} | {"type":"rectangle","id":"r1","corner1":[x1,y1],"corner2":[x2,y2]} | {"type":"polygon","id":"p1","center":[x,y],"firstVertex":[x,y],"sides":6} | {"type":"line","id":"l1","start":[x,y],"end":[x,y]} | {"type":"arc","id":"a1","start":..,"mid":..,"end":..} | {"type":"spline","id":"s1","points":[[x,y],...]}
 - {"op":"extrude","id":"torsoBody","sketch":"torsoSk","value":"torsoHeight","filterInnerLoops":true|null} — value is the depth. Inner circles in the same sketch become holes when filterInnerLoops is true.
-- {"op":"revolve","id":"vaseBody","sketch":"profileSk"} — revolves the sketch region 360° around the sketch's vertical axis (x=0). The profile MUST be closed: an axis line on x=0, the outer profile (spline/lines with all x >= 0), and closing lines back to the axis at top and bottom.
+- {"op":"revolve","id":"vaseBody","sketch":"profileSk"} — revolves the sketch region 360° so the part stands upright on the base plane. In a revolve profile sketch, x is the radius and y is the height above the base plane; the axis is x=0. The profile MUST be closed: an axis line on x=0, the outer profile (spline/lines with all x >= 0), and closing lines back to the axis at top and bottom.
 - {"op":"loft","id":"tipBody","sketches":["baseSk","topSk"]} — each profile is its own sketch on its own plane, in order.
 - {"op":"sweep","id":"tubeBody","profileSketch":"profSk","pathSketch":"pathSk"} — path is an open wire on "base"; profile sketch should use a "vertical:0" plane.
 - {"op":"shell","id":"hollow1","target":"cupBody","value":"wallThickness"} — hollows the body, opening the top face.
@@ -326,8 +326,19 @@ export function validatePlan(plan) {
 
 // ─── Compilation ─────────────────────────────────────────────────────────────
 
-function planeExprFor(step, paramNames) {
+function planeExprFor(step, paramNames, revolveProfile = false) {
   const plane = String(step.plane || "base");
+  if (revolveProfile && (plane === "base" || /^offset:/.test(plane))) {
+    // Revolve profiles are drawn on the vertical plane through the base x axis
+    // (sketch y = base normal) so the revolved part stands upright on the base.
+    const offset = plane === "base" ? null : compileExpr(plane.slice("offset:".length), paramNames, "plane offset").code;
+    const origin = offset ? `skPlane.origin + skPlane.normal * (${offset} * inch)` : "skPlane.origin";
+    const varName = `pl_${step.id}`;
+    return {
+      varName,
+      declaration: `        var ${varName} = plane(${origin}, cross(skPlane.x, skPlane.normal), skPlane.x);\n`,
+    };
+  }
   if (plane === "base") return { varName: "skPlane", declaration: "" };
   const planeMatch = plane.match(/^(offset|vertical):(.+)$/);
   const offset = compileExpr(planeMatch[2], paramNames, "plane offset").code;
@@ -387,9 +398,10 @@ export function compilePlanToFeatureScript(plan) {
     return `qUnion([${aliases.map(alias => `qCreatedBy(id + "${alias}", EntityType.BODY)`).join(", ")}])`;
   };
 
+  const revolveProfiles = new Set(plan.steps.filter(step => step.op === "revolve").map(step => step.sketch));
   for (const step of plan.steps) {
     if (step.op === "sketch") {
-      const { varName, declaration } = planeExprFor(step, paramNames);
+      const { varName, declaration } = planeExprFor(step, paramNames, revolveProfiles.has(step.id));
       if (declaration) body.push(declaration.trimEnd());
       sketchPlaneVars.set(step.id, varName);
       const sketchVar = `sk_${step.id}`;
@@ -425,7 +437,7 @@ export function compilePlanToFeatureScript(plan) {
     } else if (step.op === "revolve") {
       body.push(`        opRevolve(context, id + "${step.id}", {`);
       body.push(`            "entities"     : qSketchRegion(id + "${step.sketch}"),`);
-      body.push(`            "axis"         : line(skPlane.origin, cross(skPlane.normal, skPlane.x)),`);
+      body.push(`            "axis"         : line(skPlane.origin, skPlane.normal),`);
       body.push(`            "angleForward" : 2 * PI * radian`);
       body.push(`        });`);
       body.push("");
@@ -452,19 +464,28 @@ export function compilePlanToFeatureScript(plan) {
       body.push(`        });`);
       body.push("");
     } else if (step.op === "fillet" || step.op === "chamfer") {
+      // Edge rounding is cosmetic: if the radius is too big for some edges at the
+      // user's dimensions, keep the part and show a warning instead of failing.
       const edges = `qEdgeTopologyFilter(qOwnedByBody(${bodyQuery(step.target)}, EntityType.EDGE), EdgeTopology.TWO_SIDED)`;
+      body.push(`        try`);
+      body.push(`        {`);
       if (step.op === "fillet") {
-        body.push(`        opFillet(context, id + "${step.id}", {`);
-        body.push(`            "entities" : ${edges},`);
-        body.push(`            "radius"   : ${expr(step.value)} * inch`);
-        body.push(`        });`);
+        body.push(`            opFillet(context, id + "${step.id}", {`);
+        body.push(`                "entities" : ${edges},`);
+        body.push(`                "radius"   : ${expr(step.value)} * inch`);
+        body.push(`            });`);
       } else {
-        body.push(`        opChamfer(context, id + "${step.id}", {`);
-        body.push(`            "entities"    : ${edges},`);
-        body.push(`            "chamferType" : ChamferType.EQUAL_OFFSETS,`);
-        body.push(`            "width"       : ${expr(step.value)} * inch`);
-        body.push(`        });`);
+        body.push(`            opChamfer(context, id + "${step.id}", {`);
+        body.push(`                "entities"    : ${edges},`);
+        body.push(`                "chamferType" : ChamferType.EQUAL_OFFSETS,`);
+        body.push(`                "width"       : ${expr(step.value)} * inch`);
+        body.push(`            });`);
       }
+      body.push(`        }`);
+      body.push(`        catch (error)`);
+      body.push(`        {`);
+      body.push(`            reportFeatureWarning(context, id, "The ${step.op} \\"${step.id}\\" was skipped: it is too large for this part's edges at these dimensions.");`);
+      body.push(`        }`);
       body.push("");
     } else if (step.op === "boolean_union") {
       // Onshape-verified semantics: UNION takes ALL bodies in "tools" and must NOT
