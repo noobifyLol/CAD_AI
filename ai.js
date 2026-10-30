@@ -38,7 +38,8 @@ const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first"
 // Set USE_VALIDATED_TEMPLATES=false only when intentionally testing free-form prompting.
 const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "true").toLowerCase() !== "false";
 const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
-const ENABLE_OPERATION_COMPILER_FALLBACK = String(process.env.CAD_ENABLE_OPERATION_COMPILER_FALLBACK || "false").toLowerCase() === "true";
+const GUARANTEED_OPERATION_COMPILER = String(process.env.CAD_GUARANTEED_OPERATION_COMPILER || "false").toLowerCase() === "true";
+const ENABLE_OPERATION_COMPILER_FALLBACK =String(process.env.CAD_ENABLE_OPERATION_COMPILER_FALLBACK || "false").toLowerCase() === "true";
 // Tier 2: for prompts with no strong curated-example match, ask the model for a typed
 // JSON build plan and compile it deterministically instead of asking for raw code.
 const ENABLE_PLAN_COMPILER = String(process.env.CAD_ENABLE_PLAN_COMPILER || "true").toLowerCase() !== "false";
@@ -5746,7 +5747,9 @@ export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {},
     }
   }
 
-  const robustResult = buildLocalRobustFeatureScript(prompt, dims, decomposition, retrieval, learningContext);
+  // The hand-written operation compiler made unrelated shapes in batch tests (a "Belt Driven
+  // Side Plate" for a timing pulley), so it is off unless CAD_GUARANTEED_OPERATION_COMPILER=true.
+  const robustResult = GUARANTEED_OPERATION_COMPILER ? buildLocalRobustFeatureScript(prompt, dims, decomposition, retrieval, learningContext) : null;
   if (robustResult?.code) {
     const strict = validateFeatureScriptStrict(robustResult.code);
     return {
