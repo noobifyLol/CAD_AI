@@ -237,6 +237,21 @@ Onshape, and the official [FeatureScript library reference](https://cad.onshape.
 - Named everyday objects must be decomposed into components (pen = barrel +
   tip + clip), never one stretched primitive.
 
+## More AI capacity (free providers besides Groq)
+
+Groq's free tier allows about 8,000 tokens per request and few requests per minute. Any
+OpenAI-compatible provider can be added in front of it; it is tried first and Groq stays
+as the backup:
+
+| Provider | Free key | `ALT_LLM_BASE_URL` | `ALT_LLM_MODEL` |
+| --- | --- | --- | --- |
+| Google Gemini | aistudio.google.com/apikey | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` |
+| Cerebras | cloud.cerebras.ai | `https://api.cerebras.ai/v1` | `gpt-oss-120b` |
+
+Set `ALT_LLM_BASE_URL`, `ALT_LLM_API_KEY` and `ALT_LLM_MODEL` (and `_2`, `_3`, ... for more
+providers) in `.env` and in Render's Environment settings. `/health` lists them under
+`models.extraProviders`. A provider that is rate-limited or down is skipped for a minute.
+
 ## Environment knobs (.env)
 
 - `GROQ_GENERATION_MODEL` / `GROQ_MODEL` / `GROQ_FALLBACK_MODEL`: model routing;

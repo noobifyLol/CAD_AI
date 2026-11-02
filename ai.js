@@ -452,6 +452,7 @@ export function getModelConfig() {
     maxCompletionTokens: GROQ_MAX_COMPLETION_TOKENS,
     codeMaxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
     multiKeyEnabled: MULTI_KEY_ENABLED,
+    extraProviders: ALT_PROVIDERS.map(provider => provider.name),
     candidateCount: CAD_CANDIDATE_COUNT,
     retrievalWorkers: CAD_RETRIEVAL_WORKERS,
     sharedKeyCount,
@@ -860,7 +861,64 @@ function pickUntriedOrgSlot(poolSize, triedSlots, triedOrgs) {
   return candidates.find(slot => !keySlotOrgCache.has(slot)) || null;
 }
 
+// ── Extra AI providers (tried before Groq) ──────────────────────────────────
+// Any OpenAI-compatible chat API: Google Gemini (free key from aistudio.google.com),
+// Cerebras (free tier, cloud.cerebras.ai), OpenRouter, Mistral, ... Set in .env / Render:
+//   ALT_LLM_BASE_URL  e.g. https://generativelanguage.googleapis.com/v1beta/openai
+//                          https://api.cerebras.ai/v1
+//   ALT_LLM_API_KEY   the provider's key
+//   ALT_LLM_MODEL     e.g. gemini-2.5-flash  or  gpt-oss-120b
+// Several providers: ALT_LLM_BASE_URL_2 / ALT_LLM_API_KEY_2 / ALT_LLM_MODEL_2, ... (up to 5).
+// When a provider is rate-limited or down it is skipped for a minute and Groq is used.
+const ALT_PROVIDERS = [1, 2, 3, 4, 5].map(n => {
+  const suffix = n === 1 ? "" : `_${n}`;
+  const baseUrl = String(process.env[`ALT_LLM_BASE_URL${suffix}`] || "").replace(/\/+$/, "");
+  const apiKey = process.env[`ALT_LLM_API_KEY${suffix}`];
+  const model = process.env[`ALT_LLM_MODEL${suffix}`];
+  return baseUrl && apiKey && model ? { name: `${new URL(baseUrl).hostname}/${model}`, baseUrl, apiKey, model } : null;
+}).filter(Boolean);
+const altProviderPausedUntil = new Map();
+
+async function callAltProvider(provider, messages, options) {
+  const body = {
+    model: provider.model,
+    messages,
+    temperature: GROQ_TEMPERATURE,
+    max_tokens: Number(options.maxCompletionTokens || (options.fullCode ? GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS)),
+  };
+  if (options.jsonSchema) body.response_format = { type: "json_object" };
+  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${provider.apiKey}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(options.timeoutMs || GROQ_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const error = new Error(`${provider.name} HTTP ${response.status}: ${text.slice(0, 200)}`);
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  const content = normalizeMessageContent(data?.choices?.[0]?.message?.content);
+  if (!content) throw new Error(`${provider.name} returned no content`);
+  return content;
+}
+
 async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
+  for (const provider of ALT_PROVIDERS) {
+    if ((altProviderPausedUntil.get(provider.name) || 0) > Date.now()) continue;
+    const startedAt = Date.now();
+    try {
+      const content = await callAltProvider(provider, messages, options);
+      console.log(`[AI] ${provider.name} answered stage=${options.stage || "generation"} in ${Date.now() - startedAt}ms`);
+      return content;
+    } catch (err) {
+      const pause = err.status === 429 ? 60000 : err.status >= 500 || err.name === "TimeoutError" ? 30000 : 10000;
+      altProviderPausedUntil.set(provider.name, Date.now() + pause);
+      console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 160)}); using the next provider.`);
+    }
+  }
   const fallbackList = Array.isArray(fallbackModels)
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
