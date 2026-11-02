@@ -5682,6 +5682,90 @@ function sameObjectKind(prompt, title) {
   return a === b || OBJECT_SYNONYMS.some(group => group.includes(a) && group.includes(b));
 }
 
+// ── Follow-up edits ("make it taller", "add two holes") ─────────────────────
+// The AI edits the user's current part instead of starting over, and nothing here is a
+// template: every edit is test-built like a new part, errors go back to the AI, and if no
+// edit builds the user keeps their working part with an explanation.
+function strictPromptSection(header) {
+  const start = FEATURESCRIPT_STRICT_SYSTEM_PROMPT.indexOf(header);
+  if (start < 0) return "";
+  const next = FEATURESCRIPT_STRICT_SYSTEM_PROMPT.indexOf("═══", start + header.length);
+  return FEATURESCRIPT_STRICT_SYSTEM_PROMPT.slice(start, next < 0 ? undefined : next).trim();
+}
+
+function buildEditSystemPrompt() {
+  return [
+    "You edit an existing Onshape FeatureScript 2931 custom feature to apply the user's change request.",
+    "Rules: keep the file structure (FeatureScript 2931; import; annotation; export const ... = defineFeature(...)); keep every part the request does not mention exactly as it is; expose new sizes as precondition parameters (isLength with LengthBoundSpec, isInteger with IntegerBoundSpec) whose defaults make the requested change; keep the feature name; every length carries units; a Plane has only origin, normal and x (its y direction is cross(plane.normal, plane.x)); angles need radian or degree; join text with ~; merge touching bodies with one opBoolean UNION.",
+    strictPromptSection("═══ ONSHAPE TOOL REFERENCE"),
+    strictPromptSection("═══ RUNTIME RULES"),
+    'Return JSON only: {"featureName", "featureLabel", "reasoning", "code"} where code is the COMPLETE edited file.',
+  ].filter(Boolean).join("\n\n");
+}
+
+function lastPartInHistory(history) {
+  return [...(Array.isArray(history) ? history : [])].reverse()
+    .find(turn => turn && typeof turn.code === "string" && /defineFeature\s*\(/.test(turn.code)) || null;
+}
+
+async function editFeatureScript(prompt, history, requestId) {
+  const last = lastPartInHistory(history);
+  const previousCode = last.code;
+  const featureName = last.featureName || (previousCode.match(/export\s+const\s+(\w+)/) || [])[1] || "editedPart";
+  const featureLabel = last.featureLabel || (previousCode.match(/"Feature Type Name"\s*:\s*"([^"]+)"/) || [])[1] || "Edited Part";
+  const steps = history.slice(-5).map(turn => String(turn?.prompt || "").slice(0, 160)).filter(Boolean);
+  const slots = keySlotsForStage("generation", 4, `${requestId}:edit`);
+  const dims = { featureName, featureLabel, shape: "EDIT", confidence: "HIGH" };
+  const done = (code, generationMode, reasoning, warnings = []) => ({
+    code, featureName, featureLabel, dims, generationMode,
+    completionLevel: generationMode === "edit_not_applied" ? "partial" : "full",
+    thinking: reasoning, warnings, omissions: [],
+    orchestration: { status: "completed", passes: { generation: { selectedCandidateId: generationMode } } },
+  });
+  let feedback = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const user = [
+      `PART SO FAR (requests, oldest first): ${steps.join(" -> ") || "(unknown)"}`,
+      `CHANGE REQUEST: ${prompt}`,
+      "CURRENT CODE (it builds in Onshape):",
+      previousCode,
+      ...(feedback ? ["YOUR LAST EDIT FAILED THESE CHECKS. Fix every one:", ...feedback.map(message => `- ${message}`)] : []),
+    ].join("\n");
+    try {
+      const fitted = fitGenerationMessages(buildEditSystemPrompt(), user);
+      const raw = await chat([
+        { role: "system", content: fitted.system },
+        { role: "user", content: fitted.user },
+      ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
+        stage: "generation",
+        affinity: `${requestId}:edit:${attempt}`,
+        keySlot: slots[attempt % slots.length],
+        fullCode: true,
+        maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
+        jsonSchema: FEATURESCRIPT_GENERATION_JSON_SCHEMA,
+      });
+      const parsed = parseFeatureScriptJson(raw, dims);
+      if (!parsed?.code) {
+        feedback = ["Return only the JSON object, with the complete edited file in code."];
+        continue;
+      }
+      const strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(parsed.code));
+      if (strict.ok) {
+        console.log(`[AI] Edit applied on attempt ${attempt + 1}${describeBuildChecks(strict)}.`);
+        return done(strict.code, "edit_applied", parsed.reasoning || `Applied: ${prompt}`);
+      }
+      const built = await firstCandidateThatBuilds([strict.code]);
+      if (built) return done(built.code, "edit_applied", parsed.reasoning || `Applied: ${prompt}`, ["The rules check flagged this edit, but it built in both local test builds."]);
+      feedback = [...strict.fatalIssues, ...strict.blockingIssues].slice(0, 8).map(issue => issue.message);
+      console.log(`[AI] Edit attempt ${attempt + 1} failed: ${String(feedback[0] || "").slice(0, 160)}`);
+    } catch (err) {
+      feedback = [`The previous attempt failed: ${String(err.message || err).slice(0, 200)}`];
+    }
+  }
+  return done(previousCode, "edit_not_applied", "The change could not be made in a way that builds, so the part is unchanged.",
+    [`Could not apply "${prompt}" in a way that builds, so your previous part is returned unchanged. Try describing the change differently.`]);
+}
+
 async function firstCandidateThatBuilds(codes) {
   for (const code of [...new Set(codes.filter(Boolean))]) {
     const build = await localBuildFeatureScript(code);
@@ -6681,6 +6765,12 @@ export async function generateFeatureScript(prompt, options = {}) {
   const learningContext = normalizeLearningContext(options.learningContext);
   const history = Array.isArray(options.history) ? options.history : [];
   const requestId = options.requestId || makeRequestId(prompt);
+  // A follow-up on the user's current part edits that part (no templates, no new design).
+  if (lastPartInHistory(history)) {
+    console.log(`[AI] Editing the previous part: "${prompt}"`);
+    return editFeatureScript(prompt, history, requestId);
+  }
+
   const dims = applyPromptHeuristics(prompt, await extractDims(prompt, learningContext, history, { requestId }));
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 

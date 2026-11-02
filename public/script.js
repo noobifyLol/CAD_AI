@@ -41,7 +41,7 @@ function updateEngineHint() {
   if (!hint) return;
   const deepcad = runtimeConfig?.deepcad;
   if (engine === 'auto') {
-    const library = deepcad?.library?.available ? `First it looks for a matching real part among ${deepcad.library.parts ? deepcad.library.parts.toLocaleString() : '30,000'} DeepCAD parts. ` : '';
+    const library = deepcad?.library?.available ? `First it looks for a matching real part among ${deepcad.library.parts ? deepcad.library.parts.toLocaleString() : '42,000'} DeepCAD parts. ` : '';
     hint.textContent = library + (deepcad?.configured
       ? 'Flat, extruded parts (plates, rings, brackets) go to the DeepCAD model; cones, gears and curved or everyday objects go to Parametric AI.'
       : 'Otherwise Auto uses Parametric AI (the DeepCAD model is not connected on this server).');
@@ -455,6 +455,7 @@ async function runDeepcad(body, { button, busyLabel, idleLabel, prompt }) {
     const otherNotes = data.generationMode === 'deepcad_library' ? (data.warnings || []).filter(w => !w.startsWith('Closest real DeepCAD part')).join(' ') : notes.trim();
     setStatus('gen-status', `Generated "${data.featureLabel}" ${source}.${otherNotes ? ` ${otherNotes}` : ''}`, 'ok');
     setThinking('gen', JSON.stringify(data.sequence, null, 2));
+    if (data.code && prompt) rememberPart(prompt, data);
     return { done: true };
   } catch (e) {
     if (body.auto) return { done: false, unavailable: true, reason: `the DeepCAD model could not be reached (${e.message})` };
@@ -493,12 +494,42 @@ async function compileDeepcadJson() {
   });
 }
 
+// The part being worked on: each successful generation or edit, so follow-up messages
+// ("make it taller") edit it instead of starting over. "New part" clears it.
+let partSession = [];
+
+function rememberPart(prompt, data) {
+  partSession = [...partSession, { prompt, code: data.code, featureName: data.featureName, featureLabel: data.featureLabel }].slice(-6);
+  const banner = document.getElementById('edit-banner');
+  if (banner) {
+    document.getElementById('edit-part-name').textContent = data.featureLabel || 'your part';
+    banner.hidden = false;
+  }
+  const input = document.getElementById('gen-prompt');
+  if (input) {
+    input.value = '';
+    input.placeholder = 'Describe a change to this part, or press "New part" to start over.';
+  }
+}
+
+function startNewPart() {
+  partSession = [];
+  const banner = document.getElementById('edit-banner');
+  if (banner) banner.hidden = true;
+  const input = document.getElementById('gen-prompt');
+  if (input) {
+    input.placeholder = 'Describe the part: shape, dimensions, holes, fillets, materials, and how it should be adjustable.';
+    input.focus();
+  }
+}
+
 async function generate() {
   const prompt = document.getElementById('gen-prompt').value.trim();
   if (!prompt) return;
   const engine = document.getElementById('gen-engine')?.value || 'auto';
   let autoNote = '';
-  if (engine === 'deepcad' || engine === 'auto') {
+  // Edits of the current part always go to the AI editor (DeepCAD only makes new parts).
+  if (!partSession.length && (engine === 'deepcad' || engine === 'auto')) {
     const outcome = await runDeepcad({ prompt, auto: engine === 'auto' }, {
       button: document.getElementById('gen-btn'),
       busyLabel: 'Generating',
@@ -510,7 +541,8 @@ async function generate() {
       ? `Warning: the DeepCAD model is unavailable right now (its free monthly credits may be used up, or it is restarting), so Parametric AI made this part instead. `
       : `Auto used Parametric AI because ${outcome.reason}. `;
   }
-  const body = { prompt };
+  // A follow-up on the current part is an edit: send the part so the AI changes it.
+  const body = partSession.length ? { prompt, history: partSession.slice(-4) } : { prompt };
 
   const btn = document.getElementById('gen-btn');
   btn.innerHTML = '<div class="spinner"></div><span>Generating</span>';
@@ -529,6 +561,7 @@ async function generate() {
     if (!r.ok) throw new Error(data.error || 'Generation failed');
     setOutput('gen-output', data.code, 'copy-btn', data.generationId);
     setThinking('gen', data.thinking || '');
+    if (data.code && data.generationMode !== 'edit_not_applied') rememberPart(prompt, data);
     if (data.code) verifyGeneratedCode();
     const simplified = data.completionLevel === 'simplified' || data.generationMode === 'multi_key_simplified' || data.generationMode === 'gear_template_fallback';
     const repaired = data.completionLevel === 'repaired' || data.generationMode === 'multi_key_repaired';

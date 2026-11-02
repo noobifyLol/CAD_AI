@@ -738,6 +738,10 @@
     .two-col { grid-template-columns: 1fr !important; }
     .powered-by { display: none; }
   }
+  .edit-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px;
+    padding: 10px 12px; border: 1px solid rgba(99,102,241,.45); background: rgba(99,102,241,.1); border-radius: 10px; font-size: .86rem; }
+  .edit-banner[hidden] { display: none; }
+  .btn-small { padding: 6px 12px; font-size: .8rem; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -779,6 +783,10 @@
             <option value="deepcad">DeepCAD model (Text2CAD, Hugging Face)</option>
           </select>
           <div class="hint" id="gen-engine-hint"></div>
+          <div id="edit-banner" class="edit-banner" hidden>
+            <span>Editing <strong id="edit-part-name"></strong>: describe a change ("make it taller", "add two holes").</span>
+            <button class="btn btn-ghost btn-small" type="button" onclick="startNewPart()">New part</button>
+          </div>
           <div class="btn-row">
             <button class="btn btn-primary" id="gen-btn" onclick="generate()">Generate FeatureScript</button>
           </div>
