@@ -98,6 +98,21 @@ function generationResponse(result, generationLog, learningContext, diagnostics 
   };
 }
 
+// Pinged every 10 minutes by .github/workflows/keepalive.yml: keeps Render's free web service
+// awake and touches Supabase so the free project is not paused for inactivity.
+app.get("/keepalive", async (_req, res) => {
+  let database = "disabled";
+  if (supabase) {
+    try {
+      const { error } = await supabase.from("generations").select("id", { head: true, count: "exact" }).limit(1);
+      database = error ? `error: ${error.message}` : "ok";
+    } catch (err) {
+      database = `error: ${err.message}`;
+    }
+  }
+  res.json({ ok: true, database, at: new Date().toISOString() });
+});
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,

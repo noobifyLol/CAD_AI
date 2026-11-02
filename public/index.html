@@ -3,30 +3,38 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CAD AI Generator</title>
-<link rel="icon" href="data:,">
+<title>CAD AI: text to Onshape FeatureScript</title>
+<meta name="description" content="Describe a part in plain English and get an Onshape custom feature (FeatureScript) that is test-built before you paste it.">
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236366f1'/%3E%3Cpath d='M9 21l7-11 7 11z' fill='none' stroke='white' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:      #0d1011;
-    --surface: #8394c5;
-    --surface2: #121624;
-    --border:  #2140ca;
-    --accent:  #2b86ee;
-    --green:   #1aad8d;
-    --red:     #d94f6b;
-    --text:    #dde1ec;
-    --muted:   #9ba0b6;
-    --code-bg: #0b0e14;
-    --radius:  10px;
-    --think:   #0e1a2e;
-    --think-border: #1a3a6b;
-    --think-text: #7ab3e8;
+    --bg:      #0b0d12;
+    --surface: #12151d;
+    --surface2: #171b25;
+    --border:  #262c3a;
+    --accent:  #6366f1;
+    --accent-2: #22d3ee;
+    --green:   #22c55e;
+    --red:     #f43f5e;
+    --text:    #e7e9f0;
+    --muted:   #8b93a7;
+    --code-bg: #0a0c11;
+    --radius:  14px;
+    --think:   #111a2e;
+    --think-border: #263b66;
+    --think-text: #93b4f5;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.25);
   }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
@@ -681,6 +689,56 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* ── Modern theme layer (2026-11) ─────────────────────────────────── */
+  body {
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(99,102,241,.14), transparent 60%),
+      radial-gradient(900px 500px at 110% 0%, rgba(34,211,238,.08), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
+  }
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(11,13,18,.72);
+    backdrop-filter: saturate(160%) blur(14px);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-mark { background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 4px 14px rgba(99,102,241,.35); }
+  header h1 { font-weight: 700; letter-spacing: -.01em; }
+  .powered-by { color: var(--muted); }
+  .container { max-width: 1120px; padding: 32px 20px 64px; }
+  .tabs { gap: 4px; border-bottom: none; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 4px; width: fit-content; max-width: 100%; overflow-x: auto; }
+  .tab { border-radius: 9px; border: none !important; color: var(--muted); transition: background .15s, color .15s; white-space: nowrap; }
+  .tab:hover { color: var(--text); background: var(--surface2); }
+  .tab.active { color: #fff; background: var(--accent); box-shadow: 0 2px 10px rgba(99,102,241,.35); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .card-label { color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; font-size: .72rem; }
+  textarea, input[type="text"], input[type="email"], input[type="password"], input[type="number"], select {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+    font-family: inherit; transition: border-color .15s, box-shadow .15s;
+  }
+  textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
+  .btn { border-radius: 10px; font-weight: 600; transition: transform .08s, filter .15s, background .15s; }
+  .btn:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  .btn:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .output-box, pre, code, .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .output-box { background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px; }
+  .verify-box, .explanation-box, .diagnostics-box { border-radius: 12px; }
+  .hint { color: var(--muted); }
+  ::selection { background: rgba(99,102,241,.4); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #2a3142; border-radius: 10px; border: 2px solid var(--bg); }
+  @media (max-width: 720px) {
+    header { padding: 12px 16px; }
+    .container { padding: 20px 16px 48px; }
+    .two-col { grid-template-columns: 1fr !important; }
+    .powered-by { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
 <body>

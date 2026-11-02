@@ -1,0 +1,18 @@
+# Keeps the public site responsive: Render's free plan sleeps after 15 minutes without
+# traffic and Supabase pauses free projects after a week without use. GitHub runs this
+# for free. Set the site address in the repo's Actions variables as SITE_URL
+# (Settings > Secrets and variables > Actions > Variables), or it uses the default below.
+name: keep-alive
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping the site and database
+        run: |
+          URL="${{ vars.SITE_URL || 'https://cad-ai-0o9s.onrender.com' }}"
+          curl -fsS --retry 3 --retry-delay 20 --max-time 90 "$URL/keepalive" || curl -fsS --max-time 90 "$URL/health"
