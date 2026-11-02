@@ -6,7 +6,7 @@ import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { simulateFeatureScript } from "./simulatorClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
-import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFixRevolveAxisAlongNormal, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
+import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { headNoun } from "./deepcadLibrary.js";
 
@@ -3078,6 +3078,17 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   // line) gets that segment added, so qSketchRegion finds the region.
   // A revolve axis along the sketch normal ("Revolved face is perpendicular to axis"):
   // turn it into the sketch's in-plane y axis.
+  // Runtime type mistakes that compile but fail in Onshape (plane.y, unitless angles, length*inch).
+  try {
+    const before = code;
+    const fixed = autoFixRuntimeTypes(code);
+    if (fixed.code !== before) {
+      code = fixed.code;
+      record("runtime_type_fixes", before, code);
+    }
+  } catch {
+    // keep the code as it was
+  }
   try {
     const before = code;
     code = autoFixRevolveAxisAlongNormal(code);

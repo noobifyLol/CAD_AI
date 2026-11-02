@@ -491,6 +491,116 @@ export function autoFixRevolveAxisAlongNormal(code) {
   return text;
 }
 
+// Runtime type mistakes that compile but fail when Onshape runs the feature (found by
+// building live-site output in the Onshape-library simulator, 2026-11):
+//   plane.y                        Plane has no y field  -> cross(plane.normal, plane.x)
+//   rotationAround(axis, 2*PI/n)   angle without units   -> autoAngle(..., radian|degree)
+//   "angleForward" : 2 * PI        same, in opRevolve
+//   vector(lenA, lenB) * inch      length * inch = area  -> vector(lenA, lenB)
+export function autoFixRuntimeTypes(code) {
+  let text = String(code || "");
+  const changes = [];
+
+  // 1) plane.y -> cross(plane.normal, plane.x) for identifiers used as planes (.normal) or
+  //    assigned from plane(...) / evPlane(...).
+  const planeVars = new Set([
+    ...[...text.matchAll(/\b([A-Za-z_]\w*)\.normal\b/g)].map(m => m[1]),
+    ...[...text.matchAll(/\bvar\s+(\w+)\s*=\s*(?:plane|evPlane)\s*\(/g)].map(m => m[1]),
+    ...[...text.matchAll(/"sketchPlane"\s*:\s*(\w+)/g)].map(m => m[1]),
+  ]);
+  for (const name of planeVars) {
+    const pattern = new RegExp(`\\b${name}\\.y\\b`, "g");
+    if (pattern.test(text)) {
+      text = text.replace(pattern, `cross(${name}.normal, ${name}.x)`);
+      changes.push(`${name}.y -> cross(${name}.normal, ${name}.x)`);
+    }
+  }
+
+  // 2) Unitless angles. Find each variable's defining expression to judge its units.
+  const varExpr = {};
+  for (const m of text.matchAll(/\bvar\s+(\w+)\s*=\s*([^;]+);/g)) varExpr[m[1]] = m[2];
+  const hasUnit = expr => /\b(radian|degree)\b/.test(expr);
+  const unitFor = expr => (/\b(360|180)\b/.test(expr) && !/\bPI\b/.test(expr) ? "degree" : "radian");
+  const resolve = expr => {
+    let full = expr;
+    for (let depth = 0; depth < 3; depth += 1) {
+      full = full.replace(/\b([A-Za-z_]\w*)\b/g, name => (varExpr[name] && !/^(PI|i|j|k)$/.test(name) ? `(${varExpr[name]})` : name));
+    }
+    return full;
+  };
+  let wrapped = 0;
+  text = text.replace(/\brotationAround\s*\(\s*([^,()]+(?:\([^()]*\))?[^,()]*)\s*,\s*([^()]+?(?:\([^()]*\)[^()]*?)*)\)/g, (call, axis, angle) => {
+    const full = resolve(angle);
+    if (hasUnit(full) || /autoAngle\(/.test(angle) || !/[\dA-Za-z]/.test(angle)) return call;
+    wrapped += 1;
+    return `rotationAround(${axis.trim()}, autoAngle(${angle.trim()}, ${unitFor(full)}))`;
+  });
+  text = text.replace(/("angle(?:Forward|Back)"\s*:\s*)([^,\n}]+)/g, (entry, key, angle) => {
+    const full = resolve(angle);
+    if (hasUnit(full) || /autoAngle\(/.test(angle)) return entry;
+    wrapped += 1;
+    return `${key}autoAngle(${angle.trim()}, ${unitFor(full)})`;
+  });
+  // sin/cos/tan need an angle: sin(2 * PI * i / n) -> sin(autoAngle(..., radian)).
+  text = text.replace(/\b(sin|cos|tan)\s*\(\s*([^()]*(?:\([^()]*\)[^()]*)*)\)/g, (call, fn, angle) => {
+    const full = resolve(angle);
+    if (hasUnit(full) || /autoAngle\(/.test(angle) || !angle.trim()) return call;
+    wrapped += 1;
+    return `${fn}(autoAngle(${angle.trim()}, ${unitFor(full)}))`;
+  });
+  if (wrapped) {
+    changes.push(`${wrapped} unitless angle(s) given units`);
+    text = ensureHelper(text, "autoAngle", "// A plain number used as an angle gets the unit the expression implies; angles pass through.\nfunction autoAngle(value, unit)\n{\n    return value is number ? value * unit : value;\n}");
+  }
+
+  // opPattern needs one instance name per transform: fill an empty or missing list.
+  let named = 0;
+  text = text.replace(/\bopPattern\s*\(\s*context\s*,[^{]*\{([^;]*?)\}\s*\)\s*;/g, (call, body) => {
+    const transforms = (body.match(/"transforms"\s*:\s*([A-Za-z_]\w*)/) || [])[1];
+    if (!transforms) return call;
+    let next = body;
+    if (/"instanceNames"\s*:\s*\[\s*\]/.test(body)) next = body.replace(/"instanceNames"\s*:\s*\[\s*\]/, `"instanceNames" : patternNames(size(${transforms}))`);
+    else if (!/"instanceNames"/.test(body)) next = body.replace(/("transforms"\s*:\s*[A-Za-z_]\w*)/, `$1,\n            "instanceNames" : patternNames(size(${transforms}))`);
+    if (next === body) return call;
+    named += 1;
+    return call.replace(body, next);
+  });
+  if (named) {
+    changes.push(`${named} opPattern instance name list(s) filled`);
+    text = ensureHelper(text, "patternNames", "// One unique instance name per pattern transform.\nfunction patternNames(count)\n{\n    var names = [];\n    for (var i = 0; i < count; i += 1)\n    {\n        names = append(names, \"p\" ~ i);\n    }\n    return names;\n}");
+  }
+
+  // 3) vector(a, b) * inch where every component is already a length (definition lengths or
+  //    variables derived from them without "/ inch").
+  const lengthParams = new Set([...text.matchAll(/\bisLength\s*\(\s*definition\.(\w+)/g)].map(m => m[1]));
+  const isLengthExpr = (expr, seen = 0) => {
+    const e = expr.trim();
+    if (/\/\s*(inch|millimeter|meter|centimeter)\b/.test(e) || seen > 3) return false;
+    if (/\bdefinition\.(\w+)/.test(e)) return [...e.matchAll(/\bdefinition\.(\w+)/g)].some(m => lengthParams.has(m[1]));
+    const name = (e.match(/^-?\s*\(?\s*([A-Za-z_]\w*)\b/) || [])[1];
+    return Boolean(name && varExpr[name] && isLengthExpr(varExpr[name], seen + 1));
+  };
+  let unscaled = 0;
+  text = text.replace(/\bvector\s*\(([^()]*)\)\s*\*\s*inch\b/g, (whole, inner) => {
+    const parts = inner.split(",");
+    if (parts.length < 2 || !parts.every(part => isLengthExpr(part) || /^\s*-?\s*0(\.0+)?\s*$/.test(part) && false)) return whole;
+    unscaled += 1;
+    return `vector(${inner})`;
+  });
+  if (unscaled) changes.push(`${unscaled} vector(...) * inch of lengths fixed (was length x inch)`);
+  return { code: text, changes };
+}
+
+// Top-level helper functions go right after the import line (the end of the file is touched
+// by other repairs that close a truncated feature).
+function ensureHelper(text, name, source) {
+  if (new RegExp(`\\bfunction\\s+${name}\\s*\\(`).test(text)) return text;
+  const importMatch = text.match(/^import\s*\([^)]*\)\s*;[ \t]*\r?\n/m);
+  if (!importMatch) return `${text.trimEnd()}\n\n${source}\n`;
+  const at = importMatch.index + importMatch[0].length;
+  return `${text.slice(0, at)}\n${source}\n${text.slice(at)}`;
+}
+
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

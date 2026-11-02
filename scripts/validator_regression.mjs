@@ -224,5 +224,48 @@ export const simpleCone = defineFeature(function(context is Context, id is Id, d
   else { failures += 1; console.log(`FAIL revolve axis along the sketch normal — flagged=${flagged} fixed=${fixed}`); }
 }
 
+// 12) Runtime type mistakes from the live site (2026-11): compile fine, fail when Onshape runs them.
+{
+  const { autoFixRuntimeTypes } = await import('../featureScriptGeometry.js');
+  const snippet = `FeatureScript 2931;
+import(path : "onshape/std/geometry.fs", version : "2931.0");
+
+annotation { "Feature Type Name" : "T" }
+export const t = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Width" }
+        isLength(definition.width, { (inch) : [0.1, 1, 10] } as LengthBoundSpec);
+    }
+    {
+        var skPlane = plane(vector(0, 0, 0) * inch, vector(0, 0, 1), vector(1, 0, 0));
+        var halfW = definition.width / 2;
+        var corner = vector(-halfW, halfW) * inch;
+        var up = skPlane.origin + skPlane.y * definition.width;
+        var lean = sin(15 * PI / 180);
+        var angleStep = 2 * PI / 6;
+        var transforms = [];
+        for (var i = 1; i < 6; i += 1)
+        {
+            transforms = append(transforms, rotationAround(line(skPlane.origin, skPlane.normal), i * angleStep));
+        }
+        opPattern(context, id + "pattern", { "entities" : qCreatedBy(id + "body", EntityType.BODY), "transforms" : transforms, "instanceNames" : [] });
+    });
+`;
+  const { code, changes } = autoFixRuntimeTypes(snippet);
+  const checks = {
+    'plane.y rewritten': code.includes('cross(skPlane.normal, skPlane.x) * definition.width'),
+    'rotation angle gets radians': code.includes('autoAngle(i * angleStep, radian)'),
+    'sin argument gets units': /sin\(autoAngle\(15 \* PI \/ 180, radian\)\)/.test(code),
+    'length vector not multiplied by inch': code.includes('var corner = vector(-halfW, halfW);'),
+    'pattern names filled': code.includes('"instanceNames" : patternNames(size(transforms))'),
+    'helpers placed after import': code.indexOf('function autoAngle') > code.indexOf('import(') && code.indexOf('function patternNames') < code.indexOf('defineFeature'),
+  };
+  for (const [label, ok] of Object.entries(checks)) {
+    if (ok) console.log(`PASS (repaired) ${label}`);
+    else { failures += 1; console.log(`FAIL ${label} (changes: ${changes.join('; ')})`); }
+  }
+}
+
 console.log(failures === 0 ? '\nALL VALIDATOR CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
