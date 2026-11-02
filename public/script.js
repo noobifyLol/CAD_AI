@@ -497,6 +497,8 @@ async function compileDeepcadJson() {
 let partSession = [];
 
 function rememberPart(prompt, data) {
+  // A brand-new part (not an edit) starts a new session.
+  if (!String(data.generationMode || '').startsWith('edit')) partSession = [];
   partSession = [...partSession, { prompt, code: data.code, featureName: data.featureName, featureLabel: data.featureLabel }].slice(-6);
   const banner = document.getElementById('edit-banner');
   if (banner) {

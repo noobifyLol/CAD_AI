@@ -561,6 +561,27 @@ export function autoFixRuntimeTypes(code) {
     text = ensureHelper(text, "autoAngle", "// A plain number used as an angle gets the unit the expression implies; angles pass through.\nfunction autoAngle(value, unit)\n{\n    return value is number ? value * unit : value;\n}");
   }
 
+  // Directions must be unitless: hingeAxis = vector(1, 0, 0) * inch used as a plane normal or an
+  // extrude direction fails ("Failed to extrude", "plane normal must be a unitless vector").
+  // Wrap such vectors in normalize(), which keeps the direction and drops the units.
+  const unitVectorVars = new Set(Object.entries(varExpr)
+    .filter(([, expr]) => /^\s*vector\s*\([^()]*\)\s*\*\s*(inch|millimeter|centimeter|meter)\s*$/.test(expr))
+    .map(([name]) => name));
+  const isUnitVector = arg => {
+    const a = arg.trim();
+    return unitVectorVars.has(a) || /^vector\s*\([^()]*\)\s*\*\s*(inch|millimeter|centimeter|meter)$/.test(a);
+  };
+  let directions = 0;
+  const unitless = arg => { directions += 1; return `normalize(${arg.trim()})`; };
+  text = rewriteCallArgs(text, "plane", args => {
+    if (args.length < 2 || !args.slice(1).some(isUnitVector)) return null;
+    return args.map((arg, k) => (k > 0 && isUnitVector(arg) ? unitless(arg) : arg.trim()));
+  });
+  text = rewriteCallArgs(text, "line", args => (args.length === 2 && isUnitVector(args[1]) ? [args[0].trim(), unitless(args[1])] : null));
+  text = text.replace(/("direction"\s*:\s*)([A-Za-z_]\w*|vector\s*\([^()]*\)\s*\*\s*(?:inch|millimeter|centimeter|meter))(\s*[,\n}])/g, (whole, key, arg, tail) =>
+    (isUnitVector(arg) ? `${key}${unitless(arg)}${tail}` : whole));
+  if (directions) changes.push(`${directions} direction vector(s) with length units normalized`);
+
   // "text" + number is not defined in FeatureScript (strings join with ~):
   // id + "spoke" + i -> id + ("spoke" ~ i).
   let joined = 0;

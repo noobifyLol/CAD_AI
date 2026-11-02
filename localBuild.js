@@ -42,9 +42,43 @@ export function isLocalBuildAvailable() {
     && existsSync(path.join(ROOT, ".fsgen", "onshape-fsgen", "fsgen"));
 }
 
+// Where FS-Lite is not installed (the public site on Render), the same build runs on the
+// simulator service (fs_sim/modal_app.py, POST /build) when FS_SIM_URL is set.
+const REMOTE_URL = String(process.env.FS_SIM_URL || "").replace(/\/+$/, "");
+const REMOTE_TOKEN = process.env.FS_SIM_TOKEN || "";
+
+// FS-Lite implements most, not all, of Onshape's standard library. "Variable X not found" for
+// a name the real std library defines is a gap in FS-Lite, not in the part: report it as
+// unchecked so the fs_sim simulator (which runs the real std library) decides.
+// ok === null: the engine itself broke (not the part), also unchecked.
+function interpret(result) {
+  const missing = result.ok === false && String(result.error || "").match(/Variable (\w+) not found/);
+  if (missing && stdLibraryNames().has(missing[1])) {
+    return { attempted: true, ok: null, error: null, line: 0, metrics: null, skippedReason: `Local test build does not support ${missing[1]} yet.` };
+  }
+  return { attempted: true, ok: result.ok, error: result.error || null, line: result.line || 0, metrics: result.metrics || null, skippedReason: result.ok === null ? result.error : null };
+}
+
+async function remoteBuild(code) {
+  try {
+    const response = await fetch(`${REMOTE_URL}/build`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(REMOTE_TOKEN ? { Authorization: `Bearer ${REMOTE_TOKEN}` } : {}) },
+      body: JSON.stringify({ code }),
+      signal: AbortSignal.timeout(TIMEOUT_MS + 30000),
+    });
+    if (!response.ok) return { attempted: false, ok: null, skippedReason: `Remote test build answered HTTP ${response.status}.` };
+    return interpret(await response.json());
+  } catch (err) {
+    return { attempted: false, ok: null, skippedReason: `Remote test build unreachable: ${err.message}` };
+  }
+}
+
 /** { attempted, ok, error, line, metrics: { bodies, volume_mm3, bbox_mm }, skippedReason } */
 export function localBuildFeatureScript(code) {
-  if (!isLocalBuildAvailable()) {
+  // LOCAL_BUILD_REMOTE=1 uses the service even where FS-Lite is installed (to test the Render setup).
+  if (!isLocalBuildAvailable() || process.env.LOCAL_BUILD_REMOTE === "1") {
+    if (REMOTE_URL && process.env.LOCAL_BUILD_CHECK !== "0") return remoteBuild(code);
     return Promise.resolve({ attempted: false, ok: null, skippedReason: "Local test build not installed." });
   }
   return new Promise(resolve => {
@@ -72,17 +106,7 @@ export function localBuildFeatureScript(code) {
       clearTimeout(timer);
       const line = stdout.trim().split(/\r?\n/).pop() || "";
       try {
-        const result = JSON.parse(line);
-        // FS-Lite implements most, not all, of Onshape's standard library. "Variable X not found"
-        // for a name the real std library defines is a gap in FS-Lite, not in the part: report
-        // it as unchecked so the fs_sim simulator (which runs the real std library) decides.
-        const missing = result.ok === false && String(result.error || "").match(/Variable (\w+) not found/);
-        if (missing && stdLibraryNames().has(missing[1])) {
-          done({ attempted: true, ok: null, error: null, line: 0, metrics: null, skippedReason: `Local test build does not support ${missing[1]} yet.` });
-          return;
-        }
-        // ok === null: the local engine itself broke (not the part) - treat as unchecked.
-        done({ attempted: true, ok: result.ok, error: result.error || null, line: result.line || 0, metrics: result.metrics || null, skippedReason: result.ok === null ? result.error : null });
+        done(interpret(JSON.parse(line)));
       } catch {
         done({ attempted: true, ok: null, skippedReason: `Local test build gave no result: ${(stderr || stdout).slice(-300)}` });
       }

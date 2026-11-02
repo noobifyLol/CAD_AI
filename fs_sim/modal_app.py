@@ -21,6 +21,7 @@ import modal
 
 HERE = pathlib.Path(__file__).resolve().parent
 STD_COMMIT = "a2a7b13ea823f144b20d27198043aea35a64d928"  # same pin as fs_sim/fetch_std.sh
+FSGEN_COMMIT = "eabcc02ba104005da3de869e613cefe53042fd98"  # onshape-fsgen release 0.2.0
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -32,8 +33,15 @@ image = (
         " && git remote add origin https://github.com/javawizard/onshape-std-library-mirror"
         f" && git fetch -q --depth 1 origin {STD_COMMIT} && git checkout -q FETCH_HEAD && rm -rf .git"
     )
-    .env({"FS_STD_DIR": "/opt/fs_sim_std", "PYTHONPATH": "/root"})
+    # FS-Lite test build (onshape-fsgen, MIT): the second checker, same as scripts/local_build.py.
+    .pip_install("build123d")
+    .run_commands(
+        "git clone -q https://github.com/Lucasfrit/onshape-fsgen /opt/onshape-fsgen"
+        f" && cd /opt/onshape-fsgen && git checkout -q {FSGEN_COMMIT} && rm -rf .git"
+    )
+    .env({"FS_STD_DIR": "/opt/fs_sim_std", "PYTHONPATH": "/root", "FSGEN_DIR": "/opt/onshape-fsgen"})
     .add_local_dir(str(HERE), remote_path="/root/fs_sim", ignore=["std", "__pycache__", "tests", "modal_app.py"])
+    .add_local_file(str(HERE.parent / "scripts" / "local_build.py"), remote_path="/root/local_build.py")
 )
 
 app = modal.App("cad-ai-fs-sim")
@@ -58,6 +66,14 @@ def web():
     @api.get("/health")
     def health():
         return {"ok": True}
+
+    @api.post("/build")
+    def build(body: dict, authorization: str = Header(default="")):
+        """FS-Lite test build: {"ok", "error", "line", "metrics"} like scripts/local_build.py."""
+        if token and authorization != f"Bearer {token}":
+            raise HTTPException(status_code=401, detail="bad token")
+        import local_build
+        return local_build.build(str(body.get("code", ""))[:200_000], "remote")
 
     @api.post("/simulate")
     def simulate(body: dict, authorization: str = Header(default="")):

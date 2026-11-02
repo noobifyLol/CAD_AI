@@ -5769,6 +5769,19 @@ function buildEditSystemPrompt() {
   ].filter(Boolean).join("\n\n");
 }
 
+// "make it taller", "add two holes", "can you make the cap bigger" are edits; "a black water
+// bottle with a hinge cap" is a new part even when a part is open (it was being edited into
+// the previous "Desktop Speaker").
+export function looksLikeEditRequest(prompt) {
+  const text = String(prompt || "").trim().toLowerCase().replace(/^(please|pls|now|ok|okay|and|also|then|can you|could you|i want you to|i want to|let'?s)[\s,]+/g, "").replace(/^(please|can you|could you)\s+/, "");
+  const editVerb = /^(make|add|remove|delete|take|change|increase|decrease|reduce|raise|lower|move|shift|rotate|turn|flip|mirror|scale|resize|set|put|double|halve|extend|shorten|lengthen|widen|narrow|thicken|thin|round|fillet|chamfer|cut|drill|hollow|shell|give|replace|swap|use|attach|connect|merge|split|bend|taper|smooth|sharpen|center|align|offset|space|keep|undo|fix|enlarge|shrink)\b/;
+  const refersToPart = /\b(it|its|it's|this|that|the part|same part|the same|current|existing|instead)\b/;
+  const comparative = /\b(bigger|smaller|taller|shorter|wider|narrower|thicker|thinner|longer|deeper|larger|more|less|fewer)\b/;
+  if (editVerb.test(text)) return true;
+  if (/^(a|an|one|two|three|four|five|six|some|another|new)\b/.test(text)) return false;
+  return refersToPart.test(text) || comparative.test(text);
+}
+
 function lastPartInHistory(history) {
   return [...(Array.isArray(history) ? history : [])].reverse()
     .find(turn => turn && typeof turn.code === "string" && /defineFeature\s*\(/.test(turn.code)) || null;
@@ -6839,7 +6852,7 @@ export async function generateFeatureScript(prompt, options = {}) {
   const history = Array.isArray(options.history) ? options.history : [];
   const requestId = options.requestId || makeRequestId(prompt);
   // A follow-up on the user's current part edits that part (no templates, no new design).
-  if (lastPartInHistory(history)) {
+  if (lastPartInHistory(history) && looksLikeEditRequest(prompt)) {
     console.log(`[AI] Editing the previous part: "${prompt}"`);
     reportProgress("Editing your current part");
     return editFeatureScript(prompt, history, requestId);

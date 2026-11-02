@@ -16,7 +16,8 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / ".fsgen" / "onshape-fsgen"))
+import os  # noqa: E402
+sys.path.insert(0, os.environ.get("FSGEN_DIR") or str(ROOT / ".fsgen" / "onshape-fsgen"))
 
 from fsgen.fslite import interp as _interp  # noqa: E402
 from fsgen.fslite.runner import render_png, run_source  # noqa: E402
