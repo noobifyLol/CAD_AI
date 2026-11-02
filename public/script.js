@@ -64,16 +64,10 @@ function formatTimestamp(value) {
   return date.toLocaleString();
 }
 
+// Visitors see a short, plain note; database details stay in the server log.
 function databaseStatusText(database) {
-  if (!database) return 'No database status returned';
-  if (database.ok) {
-    if (database.schemaReady === false && database.missingAdaptiveTables?.length) {
-      return `Saved generation; adaptive schema missing ${database.missingAdaptiveTables.length} table(s)`;
-    }
-    return 'Saved';
-  }
-  if (database.skipped) return database.error ? `Skipped: ${database.error}` : 'Skipped';
-  return database.error ? `Not saved: ${database.error}` : 'Not saved';
+  if (database?.ok) return 'saved to your history';
+  return 'ready to paste into Onshape';
 }
 
 function setText(id, value) {
@@ -542,7 +536,9 @@ async function generate() {
       : `Auto used Parametric AI because ${outcome.reason}. `;
   }
   // A follow-up on the current part is an edit: send the part so the AI changes it.
-  const body = partSession.length ? { prompt, history: partSession.slice(-4) } : { prompt };
+  const progressId = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const body = partSession.length ? { prompt, history: partSession.slice(-4), progressId } : { prompt, progressId };
+  const stopProgress = watchProgress(progressId);
 
   const btn = document.getElementById('gen-btn');
   btn.innerHTML = '<div class="spinner"></div><span>Generating</span>';
@@ -566,7 +562,11 @@ async function generate() {
     const simplified = data.completionLevel === 'simplified' || data.generationMode === 'multi_key_simplified' || data.generationMode === 'gear_template_fallback';
     const repaired = data.completionLevel === 'repaired' || data.generationMode === 'multi_key_repaired';
     const partial = data.completionLevel === 'partial';
-    const statusMessage = simplified
+    const statusMessage = data.generationMode === 'edit_applied'
+      ? `Updated "${data.featureLabel}": ${prompt} - ${databaseStatusText(data.database)}`
+      : data.generationMode === 'edit_not_applied'
+      ? (data.warnings?.[0] || 'That change could not be made in a way that builds; your part is unchanged.')
+      : simplified
       ? `Generated simplified "${data.featureLabel}" - ${databaseStatusText(data.database)}`
       : repaired
       ? `Generated repaired "${data.featureLabel}" - ${databaseStatusText(data.database)}`
@@ -605,9 +605,48 @@ async function generate() {
       outputKind: 'generation',
     });
   } finally {
+    stopProgress();
     btn.textContent = 'Generate FeatureScript';
     btn.disabled = false;
   }
+}
+
+// Shows the server's real steps ("Writing FeatureScript", "Test-building the part",
+// "Found a problem: ...") while a part is generated. Returns a function that stops it.
+function watchProgress(progressId) {
+  const list = document.getElementById('gen-progress');
+  if (!list) return () => {};
+  let stopped = false;
+  let shown = [];
+  list.replaceChildren();
+  list.hidden = false;
+  const render = (steps, finished) => {
+    if (!steps.length || steps.join('\n') === shown.join('\n') && !finished) return;
+    shown = steps;
+    list.replaceChildren(...steps.filter(step => step !== 'Done').map((step, index, all) => {
+      const item = document.createElement('li');
+      item.textContent = step;
+      if (/^Found a problem|^Fixing/.test(step)) item.className = 'problem';
+      else if (index === all.length - 1 && !finished) item.className = 'active';
+      return item;
+    }));
+  };
+  const poll = async () => {
+    if (stopped) return;
+    try {
+      const r = await fetch(`/progress/${progressId}`);
+      if (r.ok) render((await r.json()).steps || [], false);
+    } catch { /* the next poll will try again */ }
+    if (!stopped) setTimeout(poll, 1200);
+  };
+  setTimeout(poll, 400);
+  return async () => {
+    stopped = true;
+    try {
+      const r = await fetch(`/progress/${progressId}`);
+      if (r.ok) render((await r.json()).steps || [], true);
+    } catch { /* keep what is shown */ }
+  };
 }
 
 async function debugCode() {

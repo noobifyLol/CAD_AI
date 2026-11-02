@@ -9,6 +9,7 @@ import {
   generateFeatureScript,
   validateFeatureScriptStrict,
   getModelConfig,
+  progressContext,
 } from "./ai.js";
 import { authMiddleware, createAuthRouter, requireAuth } from "./Auth.js";
 import { createLearningService } from "./learning.js";
@@ -26,9 +27,24 @@ const supabaseKey =
 const supabaseKeyMode = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
   ? "service_role"
   : (process.env.SUPABASE_ANON_KEY ? "anon" : "missing");
+// Database calls must never slow generation down: each call times out after 4 s, and after
+// a network failure (project paused or deleted, DNS gone) the database is skipped for 5
+// minutes instead of being retried on every request.
+let databaseDownUntil = 0;
+async function guardedFetch(input, init = {}) {
+  if (Date.now() < databaseDownUntil) throw new TypeError("fetch failed (database unreachable; retrying in a few minutes)");
+  try {
+    return await fetch(input, { ...init, signal: init.signal || AbortSignal.timeout(4000) });
+  } catch (err) {
+    databaseDownUntil = Date.now() + 5 * 60 * 1000;
+    console.warn(`[DB] Supabase unreachable (${err.cause?.code || err.name}); skipping database calls for 5 minutes.`);
+    throw err;
+  }
+}
 const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: guardedFetch },
     })
   : null;
 
@@ -197,6 +213,14 @@ app.get("/learning/diagnostics", async (_req, res) => {
   }
 });
 
+// Live progress of a running /generate (the page polls this while it waits).
+const progressStore = new Map();
+app.get("/progress/:id", (req, res) => {
+  const now = Date.now();
+  for (const [key, entry] of progressStore) if (now - entry.at > 15 * 60 * 1000) progressStore.delete(key);
+  res.json({ steps: progressStore.get(String(req.params.id).slice(0, 64))?.steps || [] });
+});
+
 app.post("/generate", async (req, res) => {
   const prompt = String(req.body.prompt || "").trim();
   const history = Array.isArray(req.body.history) ? req.body.history : [];
@@ -204,6 +228,15 @@ app.post("/generate", async (req, res) => {
 
   try {
     console.log(`[/generate] body=${truncateForLog(req.body, 2000)}`);
+    const progressId = typeof req.body.progressId === "string" ? req.body.progressId.slice(0, 64) : null;
+    const report = message => {
+      if (!progressId) return;
+      const entry = progressStore.get(progressId) || { steps: [], at: Date.now() };
+      if (entry.steps[entry.steps.length - 1] !== message) entry.steps.push(message);
+      entry.at = Date.now();
+      progressStore.set(progressId, entry);
+    };
+    report(history.length ? "Reading your change request" : "Reading your request");
 
     // A DB hiccup fetching learning context must not block generation — FeatureScript
     // generation doesn't fundamentally need it, so degrade to an empty context instead
@@ -215,7 +248,8 @@ app.post("/generate", async (req, res) => {
       console.error("[/generate] fetchLearningContext failed, continuing without it:", contextErr.message);
     }
 
-    const result = await generateFeatureScript(prompt, { learningContext, history });
+    const result = await progressContext.run(report, () => generateFeatureScript(prompt, { learningContext, history }));
+    report("Done");
 
     // generateFeatureScript is guaranteed to return usable code at this point (it has
     // its own layered fallbacks). A failure logging/reading DB state afterward must not

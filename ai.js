@@ -9,6 +9,14 @@ import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, co
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { headNoun } from "./deepcadLibrary.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+// Live progress for the page: server.js runs a request inside progressContext with a
+// callback, and reportProgress() calls it from anywhere in the pipeline.
+export const progressContext = new AsyncLocalStorage();
+function reportProgress(message) {
+  try { progressContext.getStore()?.(String(message).slice(0, 200)); } catch { /* progress is best effort */ }
+}
 
 const DEFAULT_CODE_GENERATION_MODEL = "openai/gpt-oss-120b";
 // llama-3.1-8b-instant and llama-3.3-70b-versatile are gone from Groq entirely as of
@@ -5724,6 +5732,7 @@ async function editFeatureScript(prompt, history, requestId) {
   });
   let feedback = null;
   for (let attempt = 0; attempt < 4; attempt += 1) {
+    reportProgress(attempt === 0 ? "Writing the edit" : `Fixing the edit (attempt ${attempt + 1}): ${String(feedback?.[0] || "").replace(/\s+/g, " ").slice(0, 120)}`);
     const user = [
       `PART SO FAR (requests, oldest first): ${steps.join(" -> ") || "(unknown)"}`,
       `CHANGE REQUEST: ${prompt}`,
@@ -5779,6 +5788,7 @@ async function firstCandidateThatBuilds(codes) {
 }
 
 async function datasetLibraryFallback(prompt) {
+  reportProgress("Looking for the closest real part in the 42,000-part dataset");
   try {
     const { generateFromLibrary } = await import("./deepcadService.js");
     const result = await generateFromLibrary(prompt);
@@ -6355,6 +6365,7 @@ async function applyOnshapeCompileCheck(strict) {
 
   // Free local test build first (same verdicts as Onshape on every calibration part); only
   // candidates that build locally spend an Onshape API call (education plans: 2,500/year).
+  reportProgress("Test-building the part");
   const localBuild = await localBuildFeatureScript(strict.code);
   if (localBuild.ok === false) {
     const error = String(localBuild.error || "").split("\n")[0].slice(0, 300);
@@ -6371,6 +6382,7 @@ async function applyOnshapeCompileCheck(strict) {
   }
   strict = { ...strict, localBuild };
   // Then the fs_sim simulator (Onshape's real std library on OpenCascade) when installed.
+  reportProgress("Running it with Onshape's standard library");
   strict = await applySimulatorCheck(strict);
   if (!strict.ok || !isOnshapeConfigured()) return strict;
 
@@ -6580,6 +6592,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         withLearningContext(buildSystemPromptForRequest(prompt), learningContext),
         buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }),
       );
+      reportProgress(iteration === 0 ? "Writing FeatureScript" : `Writing FeatureScript again (attempt ${iteration + 1}) with the fixes`);
       console.log(`[AI] GTF iteration ${iteration + 1}: prompt ~${fitted.before} -> ~${fitted.after} tokens (budget ${GENERATION_PROMPT_TOKEN_BUDGET})${fitted.dropped.length ? `, dropped ${fitted.dropped.join(", ")}` : ""}; system ${fitted.system.length} chars, user ${fitted.user.length} chars`);
       const raw = await chat([
         { role: "system", content: fitted.system },
@@ -6632,6 +6645,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
       if (strict.ok && candidate.looseBodies && iteration < MAX_ITERATIONS - 1) {
         priorIssues = [{ message: candidate.looseBodies }];
         console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: builds but as ${strict.localBuild.metrics.bodies} separate pieces; asking to connect them`);
+        reportProgress(`Found a problem: the part came out as ${strict.localBuild.metrics.bodies} separate pieces, connecting them`);
         await new Promise(resolve => setTimeout(resolve, 300));
         continue;
       }
@@ -6651,6 +6665,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         priorIssues.push({ message: "Previous response was cut off by the completion token limit. Produce a more COMPACT file: reasoning under 2 sentences, fewer sketch entities, no redundant comments — while still building the requested geometry." });
       }
       console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: ${priorIssues.length} issue(s) fed back → next prompt`);
+      reportProgress(`Found a problem: ${String(priorIssues[0]?.message || "").replace(/\s+/g, " ").slice(0, 140)}`);
       for (const issue of priorIssues.slice(0, 3)) {
         console.log(`[AI]   issue: ${String(issue.message || "").slice(0, 180)}`);
       }
@@ -6768,9 +6783,11 @@ export async function generateFeatureScript(prompt, options = {}) {
   // A follow-up on the user's current part edits that part (no templates, no new design).
   if (lastPartInHistory(history)) {
     console.log(`[AI] Editing the previous part: "${prompt}"`);
+    reportProgress("Editing your current part");
     return editFeatureScript(prompt, history, requestId);
   }
 
+  reportProgress("Working out the part's shape and sizes");
   const dims = applyPromptHeuristics(prompt, await extractDims(prompt, learningContext, history, { requestId }));
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
