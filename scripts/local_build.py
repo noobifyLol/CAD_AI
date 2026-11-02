@@ -48,6 +48,22 @@ def _collect_with_query_defaults(self, ff, overrides=None):
 
 _interp.Interpreter.collect_parameters = _collect_with_query_defaults
 
+# Onshape's units.fs allows comparing a value with units to the number 0
+# (`if (definition.holeRadius > 0)`); only nonzero numbers are an error. FS-Lite rejected it.
+_original_compare = _interp.compare
+
+
+def _compare_with_zero(op, a, b, node):
+    plain = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+    if plain(b) and b == 0 and isinstance(a, _interp.Q):
+        a, b = _interp.mag(a), 0
+    elif plain(a) and a == 0 and isinstance(b, _interp.Q):
+        a, b = 0, _interp.mag(b)
+    return _original_compare(op, a, b, node)
+
+
+_interp.compare = _compare_with_zero
+
 
 # Two Onshape behaviours FS-Lite does not cover yet, added here without editing its code:
 #   skFitSpline  - smooth curve through points (revolved bottles, vases, organic profiles)
