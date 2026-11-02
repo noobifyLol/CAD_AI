@@ -5,11 +5,38 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
-if (process.env.RENDER !== "true" && process.env.FS_SIM_SETUP !== "1") process.exit(0);
-const run = (cmd, args) => spawnSync(cmd, args, { stdio: "inherit" }).status === 0;
-const py = ".fs-sim-venv/bin/python";
-const ok = (existsSync(py) || run("python3", ["-m", "venv", ".fs-sim-venv"]))
-  && run(py, ["-m", "pip", "install", "--no-cache-dir", "-q", "-r", "fs_sim/requirements.txt"])
-  && run("bash", ["fs_sim/fetch_std.sh"]);
+const onRender = process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
+if (!onRender && process.env.FS_SIM_SETUP !== "1") process.exit(0);
+
+const run = (cmd, args) => {
+  console.log(`[fs_sim setup] ${cmd} ${args.join(" ")}`);
+  const result = spawnSync(cmd, args, { stdio: "inherit" });
+  return result.status === 0;
+};
+const VENV = ".fs-sim-venv";
+const py = `${VENV}/bin/python`;
+
+function makeVenv() {
+  if (existsSync(py)) return true;
+  if (run("python3", ["-m", "venv", VENV])) return true;
+  // Some images ship Python without ensurepip: make the venv without pip, then add pip.
+  return run("python3", ["-m", "venv", "--without-pip", VENV])
+    && run("bash", ["-c", `curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && ${py} /tmp/get-pip.py -q`]);
+}
+
+function installPackages() {
+  const pip = [py, "-m", "pip", "install", "--no-cache-dir", "-q"];
+  if (run(pip[0], [...pip.slice(1), "-r", "fs_sim/requirements.txt"])) return true;
+  // Pinned versions need Python 3.11+; fall back to the newest versions this Python supports.
+  return run(pip[0], [...pip.slice(1), "cadquery-ocp", "numpy", "matplotlib"]);
+}
+
+let ok = false;
+try {
+  ok = makeVenv() && installPackages() && run("bash", ["fs_sim/fetch_std.sh"])
+    && run(py, ["-c", "import OCP, numpy, matplotlib; print('[fs_sim setup] OCP import ok')"]);
+} catch (err) {
+  console.log(`[fs_sim setup] error: ${err.message}`);
+}
 console.log(ok ? "[fs_sim setup] simulator ready" : "[fs_sim setup] failed; the site will run without the simulator");
 process.exit(0);
