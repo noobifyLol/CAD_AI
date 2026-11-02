@@ -14,3 +14,4 @@ vcpkg
 *.log
 fs_sim/std
 **/__pycache__
+.fs-sim-venv/

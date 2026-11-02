@@ -19,7 +19,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 // Default: the local test-build virtualenv (.fsgen/venv, see README) when present, since it
 // already has OCP, numpy and matplotlib; otherwise python3.
-const LOCAL_VENV_PYTHON = [join(ROOT, ".fsgen", "venv", "Scripts", "python.exe"), join(ROOT, ".fsgen", "venv", "bin", "python")]
+const LOCAL_VENV_PYTHON = [join(ROOT, ".fsgen", "venv", "Scripts", "python.exe"), join(ROOT, ".fsgen", "venv", "bin", "python"),
+  join(ROOT, ".fs-sim-venv", "bin", "python")] // .fs-sim-venv: made by scripts/postinstall.mjs on Render
   .find(candidate => existsSync(candidate));
 const PYTHON = process.env.FS_SIM_PYTHON || LOCAL_VENV_PYTHON || "python3";
 const ENABLED = String(process.env.FS_SIM_ENABLED || "true").toLowerCase() !== "false";
