@@ -920,6 +920,8 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
       console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 160)}); using the next provider.`);
     }
   }
+  // Groq (the backup) gets the trimmed prompt when the caller made one.
+  if (Array.isArray(options.groqMessages)) messages = options.groqMessages;
   const fallbackList = Array.isArray(fallbackModels)
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
@@ -6658,7 +6660,15 @@ async function generateViaPlanCompiler(prompt, dims, learningContext, requestId)
 const GENERATION_PROMPT_TOKEN_BUDGET = Number(process.env.GROQ_PROMPT_TOKEN_BUDGET || 5000);
 const estimatePromptTokens = text => Math.ceil(String(text || "").length / 4.4);
 
-function fitGenerationMessages(system, user) {
+// With a bigger provider configured (ALT_LLM_*), send it the full instructions and examples
+// (ALT_PROMPT_TOKEN_BUDGET); Groq, the backup, still gets the trimmed version (groqMessages).
+const ALT_PROMPT_TOKEN_BUDGET = Number(process.env.ALT_PROMPT_TOKEN_BUDGET || 20000);
+function messagesForProviders(fullSystem, fullUser, groqFitted) {
+  const fitted = ALT_PROVIDERS.length ? fitGenerationMessages(fullSystem, fullUser, ALT_PROMPT_TOKEN_BUDGET) : groqFitted;
+  return [{ role: "system", content: fitted.system }, { role: "user", content: fitted.user }];
+}
+
+function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BUDGET) {
   const total = () => estimatePromptTokens(system) + estimatePromptTokens(user);
   const before = total();
   const dropped = [];
@@ -6685,7 +6695,7 @@ function fitGenerationMessages(system, user) {
     () => dropUserLine("STYLE HINT:"),
   ];
   for (const step of steps) {
-    if (total() <= GENERATION_PROMPT_TOKEN_BUDGET) break;
+    if (total() <= budget) break;
     step();
   }
   return { system, user, before, after: total(), dropped };
@@ -6704,22 +6714,19 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
     const preferSimple = iteration >= MAX_ITERATIONS - 1; // last pass: simplify to ensure cleanliness
 
     try {
-      const fitted = fitGenerationMessages(
-        withLearningContext(buildSystemPromptForRequest(prompt), learningContext),
-        buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues }),
-      );
+      const fullSystem = withLearningContext(buildSystemPromptForRequest(prompt), learningContext);
+      const fullUser = buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, preferSimple, priorIssues });
+      const fitted = fitGenerationMessages(fullSystem, fullUser);
       reportProgress(iteration === 0 ? "Writing FeatureScript" : `Writing FeatureScript again (attempt ${iteration + 1}) with the fixes`);
       console.log(`[AI] GTF iteration ${iteration + 1}: prompt ~${fitted.before} -> ~${fitted.after} tokens (budget ${GENERATION_PROMPT_TOKEN_BUDGET})${fitted.dropped.length ? `, dropped ${fitted.dropped.join(", ")}` : ""}; system ${fitted.system.length} chars, user ${fitted.user.length} chars`);
-      const raw = await chat([
-        { role: "system", content: fitted.system },
-        { role: "user", content: fitted.user },
-      ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
+      const raw = await chat(messagesForProviders(fullSystem, fullUser, fitted), selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
         stage: "generation",
         affinity: `${requestId}:gtf:${candidateId}`,
         keySlot,
         fullCode: true,
         maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
         jsonSchema: FEATURESCRIPT_GENERATION_JSON_SCHEMA,
+        groqMessages: [{ role: "system", content: fitted.system }, { role: "user", content: fitted.user }],
       });
 
       const parsed = parseFeatureScriptJson(raw, dims);
@@ -7176,6 +7183,11 @@ candidateScores: bestCandidate ? [{
     // Final defensive guard: buildGuaranteedFeatureScript above should never leave
     // selectedCode empty, but if some edge case did slip through, never send the
     // caller an empty response — fall back to the static base template.
+    if (!selectedCode && !GUARANTEED_BOX_FALLBACK) {
+      // Nothing that builds: no stand-in template (the server tells the user to retry).
+      const message = "The AI could not make a part that builds this time (the free AI service may be busy). Please try again in a minute, or describe the part a little differently.";
+      return { code: "", featureName: dims.featureName, featureLabel: dims.featureLabel, thinking, dims, generationMode: "no_buildable_result", completionLevel: "failed", warnings: [message, ...warnings], omissions, orchestration };
+    }
     if (!selectedCode) {
       warnings.push("Every generation and fallback path produced no code; returned the static base template.");
       return {
@@ -7233,7 +7245,7 @@ candidateScores: bestCandidate ? [{
     if (!recoveryCode) {
       console.warn("[AI] AI recovery produced no compile-safe code; using the guaranteed deterministic fallback.");
       try {
-        const guaranteed = buildGuaranteedFeatureScript(prompt, dims, learningContext, retrieval);
+        const guaranteed = (await datasetLibraryFallback(prompt)) || buildGuaranteedFeatureScript(prompt, dims, learningContext, retrieval);
         return {
           ...guaranteed,
           warnings: [
