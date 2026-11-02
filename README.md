@@ -173,6 +173,21 @@ python scripts/build_submission_pdf.py --author "Your Name"
 | `npm run test:e2e -- "prompt"` | Full pipeline against real Groq keys; prints generation mode, validation status, and the code |
 | `npm run test:guaranteed` | Same as `test:fallback` (kept for old habits) |
 
+### Build checks on the public site (simulator service on Modal)
+
+The FeatureScript simulator (`fs_sim`, Onshape's own standard library on OpenCascade) needs
+about 350 MB of memory, more than Render's free plan leaves for it. So the public site calls
+it as a small service on Modal that starts on demand and stops when idle:
+
+```bash
+npm run sim:modal-secret
+npm run sim:deploy
+```
+
+Then set `FS_SIM_URL` (the printed URL) and `FS_SIM_TOKEN` (from `.env`) in Render's
+Environment settings. `https://<site>/health` shows `"simulator": true` when it works. If the
+service is unreachable, parts are still generated, only without the build check.
+
 ### Local test build (free, no Onshape API calls)
 
 Every candidate the AI writes is test-built on this computer before it is accepted, using the

@@ -23,6 +23,12 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      # Build checks for every generated part: the fs_sim service on Modal (fs_sim/modal_app.py,
+      # deployed with `npm run sim:deploy`). FS_SIM_TOKEN is the value saved in .env.
+      - key: FS_SIM_URL
+        value: https://noobifylol--cad-ai-fs-sim-web.us-east.modal.run
+      - key: FS_SIM_TOKEN
+        sync: false
       # Optional: real Onshape compile checks (keys from https://dev.onshape.com/keys)
       - key: ONSHAPE_ACCESS_KEY
         sync: false

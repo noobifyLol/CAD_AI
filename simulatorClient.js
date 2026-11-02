@@ -36,9 +36,40 @@ const pending = new Map();
 
 let statusPromise = null;
 
+// Remote simulator (fs_sim/modal_app.py on Modal). Used when FS_SIM_URL is set; this is how
+// the public site on Render's free plan (512 MB) gets build checks without running the
+// ~350 MB Python worker itself.
+const REMOTE_URL = String(process.env.FS_SIM_URL || "").replace(/\/+$/, "");
+const REMOTE_TOKEN = process.env.FS_SIM_TOKEN || "";
+const ON_RENDER = process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
+const REMOTE_TIMEOUT_MS = Number(process.env.FS_SIM_REMOTE_TIMEOUT_MS || 90000);
+
+async function simulateRemote(code, render) {
+  try {
+    const response = await fetch(`${REMOTE_URL}/simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(REMOTE_TOKEN ? { Authorization: `Bearer ${REMOTE_TOKEN}` } : {}) },
+      body: JSON.stringify({ code, render }),
+      signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
+    });
+    if (!response.ok) return { available: false, reason: `Remote simulator answered HTTP ${response.status}.` };
+    return await response.json();
+  } catch (err) {
+    return { available: false, reason: `Remote simulator unreachable: ${err.name === "TimeoutError" ? "timed out" : err.message}` };
+  }
+}
+
 /** Starts the one-time availability check (imports OCP, parses the std library). */
 export function probeSimulator() {
   if (statusPromise) return statusPromise;
+  if (REMOTE_URL) {
+    statusPromise = Promise.resolve(status = { available: true, reason: null, remote: true });
+    return statusPromise;
+  }
+  if (ON_RENDER && String(process.env.FS_SIM_ENABLED || "").toLowerCase() !== "true") {
+    statusPromise = Promise.resolve(status = { available: false, reason: "Set FS_SIM_URL to the simulator service (the local worker needs more memory than Render's free plan has)." });
+    return statusPromise;
+  }
   statusPromise = new Promise((resolve) => {
     const finish = (value) => {
       status = value;
@@ -133,22 +164,8 @@ function startWorker() {
 export async function simulateFeatureScript(code, { render = false } = {}) {
   const state = await probeSimulator();
   if (!state.available) return { available: false, reason: state.reason };
-  if (!worker) startWorker();
-  await ready;
-  const id = nextId++;
-  const response = await new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      try {
-        worker?.kill("SIGKILL");
-      } catch {
-        // already gone
-      }
-      resolve({ id, ok: null, gaps: [`simulation timed out after ${TIMEOUT_MS} ms`], errors: [], warnings: [], parts: [] });
-    }, TIMEOUT_MS);
-    pending.set(id, { resolve, timer });
-    worker.stdin.write(`${JSON.stringify({ id, code, render })}\n`);
-  });
+  const response = REMOTE_URL ? await simulateRemote(code, render) : await simulateLocal(code, render);
+  if (response.available === false) return response;
   const errors = response.errors || [];
   const gaps = response.gaps || [];
   return {
@@ -163,6 +180,25 @@ export async function simulateFeatureScript(code, { render = false } = {}) {
     png: response.png || null,
     elapsedMs: response.elapsedMs ?? null,
   };
+}
+
+async function simulateLocal(code, render) {
+  if (!worker) startWorker();
+  await ready;
+  const id = nextId++;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      try {
+        worker?.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
+      resolve({ id, ok: null, gaps: [`simulation timed out after ${TIMEOUT_MS} ms`], errors: [], warnings: [], parts: [] });
+    }, TIMEOUT_MS);
+    pending.set(id, { resolve, timer });
+    worker.stdin.write(`${JSON.stringify({ id, code, render })}\n`);
+  });
 }
 
 export function stopSimulator() {

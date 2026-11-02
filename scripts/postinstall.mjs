@@ -1,11 +1,13 @@
-// Runs after `npm install`. On Render's native Node runtime (no Docker) it installs the
-// FeatureScript simulator (fs_sim: Python + OpenCascade + Onshape's std library) so the live
-// site test-builds every part. Elsewhere it does nothing (set FS_SIM_SETUP=1 to force it).
+// Runs after `npm install`. With FS_SIM_SETUP=1 it installs the FeatureScript simulator
+// (fs_sim: Python + OpenCascade + Onshape's std library) into .fs-sim-venv for hosts with
+// enough memory (~350 MB for the worker). Otherwise it does nothing.
 // Never fails the install: without the simulator the site still works, just unchecked.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
-const onRender = process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
+// Opt-in only (FS_SIM_SETUP=1): on Render the site uses the simulator service on Modal
+// (FS_SIM_URL) instead, because the local worker needs more memory than the free plan has.
+const onRender = false;
 if (!onRender && process.env.FS_SIM_SETUP !== "1") process.exit(0);
 
 const run = (cmd, args) => {

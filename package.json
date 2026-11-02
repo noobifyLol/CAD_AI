@@ -38,7 +38,9 @@
     "build:failure-corpus": "node scripts/build_failure_corpus.js",
     "smoke:generate": "node scripts/run_smoke_tests.js /generate",
     "regression:corpus": "node scripts/run_smoke_tests.js /generate",
-    "train:adaptive": "node scripts/train_adaptive_network.js data/adaptive_training.jsonl"
+    "train:adaptive": "node scripts/train_adaptive_network.js data/adaptive_training.jsonl",
+    "sim:modal-secret": "node scripts/sim_modal_secret.mjs",
+    "sim:deploy": "node scripts/run_python.mjs .text2cad/venv -m modal deploy fs_sim/modal_app.py"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
