@@ -177,6 +177,12 @@ export function findMissingFeatures(prompt, sequence) {
   const centerBoreOk = /\b(flange|wheel|pulley|gear|hub|disc|disk|plate|ring|washer|rotor|sprocket|coupling)\b/.test(text) && holeLike === wantedHoles + 1;
   if (holes && holeLike !== wantedHoles && !centerBoreOk) missing.push(`asked for ${wantedHoles} hole${wantedHoles > 1 ? "s" : ""}, model made ${holeLike}`);
   else if (!holes && wantedHoles && holeLike < wantedHoles) missing.push(`asked for a hole, model made none`);
+  // N spokes leave N openings between them (plus maybe a hub bore): "6 spokes" got a 4-spoke wheel.
+  const spokes = text.match(/\b(\d+|three|four|five|six|seven|eight|nine|ten|twelve)\s+(?:[a-z-]+\s+)?spokes?\b/);
+  if (spokes) {
+    const wanted = Number(spokes[1]) || NUMBER_WORDS[spokes[1]];
+    if (holeLike !== wanted && holeLike !== wanted + 1) missing.push(`asked for ${wanted} spokes, model has ${holeLike} openings`);
+  }
   if (/\b(slots?|cut-?outs?|pockets?|recess(es)?|notch(es)?|window)\b/.test(text) && !holes && !impliesHole && holeLike === 0) {
     missing.push("asked for a slot/cutout/pocket, model cut nothing");
   }

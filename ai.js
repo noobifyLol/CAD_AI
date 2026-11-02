@@ -46,7 +46,8 @@ const GENERATION_STRATEGY = String(process.env.CAD_GENERATION_MODE || "ai_first"
 // Set USE_VALIDATED_TEMPLATES=false only when intentionally testing free-form prompting.
 const USE_VALIDATED_TEMPLATES = String(process.env.USE_VALIDATED_TEMPLATES || "true").toLowerCase() !== "false";
 const ALLOW_TEMPLATE_FALLBACK = String(process.env.ALLOW_TEMPLATE_FALLBACK || "false").toLowerCase() === "true";
-const GUARANTEED_OPERATION_COMPILER = String(process.env.CAD_GUARANTEED_OPERATION_COMPILER || "false").toLowerCase() === "true";
+const GUARANTEED_BOX_FALLBACK = String(process.env.CAD_GUARANTEED_BOX_FALLBACK || "false").toLowerCase() === "true";
+const GUARANTEED_OPERATION_COMPILER =String(process.env.CAD_GUARANTEED_OPERATION_COMPILER || "false").toLowerCase() === "true";
 const ENABLE_OPERATION_COMPILER_FALLBACK =String(process.env.CAD_ENABLE_OPERATION_COMPILER_FALLBACK || "false").toLowerCase() === "true";
 // Tier 2: for prompts with no strong curated-example match, ask the model for a typed
 // JSON build plan and compile it deterministically instead of asking for raw code.
@@ -5963,6 +5964,34 @@ export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {},
     };
   }
 
+  // A plain box labelled "Brake Disc" is worse than an honest message (batch tests: a 305 mm
+  // stick for a brake disc). Without CAD_GUARANTEED_BOX_FALLBACK=true the user is told to retry.
+  // A gear has a real, validated parametric template (involute teeth), so use it.
+  if (dims?.shape === "GEAR_SPUR") {
+    const emptyRetrieval = { summaries: [], docRows: [], dbRows: [], datasetRows: [], sourceRows: [] };
+    const context = { examples: [], memoryMatches: [], featureScriptDocs: [], notes: [], ...(learningContext || {}) };
+    const gearDims = {
+      numTeeth: 20, heightInches: dims.faceWidthInches || 0.5, ...dims,
+      radiusInches: Number.isFinite(dims.radiusInches) ? dims.radiusInches : (dims.pitchRadiusInches || 1),
+    };
+    const gear = buildGearTemplateResult(prompt, gearDims, context, retrieval || emptyRetrieval, ["Used the validated spur gear template."]);
+    if (gear?.code) return gear;
+  }
+  if (!GUARANTEED_BOX_FALLBACK) {
+    const message ="The AI could not make a part that builds this time (the free AI service may be busy). Please try again in a minute, or describe the part a little differently.";
+    return {
+      code: "",
+      featureName: dims.featureName || "part",
+      featureLabel: dims.featureLabel || "Part",
+      reasoning: message,
+      dims,
+      generationMode: "no_buildable_result",
+      completionLevel: "failed",
+      warnings: [message],
+      omissions: [],
+      orchestration: { status: "failed", completionLevel: "failed", failedPass: "generation", passes: {}, warnings: [message], omissions: [] },
+    };
+  }
   const fallback = buildLocalSimpleBox(prompt, dims);
   const strict = validateFeatureScriptStrict(fallback.code || "");
   return {
@@ -6393,6 +6422,22 @@ export function validateFeatureScriptStrict(code, opts = {}) {
 // misconfigured or unreachable Onshape check never blocks generation.
 // A single object (mug, stand, bracket) that the test build shows as several separate
 // solids has pieces floating apart or never merged. Requests for several parts are exempt.
+// A named object (speaker, phone stand, bottle) that builds as one bare cylinder, ring or box
+// (6 faces or fewer, from the simulator) does not look like the object. Requests for basic
+// shapes (washer, spacer, plate, ...) or "simple" ones are exempt.
+const BASIC_SHAPE_WORDS = /\b(cylinders?|discs?|disks?|rings?|washers?|spacers?|tubes?|pipes?|rods?|shafts?|plates?|blocks?|cubes?|boxe?s?|spheres?|balls?|cones?|bushings?|sleeves?|pins?|dowels?|coins?|pucks?|slabs?|bars?|beams?|torus|donuts?|coasters?|tiles?|primitive|simple|basic|plain|blank)\b/i;
+function tooSimpleFeedback(prompt, strict) {
+  const parts = strict.simulatorCheck?.parts;
+  if (!Array.isArray(parts) || !parts.length) return null;
+  const faces = parts.reduce((sum, part) => sum + (Number(part.faces) || 0), 0);
+  if (!faces || faces > 6 || BASIC_SHAPE_WORDS.test(prompt)) return null;
+  const object = String(prompt).trim().slice(0, 80);
+  return `The part built, but it is a single plain shape with only ${faces} faces, which does not look like "${object}". `
+    + "Model what a real one looks like: decide its 3 to 6 recognizable components (body, openings, recesses, holes, "
+    + "handles, caps, feet, grilles, bosses, ribs) with realistic proportions, build each one, cut the openings with "
+    + "opBoolean SUBTRACTION, and merge the attached pieces with one opBoolean UNION. Expose the main sizes as parameters.";
+}
+
 function looseBodiesFeedback(prompt, strict) {
   const bodies = strict.localBuild?.metrics?.bodies;
   if (!bodies || bodies <= 1) return null;
@@ -6701,11 +6746,12 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         strict,
         iteration,
         looseBodies: strict.ok ? looseBodiesFeedback(prompt, strict) : null,
+        tooSimple: strict.ok ? tooSimpleFeedback(prompt, strict) : null,
       };
 
       // Track the best candidate seen across all iterations: clean first, then one
-      // connected solid over loose pieces, then score.
-      const rank = c => [c.ok ? 1 : 0, c.looseBodies ? 0 : 1, c.score];
+      // connected solid over loose pieces, then a real design over a bare shape, then score.
+      const rank = c => [c.ok ? 1 : 0, c.looseBodies ? 0 : 1, c.tooSimple ? 0 : 1, c.score];
       const better = (a, b) => { const ra = rank(a), rb = rank(b); for (let k = 0; k < ra.length; k += 1) if (ra[k] !== rb[k]) return ra[k] > rb[k]; return false; };
       if (!bestCandidate || better(candidate, bestCandidate)) {
         bestCandidate = candidate;
@@ -6717,6 +6763,13 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         priorIssues = [{ message: candidate.looseBodies }];
         console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: builds but as ${strict.localBuild.metrics.bodies} separate pieces; asking to connect them`);
         reportProgress(`Found a problem: the part came out as ${strict.localBuild.metrics.bodies} separate pieces, connecting them`);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        continue;
+      }
+      if (strict.ok && candidate.tooSimple && iteration < MAX_ITERATIONS - 1) {
+        priorIssues = [{ message: candidate.tooSimple }];
+        console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: builds but is one bare shape; asking for the object's real features`);
+        reportProgress("Found a problem: the part is one plain shape, adding the object's real features");
         await new Promise(resolve => setTimeout(resolve, 300));
         continue;
       }

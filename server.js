@@ -250,6 +250,10 @@ app.post("/generate", async (req, res) => {
 
     const result = await progressContext.run(report, () => generateFeatureScript(prompt, { learningContext, history }));
     report("Done");
+    if (!result.code) {
+      // Nothing that builds: say so plainly instead of returning a stand-in shape.
+      return res.status(503).json({ error: result.warnings?.[0] || "Could not make a part that builds. Please try again." });
+    }
 
     // generateFeatureScript is guaranteed to return usable code at this point (it has
     // its own layered fallbacks). A failure logging/reading DB state afterward must not
