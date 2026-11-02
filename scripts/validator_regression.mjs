@@ -250,6 +250,8 @@ export const t = defineFeature(function(context is Context, id is Id, definition
             transforms = append(transforms, rotationAround(line(skPlane.origin, skPlane.normal), i * angleStep));
         }
         opPattern(context, id + "pattern", { "entities" : qCreatedBy(id + "body", EntityType.BODY), "transforms" : transforms, "instanceNames" : [] });
+        const stepDeg = 360 / 6;
+        var nested = rotationAround(line(vector(0, 0, 0) * inch, vector(0, 0, 1)), 2 * stepDeg);
     });
 `;
   const { code, changes } = autoFixRuntimeTypes(snippet);
@@ -259,6 +261,7 @@ export const t = defineFeature(function(context is Context, id is Id, definition
     'sin argument gets units': /sin\(autoAngle\(15 \* PI \/ 180, radian\)\)/.test(code),
     'length vector not multiplied by inch': code.includes('var corner = vector(-halfW, halfW);'),
     'pattern names filled': code.includes('"instanceNames" : patternNames(size(transforms))'),
+    'nested axis, const degrees': code.includes('rotationAround(line(vector(0, 0, 0) * inch, vector(0, 0, 1)), autoAngle(2 * stepDeg, degree))'),
     'helpers placed after import': code.indexOf('function autoAngle') > code.indexOf('import(') && code.indexOf('function patternNames') < code.indexOf('defineFeature'),
   };
   for (const [label, ok] of Object.entries(checks)) {

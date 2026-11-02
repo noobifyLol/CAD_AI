@@ -518,7 +518,7 @@ export function autoFixRuntimeTypes(code) {
 
   // 2) Unitless angles. Find each variable's defining expression to judge its units.
   const varExpr = {};
-  for (const m of text.matchAll(/\bvar\s+(\w+)\s*=\s*([^;]+);/g)) varExpr[m[1]] = m[2];
+  for (const m of text.matchAll(/\b(?:var|const)\s+(\w+)\s*=\s*([^;]+);/g)) varExpr[m[1]] = m[2];
   const hasUnit = expr => /\b(radian|degree)\b/.test(expr);
   const unitFor = expr => (/\b(360|180)\b/.test(expr) && !/\bPI\b/.test(expr) ? "degree" : "radian");
   const resolve = expr => {
@@ -529,11 +529,16 @@ export function autoFixRuntimeTypes(code) {
     return full;
   };
   let wrapped = 0;
-  text = text.replace(/\brotationAround\s*\(\s*([^,()]+(?:\([^()]*\))?[^,()]*)\s*,\s*([^()]+?(?:\([^()]*\)[^()]*?)*)\)/g, (call, axis, angle) => {
+  const needsUnit = angle => {
     const full = resolve(angle);
-    if (hasUnit(full) || /autoAngle\(/.test(angle) || !/[\dA-Za-z]/.test(angle)) return call;
+    return !hasUnit(full) && !/autoAngle\(/.test(angle) && /[\dA-Za-z]/.test(angle) ? unitFor(full) : null;
+  };
+  text = rewriteCallArgs(text, "rotationAround", args => {
+    if (args.length !== 2) return null;
+    const unit = needsUnit(args[1]);
+    if (!unit) return null;
     wrapped += 1;
-    return `rotationAround(${axis.trim()}, autoAngle(${angle.trim()}, ${unitFor(full)}))`;
+    return [args[0].trim(), `autoAngle(${args[1].trim()}, ${unit})`];
   });
   text = text.replace(/("angle(?:Forward|Back)"\s*:\s*)([^,\n}]+)/g, (entry, key, angle) => {
     const full = resolve(angle);
@@ -542,12 +547,15 @@ export function autoFixRuntimeTypes(code) {
     return `${key}autoAngle(${angle.trim()}, ${unitFor(full)})`;
   });
   // sin/cos/tan need an angle: sin(2 * PI * i / n) -> sin(autoAngle(..., radian)).
-  text = text.replace(/\b(sin|cos|tan)\s*\(\s*([^()]*(?:\([^()]*\)[^()]*)*)\)/g, (call, fn, angle) => {
-    const full = resolve(angle);
-    if (hasUnit(full) || /autoAngle\(/.test(angle) || !angle.trim()) return call;
-    wrapped += 1;
-    return `${fn}(autoAngle(${angle.trim()}, ${unitFor(full)}))`;
-  });
+  for (const fn of ["sin", "cos", "tan"]) {
+    text = rewriteCallArgs(text, fn, args => {
+      if (args.length !== 1 || !args[0].trim()) return null;
+      const unit = needsUnit(args[0]);
+      if (!unit) return null;
+      wrapped += 1;
+      return [`autoAngle(${args[0].trim()}, ${unit})`];
+    });
+  }
   if (wrapped) {
     changes.push(`${wrapped} unitless angle(s) given units`);
     text = ensureHelper(text, "autoAngle", "// A plain number used as an angle gets the unit the expression implies; angles pass through.\nfunction autoAngle(value, unit)\n{\n    return value is number ? value * unit : value;\n}");
@@ -637,6 +645,39 @@ export function autoFixRuntimeTypes(code) {
   });
   if (unscaled) changes.push(`${unscaled} vector(...) * unit with length components fixed`);
   return { code: text, changes };
+}
+
+// Rewrites the arguments of every call to `name(...)`, with balanced brackets and strings
+// (axes like line(vector(0, 0, 0) * inch, vector(0, 0, 1)) contain nested commas).
+// rewrite(args) returns the new argument list, or null to keep the call as it is.
+function rewriteCallArgs(text, name, rewrite) {
+  const head = new RegExp(`\\b${name}\\s*\\(`, "g");
+  let out = "";
+  let last = 0;
+  let match;
+  while ((match = head.exec(text))) {
+    const open = match.index + match[0].length - 1;
+    let depth = 0, close = -1, inString = false;
+    const commas = [];
+    for (let i = open; i < text.length; i += 1) {
+      const ch = text[i];
+      if (inString) { if (ch === "\\") i += 1; else if (ch === '"') inString = false; continue; }
+      if (ch === '"') inString = true;
+      else if ("([{".includes(ch)) depth += 1;
+      else if (")]}".includes(ch)) { depth -= 1; if (depth === 0) { close = i; break; } }
+      else if (ch === "," && depth === 1) commas.push(i);
+    }
+    if (close < 0) break;
+    const bounds = [open, ...commas, close];
+    const args = bounds.slice(0, -1).map((at, k) => text.slice(at + 1, bounds[k + 1]));
+    const next = rewrite(args);
+    if (next) {
+      out += text.slice(last, open + 1) + next.join(", ") + ")";
+      last = close + 1;
+    }
+    head.lastIndex = open + 1;
+  }
+  return out + text.slice(last);
 }
 
 // Top-level helper functions go right after the import line (the end of the file is touched

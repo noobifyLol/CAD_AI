@@ -115,7 +115,11 @@ function formatOrchestration(orchestration) {
   return lines.join('\n');
 }
 
+// The run details panel is for debugging: shown for failures, or always with ?debug=1.
+const DEBUG_PANELS = new URLSearchParams(location.search).has('debug');
+
 function showRunModal({ title, ok, message, createdAt, database, generationId, prompt, learning, orchestration, outputKind, errorMessages }) {
+  if (ok && !DEBUG_PANELS) return;
   const backdrop = document.getElementById('run-modal-backdrop');
   const summary = document.getElementById('run-modal-summary');
   const feedbackPanel = document.getElementById('run-feedback-panel');
