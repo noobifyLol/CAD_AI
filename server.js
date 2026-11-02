@@ -42,6 +42,28 @@ const learning = createLearningService({
 const authRoutes = createAuthRouter(supabase);
 
 app.use(express.json({ limit: "20mb" }));
+
+// Public site: per-visitor limit on the routes that spend free AI/compute quota, so one
+// visitor or bot cannot use up every Groq key. In memory (one Render instance).
+app.set("trust proxy", 1);
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 12);
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000);
+const requestLog = new Map();
+function limitExpensive(req, res, next) {
+  const now = Date.now();
+  const key = req.ip || "unknown";
+  const recent = (requestLog.get(key) || []).filter(at => now - at < RATE_LIMIT_WINDOW_MS);
+  if (recent.length >= RATE_LIMIT_MAX) {
+    const retrySec = Math.ceil((RATE_LIMIT_WINDOW_MS - (now - recent[0])) / 1000);
+    res.set("Retry-After", String(retrySec));
+    return res.status(429).json({ error: `Too many requests. Please wait ${Math.ceil(retrySec / 60)} minute(s) and try again.` });
+  }
+  recent.push(now);
+  requestLog.set(key, recent);
+  if (requestLog.size > 5000) for (const [k, times] of requestLog) if (!times.some(at => now - at < RATE_LIMIT_WINDOW_MS)) requestLog.delete(k);
+  next();
+}
+for (const route of ["/generate", "/generate-deepcad", "/verify", "/debug", "/analyze", "/analyze-multi"]) app.post(route, limitExpensive);
 app.use(authMiddleware);
 app.use(express.static("public"));
 
