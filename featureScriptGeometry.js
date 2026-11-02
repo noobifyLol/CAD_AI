@@ -553,6 +553,17 @@ export function autoFixRuntimeTypes(code) {
     text = ensureHelper(text, "autoAngle", "// A plain number used as an angle gets the unit the expression implies; angles pass through.\nfunction autoAngle(value, unit)\n{\n    return value is number ? value * unit : value;\n}");
   }
 
+  // "text" + number is not defined in FeatureScript (strings join with ~):
+  // id + "spoke" + i -> id + ("spoke" ~ i).
+  let joined = 0;
+  text = text.replace(/("(?:[^"\\\n]|\\.)*")\s*\+\s*([A-Za-z_][\w.]*(?:\s*\[[^\]]*\])?|\d+|\([^()]*\))/g, (whole, literal, operand, offset) => {
+    const before = text.slice(Math.max(0, offset - 40), offset);
+    if (/\b(?:annotation|import)\b[^\n]*$/.test(before) || /"Name"\s*:\s*$/.test(before)) return whole;
+    joined += 1;
+    return `(${literal} ~ ${operand})`;
+  });
+  if (joined) changes.push(`${joined} "text" + value joined with ~`);
+
   // opPattern needs one instance name per transform: fill an empty or missing list.
   let named = 0;
   text = text.replace(/\bopPattern\s*\(\s*context\s*,[^{]*\{([^;]*?)\}\s*\)\s*;/g, (call, body) => {
@@ -576,18 +587,55 @@ export function autoFixRuntimeTypes(code) {
   const isLengthExpr = (expr, seen = 0) => {
     const e = expr.trim();
     if (/\/\s*(inch|millimeter|meter|centimeter)\b/.test(e) || seen > 3) return false;
-    if (/\bdefinition\.(\w+)/.test(e)) return [...e.matchAll(/\bdefinition\.(\w+)/g)].some(m => lengthParams.has(m[1]));
-    const name = (e.match(/^-?\s*\(?\s*([A-Za-z_]\w*)\b/) || [])[1];
-    return Boolean(name && varExpr[name] && isLengthExpr(varExpr[name], seen + 1));
+    if ([...e.matchAll(/\bdefinition\.(\w+)/g)].some(m => lengthParams.has(m[1]))) return true;
+    // Any variable in the expression that holds a length makes the expression a length.
+    return [...e.replace(/\bdefinition\.\w+/g, " ").matchAll(/\b([A-Za-z_]\w*)\b/g)]
+      .some(m => varExpr[m[1]] && isLengthExpr(varExpr[m[1]], seen + 1));
   };
+  // Component by component: vector(halfW + 1.5, 0.5) * inch -> vector(halfW + 1.5 * inch, 0.5 * inch).
+  // Terms that are already lengths keep their units; plain-number terms get the unit.
   let unscaled = 0;
-  text = text.replace(/\bvector\s*\(([^()]*)\)\s*\*\s*inch\b/g, (whole, inner) => {
-    const parts = inner.split(",");
-    if (parts.length < 2 || !parts.every(part => isLengthExpr(part) || /^\s*-?\s*0(\.0+)?\s*$/.test(part) && false)) return whole;
+  const splitTerms = expr => {
+    const terms = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < expr.length; i += 1) {
+      const ch = expr[i];
+      if (ch === "(" || ch === "[") depth += 1;
+      else if (ch === ")" || ch === "]") depth -= 1;
+      else if ((ch === "+" || ch === "-") && depth === 0 && i > 0 && !/[*/(,+\-eE]\s*$/.test(expr.slice(0, i).trimEnd().slice(-1) || "(") && expr.slice(0, i).trim()) {
+        terms.push(expr.slice(start, i));
+        start = i;
+      }
+    }
+    terms.push(expr.slice(start));
+    return terms;
+  };
+  const scaleComponent = (component, unit) => {
+    if (!isLengthExpr(component)) return { text: `(${component.trim()}) * ${unit}`, mixed: false };
+    let mixed = false;
+    const out = splitTerms(component).map(term => {
+      const sign = (term.match(/^\s*([+-])/) || [])[1] || "";
+      const body = term.replace(/^\s*[+-]/, "").trim();
+      if (!body || isLengthExpr(body) || /\b(inch|millimeter|meter|centimeter)\b/.test(body)) return term;
+      mixed = true;
+      return ` ${sign} ${body} * ${unit}`.replace(/^ {2}/, " ");
+    }).join("");
+    return { text: out.trim(), mixed };
+  };
+  text = text.replace(/\bvector\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*\*\s*(inch|millimeter|centimeter|meter)\b/g, (whole, inner, unit) => {
+    const parts = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < inner.length; i += 1) {
+      if (inner[i] === "(" || inner[i] === "[") depth += 1;
+      else if (inner[i] === ")" || inner[i] === "]") depth -= 1;
+      else if (inner[i] === "," && depth === 0) { parts.push(inner.slice(start, i)); start = i + 1; }
+    }
+    parts.push(inner.slice(start));
+    if (parts.length < 2 || !parts.some(part => isLengthExpr(part))) return whole; // all plain numbers: correct as written
     unscaled += 1;
-    return `vector(${inner})`;
+    return `vector(${parts.map(part => scaleComponent(part, unit).text).join(", ")})`;
   });
-  if (unscaled) changes.push(`${unscaled} vector(...) * inch of lengths fixed (was length x inch)`);
+  if (unscaled) changes.push(`${unscaled} vector(...) * unit with length components fixed`);
   return { code: text, changes };
 }
 
