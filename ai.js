@@ -8,6 +8,7 @@ import { simulateFeatureScript } from "./simulatorClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFilterInnerLoops, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
+import { autoFixMixedUnits } from "./unitFixer.js";
 import { headNoun } from "./deepcadLibrary.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -3147,6 +3148,17 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   // line) gets that segment added, so qSketchRegion finds the region.
   // A revolve axis along the sketch normal ("Revolved face is perpendicular to axis"):
   // turn it into the sketch's in-plane y axis.
+  // Sums that mix plain numbers with lengths ("units differ"): see unitFixer.js.
+  try {
+    const before = code;
+    const units = autoFixMixedUnits(code);
+    if (units.fixed) {
+      code = units.code;
+      record("mixed_units_fixed", before, code);
+    }
+  } catch {
+    // keep the code as it was
+  }
   // Runtime type mistakes that compile but fail in Onshape (plane.y, unitless angles, length*inch).
   try {
     const before = code;
