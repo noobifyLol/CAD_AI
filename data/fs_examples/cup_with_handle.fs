@@ -104,6 +104,7 @@ export const cupWithHandle = defineFeature(function(context is Context, id is Id
             "tools" : qCreatedBy(id + "cavityTool", EntityType.BODY),
             "targets" : qUnion([
                 qCreatedBy(id + "cupBody", EntityType.BODY),
+                qCreatedBy(id + "handleBody", EntityType.BODY),
                 qCreatedBy(id + "joinHandle", EntityType.BODY)
             ]),
             "operationType" : BooleanOperationType.SUBTRACTION

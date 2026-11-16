@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { checkerHeaders, checkerUrl } from "./checkerService.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const PYTHON = process.platform === "win32"
@@ -44,8 +45,7 @@ export function isLocalBuildAvailable() {
 
 // Where FS-Lite is not installed (the public site on Render), the same build runs on the
 // simulator service (fs_sim/modal_app.py, POST /build) when FS_SIM_URL is set.
-const REMOTE_URL = String(process.env.FS_SIM_URL || "").replace(/\/+$/, "");
-const REMOTE_TOKEN = process.env.FS_SIM_TOKEN || "";
+const REMOTE_URL = checkerUrl;
 
 // FS-Lite implements most, not all, of Onshape's standard library. "Variable X not found" for
 // a name the real std library defines is a gap in FS-Lite, not in the part: report it as
@@ -56,14 +56,14 @@ function interpret(result) {
   if (missing && stdLibraryNames().has(missing[1])) {
     return { attempted: true, ok: null, error: null, line: 0, metrics: null, skippedReason: `Local test build does not support ${missing[1]} yet.` };
   }
-  return { attempted: true, ok: result.ok, error: result.error || null, line: result.line || 0, metrics: result.metrics || null, skippedReason: result.ok === null ? result.error : null };
+  return { attempted: true, ok: result.ok, error: result.error || null, line: result.line || 0, metrics: result.metrics || null, notes: Array.isArray(result.notes) ? result.notes : [], skippedReason: result.ok === null ? result.error : null };
 }
 
 async function remoteBuild(code) {
   try {
     const response = await fetch(`${REMOTE_URL}/build`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(REMOTE_TOKEN ? { Authorization: `Bearer ${REMOTE_TOKEN}` } : {}) },
+      headers: checkerHeaders(),
       body: JSON.stringify({ code }),
       signal: AbortSignal.timeout(TIMEOUT_MS + 30000),
     });

@@ -6,7 +6,7 @@ import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { simulateFeatureScript } from "./simulatorClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
-import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
+import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFilterInnerLoops, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { headNoun } from "./deepcadLibrary.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -3154,6 +3154,17 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     if (fixed.code !== before) {
       code = fixed.code;
       record("runtime_type_fixes", before, code);
+    }
+  } catch {
+    // keep the code as it was
+  }
+  // Holes drawn in the outline's own sketch must stay open when it is extruded.
+  try {
+    const before = code;
+    const holes = autoFilterInnerLoops(code);
+    if (holes.fixed.length) {
+      code = holes.code;
+      record("filter_inner_loops", before, code);
     }
   } catch {
     // keep the code as it was
@@ -6440,6 +6451,26 @@ function tooSimpleFeedback(prompt, strict) {
     + "opBoolean SUBTRACTION, and merge the attached pieces with one opBoolean UNION. Expose the main sizes as parameters.";
 }
 
+// Things the test build can see that make a part wrong although it builds: a cut that
+// removed nothing, a union of pieces that do not touch, a container that is solid.
+const CONTAINER_WORDS = /\b(mugs?|cups?|bottles?|vases?|bowls?|buckets?|jars?|tumblers?|planters?|flower ?pots?|trash cans?|bins?|lamp ?shades?|glass|pitchers?|jugs?)\b/i;
+function designIssueFeedback(prompt, strict) {
+  const build = strict.localBuild;
+  if (!build || build.ok !== true) return null;
+  const issues = [...(build.notes || [])];
+  const box = build.metrics?.bbox_mm;
+  if (CONTAINER_WORDS.test(prompt) && Array.isArray(box) && box.length === 6 && build.metrics.volume_mm3 > 0) {
+    const boxVolume = Math.max(1e-9, (box[3] - box[0]) * (box[4] - box[1]) * (box[5] - box[2]));
+    const fill = build.metrics.volume_mm3 / boxVolume;
+    if (fill > 0.4) {
+      issues.push(`The part is solid (it fills ${Math.round(fill * 100)}% of its bounding box), but this object is a hollow container. `
+        + "Hollow it: opShell with \"entities\" : qCapEntity(id + \"<body extrude id>\", CapType.END, EntityType.FACE) and a negative "
+        + "\"thickness\" (wall), or subtract a slightly smaller inner body that stops one wall thickness above the bottom.");
+    }
+  }
+  return issues.length ? `The part built, but it is not right yet. ${issues.slice(0, 3).join(" ")} Keep everything else the same.` : null;
+}
+
 function looseBodiesFeedback(prompt, strict) {
   const bodies = strict.localBuild?.metrics?.bodies;
   if (!bodies || bodies <= 1) return null;
@@ -6702,7 +6733,8 @@ function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BU
 }
 
 async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
-  const MAX_ITERATIONS = Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
+  // A bigger, faster provider (ALT_LLM_*) can afford more fix-and-retry rounds than Groq's free tier.
+  const MAX_ITERATIONS = ALT_PROVIDERS.length ? 5 : Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
   const slots = keySlotsForStage("generation", MAX_ITERATIONS, `${requestId}:gtf`);
 
   let bestCandidate = null;
@@ -6754,11 +6786,12 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         iteration,
         looseBodies: strict.ok ? looseBodiesFeedback(prompt, strict) : null,
         tooSimple: strict.ok ? tooSimpleFeedback(prompt, strict) : null,
+        designIssue: strict.ok ? designIssueFeedback(prompt, strict) : null,
       };
 
       // Track the best candidate seen across all iterations: clean first, then one
       // connected solid over loose pieces, then a real design over a bare shape, then score.
-      const rank = c => [c.ok ? 1 : 0, c.looseBodies ? 0 : 1, c.tooSimple ? 0 : 1, c.score];
+      const rank = c => [c.ok ? 1 : 0, c.looseBodies ? 0 : 1, c.designIssue ? 0 : 1, c.tooSimple ? 0 : 1, c.score];
       const better = (a, b) => { const ra = rank(a), rb = rank(b); for (let k = 0; k < ra.length; k += 1) if (ra[k] !== rb[k]) return ra[k] > rb[k]; return false; };
       if (!bestCandidate || better(candidate, bestCandidate)) {
         bestCandidate = candidate;
@@ -6770,6 +6803,13 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         priorIssues = [{ message: candidate.looseBodies }];
         console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: builds but as ${strict.localBuild.metrics.bodies} separate pieces; asking to connect them`);
         reportProgress(`Found a problem: the part came out as ${strict.localBuild.metrics.bodies} separate pieces, connecting them`);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        continue;
+      }
+      if (strict.ok && candidate.designIssue && iteration < MAX_ITERATIONS - 1) {
+        priorIssues = [{ message: candidate.designIssue }];
+        console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: builds, but ${candidate.designIssue.slice(0, 120)}`);
+        reportProgress(`Found a problem: ${candidate.designIssue.slice(0, 110)}`);
         await new Promise(resolve => setTimeout(resolve, 300));
         continue;
       }

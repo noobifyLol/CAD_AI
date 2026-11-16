@@ -16,6 +16,8 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { checkerHeaders, derivedCheckerUrl, explicitCheckerUrl } from "./checkerService.js";
+
 const ROOT = dirname(fileURLToPath(import.meta.url));
 // Default: the local test-build virtualenv (.fsgen/venv, see README) when present, since it
 // already has OCP, numpy and matplotlib; otherwise python3.
@@ -39,16 +41,19 @@ let statusPromise = null;
 // Remote simulator (fs_sim/modal_app.py on Modal). Used when FS_SIM_URL is set; this is how
 // the public site on Render's free plan (512 MB) gets build checks without running the
 // ~350 MB Python worker itself.
-const REMOTE_URL = String(process.env.FS_SIM_URL || "").replace(/\/+$/, "");
-const REMOTE_TOKEN = process.env.FS_SIM_TOKEN || "";
+// An explicit FS_SIM_URL always wins. Otherwise a computer with its own Python environment
+// runs the worker itself (faster, free), and anything else (Render) uses the service derived
+// from the DeepCAD settings (see checkerService.js).
 const ON_RENDER = process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
+const HAS_LOCAL_PYTHON = !ON_RENDER && Boolean(process.env.FS_SIM_PYTHON || LOCAL_VENV_PYTHON) && existsSync(join(STD_DIR, "geometry.fs"));
+const REMOTE_URL = explicitCheckerUrl || (HAS_LOCAL_PYTHON ? "" : derivedCheckerUrl);
 const REMOTE_TIMEOUT_MS = Number(process.env.FS_SIM_REMOTE_TIMEOUT_MS || 90000);
 
 async function simulateRemote(code, render) {
   try {
     const response = await fetch(`${REMOTE_URL}/simulate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(REMOTE_TOKEN ? { Authorization: `Bearer ${REMOTE_TOKEN}` } : {}) },
+      headers: checkerHeaders(),
       body: JSON.stringify({ code, render }),
       signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
     });

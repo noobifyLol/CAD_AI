@@ -77,6 +77,8 @@ from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape  # noqa: E402
 from OCP.BRepOffset import BRepOffset_Skin  # noqa: E402
 from OCP.GeomAbs import GeomAbs_Intersection  # noqa: E402
 
+DIAGNOSTICS = []  # design notes from the current build (see op_boolean below)
+
 _original_register = _std.StdLib._register
 
 
@@ -131,17 +133,56 @@ def _register_with_extras(self):
 
     self.b["opShell"] = _std.Builtin("opShell", op_shell)
 
+    # Design diagnostics: booleans that "work" but do nothing are the usual reason a part
+    # builds and still looks wrong (holes that miss the body, pieces that never touch).
+    original_boolean = self.b["opBoolean"]
+
+    def op_boolean(ctx, oid, m):
+        c = _std.need_ctx(ctx)
+        solids = lambda: [b for b in c.bodies if b.kind == "solid"]
+        volume = lambda bodies: sum(_G.props(b.shape, "volume").Mass() for b in bodies)
+        kind = getattr(m.get("operationType"), "name", None) if hasattr(m, "get") else None
+        try:
+            tools = [e.body for e in _std.need_query(m.get("tools"), "opBoolean", "tools").eval(c)
+                     if e.kind == "BODY" and e.body is not None and e.body.kind == "solid"]
+        except Exception:
+            tools = []
+        before_count, before_volume, tools_volume = len(solids()), volume(solids()), volume(tools)
+        result = original_boolean.fn(ctx, oid, m)
+        try:
+            label = str(list(oid)[-1])
+        except Exception:
+            label = "boolean"
+        after_count, after_volume = len(solids()), volume(solids())
+        if kind == "SUBTRACTION" and tools:
+            kept_tools = bool(m.get("keepTools", False))
+            removed = before_volume - (0 if kept_tools else tools_volume) - after_volume
+            if removed < 1e-6 * max(tools_volume, 1e-12):
+                DIAGNOSTICS.append(f'opBoolean "{label}" (SUBTRACTION) removed no material: its tool bodies do not overlap '
+                                   "the target, so the requested hole/cut is missing. Position the tool inside the target and "
+                                   "extrude it through the full thickness.")
+        elif kind == "UNION" and len(tools) >= 2:
+            pieces = after_count - (before_count - len(tools))
+            if pieces >= 2:
+                DIAGNOSTICS.append(f'opBoolean "{label}" (UNION) left {pieces} separate pieces: those bodies do not touch. '
+                                   "Move each piece so it overlaps its neighbour (shared volume, not just a gap or an edge).")
+        return result
+
+    self.b["opBoolean"] = _std.Builtin("opBoolean", op_boolean)
+
 
 _std.StdLib._register = _register_with_extras
 
 
 def build(source, name, png_dir=None):
+    DIAGNOSTICS.clear()
     try:
         result = run_source(source)
     except Exception as err:  # interpreter bugs must not look like part failures
         return {"file": name, "ok": None, "error": f"local engine error: {type(err).__name__}: {err}", "line": 0}
     out = {"file": name, "ok": bool(result.ok), "error": result.error, "line": result.error_line, "seconds": round(result.seconds, 2)}
     if result.ok:
+        out["notes"] = list(dict.fromkeys(DIAGNOSTICS))[:6]
         try:
             out["metrics"] = result.metrics()
         except Exception as err:

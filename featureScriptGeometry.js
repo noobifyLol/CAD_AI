@@ -668,6 +668,34 @@ export function autoFixRuntimeTypes(code) {
   return { code: text, changes };
 }
 
+/**
+ * Holes drawn in the same sketch as the outline: qSketchRegion(id + "sk") selects every
+ * region, the holes included, so a single extrude fills them back in (a brake disc came out
+ * as a plain disc). With filterInnerLoops = true the inner loops stay open. Applied only when
+ * the sketch holds several closed shapes and exactly one operation uses its regions.
+ */
+export function autoFilterInnerLoops(code) {
+  let text = String(code || "");
+  const sketchVar = {};
+  for (const m of text.matchAll(/\bvar\s+(\w+)\s*=\s*newSketch(?:OnPlane)?\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"/g)) sketchVar[m[2]] = m[1];
+  const fixed = [];
+  for (const [sketchId, variable] of Object.entries(sketchVar)) {
+    const uses = [...text.matchAll(new RegExp(`qSketchRegion\\s*\\(\\s*id\\s*\\+\\s*"${sketchId}"\\s*(,[^)]*)?\\)`, "g"))];
+    if (uses.length !== 1 || uses[0][1]) continue; // used twice, or the flag is already given
+    const count = pattern => (text.match(new RegExp(`\\b(?:${pattern})\\s*\\(\\s*${variable}\\s*,`, "g")) || []).length;
+    const closed = count("skCircle|skRectangle|skRegularPolygon|skEllipse");
+    const open = count("skLineSegment|skArc|skFitSpline");
+    if (!(closed >= 2 || (closed >= 1 && open >= 3))) continue;
+    // A sketch of hole cutters (its body is the "tools" of a later boolean) is left alone.
+    const ops = [...text.slice(0, uses[0].index).matchAll(/\bop\w+\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"/g)];
+    const opId = ops.length ? ops[ops.length - 1][1] : null;
+    if (opId && new RegExp(`"tools"\\s*:[^\\n]*"${opId}"`).test(text)) continue;
+    text = text.replace(uses[0][0], `qSketchRegion(id + "${sketchId}", true)`);
+    fixed.push(sketchId);
+  }
+  return { code: text, fixed };
+}
+
 // Rewrites the arguments of every call to `name(...)`, with balanced brackets and strings
 // (axes like line(vector(0, 0, 0) * inch, vector(0, 0, 1)) contain nested commas).
 // rewrite(args) returns the new argument list, or null to keep the call as it is.

@@ -47,8 +47,11 @@ image = (
 app = modal.App("cad-ai-fs-sim")
 
 
-@app.function(image=image, cpu=1.0, memory=1024, timeout=120, scaledown_window=300,
-              secrets=[modal.Secret.from_name("cad-ai-fs-sim")])
+# The DeepCAD service's secret is attached too: its API_TOKEN (= DEEPCAD_MODEL_TOKEN on the
+# website host) is accepted as well, so a host that already has the DeepCAD settings needs
+# no extra ones. Half a CPU and a short idle window keep the free credits lasting.
+@app.function(image=image, cpu=0.5, memory=1024, timeout=120, scaledown_window=120,
+              secrets=[modal.Secret.from_name("cad-ai-fs-sim"), modal.Secret.from_name("cad-ai-text2cad")])
 @modal.concurrent(max_inputs=1)
 @modal.asgi_app()
 def web():
@@ -61,7 +64,7 @@ def web():
 
     library()  # parse Onshape's std library once per container
     api = FastAPI()
-    token = os.environ.get("FS_SIM_TOKEN", "")
+    tokens = {f"Bearer {value}" for value in (os.environ.get("FS_SIM_TOKEN"), os.environ.get("API_TOKEN")) if value}
 
     @api.get("/health")
     def health():
@@ -70,14 +73,14 @@ def web():
     @api.post("/build")
     def build(body: dict, authorization: str = Header(default="")):
         """FS-Lite test build: {"ok", "error", "line", "metrics"} like scripts/local_build.py."""
-        if token and authorization != f"Bearer {token}":
+        if tokens and authorization not in tokens:
             raise HTTPException(status_code=401, detail="bad token")
         import local_build
         return local_build.build(str(body.get("code", ""))[:200_000], "remote")
 
     @api.post("/simulate")
     def simulate(body: dict, authorization: str = Header(default="")):
-        if token and authorization != f"Bearer {token}":
+        if tokens and authorization not in tokens:
             raise HTTPException(status_code=401, detail="bad token")
         code = str(body.get("code", ""))[:200_000]
         try:
