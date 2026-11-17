@@ -9,6 +9,7 @@ import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, co
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams, autoFilterInnerLoops, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
+import { PART_KIT_PROMPT, ensurePartKit, stripPartKit } from "./partKit.js";
 import { headNoun } from "./deepcadLibrary.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -2946,7 +2947,8 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   const arrFixedIndexMap = opts.arrFixedIndexMap || {}; // optional mapping for known arrays
   const changes = [];
 
-  let code = _coreFeatureScriptSanitize(rawCode);
+  // Code that calls the part kit (kitBox, kitCut, ...) gets the tested helper functions.
+  let code = ensurePartKit(_coreFeatureScriptSanitize(rawCode));
 
   function record(rule, before, after) {
     if (typeof before !== "string" || typeof after !== "string") return;
@@ -3982,6 +3984,8 @@ line(skPlane.origin, cross(skPlane.normal, skPlane.x)), angleForward = 2 * PI * 
 -- DO NOT use concentric circles alone — they produce a non-compiled placeholder.
 -- For a gear PAIR, keep the two gears as separate bodies offset by pitchRadius1 + pitchRadius2;
    do not union two different gears unless the prompt explicitly asks for one merged body.
+${PART_KIT_PROMPT}
+
 ═══ EVERYDAY OBJECT DECOMPOSITION (HARD RULE) ═══
 A named real-world object must NEVER be modeled as one stretched primitive.
 Decompose it into its recognizable components and build each one:
@@ -5801,6 +5805,7 @@ function buildEditSystemPrompt() {
     "You edit an existing Onshape FeatureScript 2931 custom feature to apply the user's change request.",
     "Rules: keep the file structure (FeatureScript 2931; import; annotation; export const ... = defineFeature(...)); keep every part the request does not mention exactly as it is; expose new sizes as precondition parameters (isLength with LengthBoundSpec, isInteger with IntegerBoundSpec) whose defaults make the requested change; keep the feature name; every length carries units; a Plane has only origin, normal and x (its y direction is cross(plane.normal, plane.x)); angles need radian or degree; join text with ~; merge touching bodies with one opBoolean UNION.",
     strictPromptSection("═══ ONSHAPE TOOL REFERENCE"),
+    strictPromptSection("═══ PART KIT"),
     strictPromptSection("═══ RUNTIME RULES"),
     'Return JSON only: {"featureName", "featureLabel", "reasoning", "code"} where code is the COMPLETE edited file.',
   ].filter(Boolean).join("\n\n");
@@ -5845,7 +5850,7 @@ async function editFeatureScript(prompt, history, requestId) {
       `PART SO FAR (requests, oldest first): ${steps.join(" -> ") || "(unknown)"}`,
       `CHANGE REQUEST: ${prompt}`,
       "CURRENT CODE (it builds in Onshape):",
-      previousCode,
+      stripPartKit(previousCode), // the kit helpers are added back automatically
       ...(feedback ? ["YOUR LAST EDIT FAILED THESE CHECKS. Fix every one:", ...feedback.map(message => `- ${message}`)] : []),
     ].join("\n");
     try {
@@ -6313,6 +6318,11 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
 
   return [
     `USER REQUEST: ${prompt}`,
+    ...(dims.designBrief ? [
+      "DESIGN BRIEF (model EVERY component below, with the PART KIT wherever a box, bar or cylinder fits, and a parameter for each main size; "
+      + "every attached component must overlap its neighbour so one opBoolean UNION merges them; cut every opening through):",
+      dims.designBrief,
+    ] : []),
     `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
     buildValidatedTemplateDirective(prompt, dims),
     ...(fsExampleBlock ? [fsExampleBlock] : []),
@@ -6466,7 +6476,9 @@ function tooSimpleFeedback(prompt, strict) {
   const parts = strict.simulatorCheck?.parts;
   if (!Array.isArray(parts) || !parts.length) return null;
   const faces = parts.reduce((sum, part) => sum + (Number(part.faces) || 0), 0);
-  if (!faces || faces > 6 || BASIC_SHAPE_WORDS.test(prompt)) return null;
+  // "Detailed"/"complex" requests are held to a higher bar than a bare shape.
+  const detailed = WANTS_DETAIL.test(prompt);
+  if (!faces || faces > (detailed ? 14 : 6) || (!detailed && BASIC_SHAPE_WORDS.test(prompt))) return null;
   const object = String(prompt).trim().slice(0, 80);
   return `The part built, but it is a single plain shape with only ${faces} faces, which does not look like "${object}". `
     + "Model what a real one looks like: decide its 3 to 6 recognizable components (body, openings, recesses, holes, "
@@ -6670,6 +6682,13 @@ async function generateViaPlanCompiler(prompt, dims, learningContext, requestId)
         continue;
       }
       const strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(compiled.code));
+      // Same quality bar as the main loop: loose pieces, missed cuts, solid containers or a
+      // bare shape send the request on to the detailed generator instead of being accepted.
+      const planProblem = strict.ok && (looseBodiesFeedback(prompt, strict) || designIssueFeedback(prompt, strict) || tooSimpleFeedback(prompt, strict));
+      if (planProblem) {
+        console.log(`[AI] Plan compiler result set aside: ${String(planProblem).slice(0, 120)}`);
+        return null;
+      }
       if (strict.ok) {
         console.log(`[AI] Plan compiler: verified candidate on attempt ${attempt + 1} (${plan.steps.length} steps${describeBuildChecks(strict)}).`);
         return {
@@ -6755,10 +6774,56 @@ function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BU
   return { system, user, before, after: total(), dropped };
 }
 
+// ── Design brief ─────────────────────────────────────────────────────────────
+// One short AI call that turns "a storage holder" into the components a real one has, with
+// sizes and attachment points. Skipped for basic shapes ("a washer", "a 2 inch cube").
+const DESIGN_BRIEF_ENABLED = String(process.env.CAD_DESIGN_BRIEF || "true").toLowerCase() !== "false";
+const WANTS_DETAIL = /\b(detailed|complex|realistic|advanced|intricate|full|complete|professional)\b/i;
+
+function wantsDesignBrief(prompt) {
+  if (!DESIGN_BRIEF_ENABLED) return false;
+  return WANTS_DETAIL.test(prompt) || !BASIC_SHAPE_WORDS.test(prompt);
+}
+
+async function buildDesignBrief(prompt, requestId) {
+  const detailed = WANTS_DETAIL.test(prompt);
+  const system = [
+    "You are a mechanical product designer preparing a build list for a CAD programmer who will model ONE solid part in Onshape.",
+    `List the ${detailed ? "6 to 9" : "4 to 6"} components a real one of the requested object has, most important first.`,
+    "One line per component, in this form:  name: shape, size in inches (L x W x H or diameter x height), position, how it attaches.",
+    "Rules: realistic proportions for the whole object; use shapes that are easy to model (plates, boxes, cylinders, tubes, ribs, bosses, holes, slots, pockets, fillets);",
+    "say for each component whether it is ADDED (must overlap what it attaches to) or CUT (must pass through the body);",
+    "give positions relative to the main body (centered, on top, 0.5 in from the left edge, ...); hollow containers state wall thickness and which side is open.",
+    `Plain text only, no code, no markdown, at most ${detailed ? 190 : 130} words.`,
+  ].join("\n");
+  try {
+    const raw = await chat(
+      [{ role: "system", content: system }, { role: "user", content: `Object: ${prompt}` }],
+      TEXT_MODEL, null,
+      { stage: "planning", affinity: `${requestId}:brief`, maxCompletionTokens: detailed ? 700 : 500, timeoutMs: 45000 },
+    );
+    const brief = String(raw || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```[\s\S]*?```/g, "").trim()
+      .split("\n").map(line => line.trim()).filter(Boolean).slice(0, 10).join("\n").slice(0, 1400);
+    if (brief.length < 40) return "";
+    console.log(`[AI] Design brief:\n${brief}`);
+    return brief;
+  } catch (err) {
+    console.warn(`[AI] Design brief skipped: ${String(err.message || err).slice(0, 120)}`);
+    return "";
+  }
+}
+
 async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
   // A bigger, faster provider (ALT_LLM_*) can afford more fix-and-retry rounds than Groq's free tier.
   const MAX_ITERATIONS = ALT_PROVIDERS.length ? 6 : Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
   const slots = keySlotsForStage("generation", MAX_ITERATIONS, `${requestId}:gtf`);
+
+  // Plan the object before coding it, so the result has the real thing's components instead
+  // of one plain block.
+  if (!dims.designBrief && wantsDesignBrief(prompt)) {
+    reportProgress("Planning the design: components, sizes and how they attach");
+    dims.designBrief = await buildDesignBrief(prompt, requestId);
+  }
 
   let bestCandidate = null;
   let priorIssues = null; // errors from the previous iteration, injected into next prompt
