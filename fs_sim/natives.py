@@ -254,6 +254,9 @@ def n_matrix_rotation(interp, args, node):
 
 def n_normalize(interp, args, node):
     v = [untag(x) for x in untag(args[0])]
+    # A vector with units (plane(WORLD_ORIGIN, Z_DIRECTION) passes one through the std
+    # library) normalizes to a plain direction, as in Onshape: use the numeric values.
+    v = [x.d["value"] if isinstance(x, FSMap) and "value" in x.d else x for x in v]
     n = math.sqrt(sum(x * x for x in v))
     if n == 0:
         raise interp.error("Cannot normalize a zero vector", node)

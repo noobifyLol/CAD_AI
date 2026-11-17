@@ -6,7 +6,7 @@ import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { simulateFeatureScript } from "./simulatorClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
-import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams, autoFilterInnerLoops, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
+import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams, autoFilterInnerLoops, autoFixQueryFilters, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
 import { PART_KIT_PROMPT, ensurePartKit, stripPartKit } from "./partKit.js";
@@ -2733,12 +2733,28 @@ function _coreFeatureScriptSanitize(code) {
   }
 
   // ── Basic token repairs ───────────────────────────────────────────────────
+  // A feature body cannot return a value, so value-returning returns are removed there, but
+  // never inside top-level helper functions (kitLen, autoAngle, the model's own helpers):
+  // stripping those broke the helpers whenever code went through the sanitizer a second time.
+  {
+    const helperRanges = [];
+    for (const match of cleaned.matchAll(/^function\s+\w+\s*\([^)]*\)[^{;]*\{/gm)) {
+      let depth = 0;
+      let end = match.index + match[0].length - 1;
+      for (; end < cleaned.length; end += 1) {
+        if (cleaned[end] === "{") depth += 1;
+        else if (cleaned[end] === "}" && (depth -= 1) === 0) break;
+      }
+      helperRanges.push([match.index, end]);
+    }
+    cleaned = cleaned.replace(/^\s*return\s+[^;{][^;]*;\s*$/gm, (line, offset) =>
+      (helperRanges.some(([from, to]) => offset >= from && offset <= to) ? line : ""));
+  }
   cleaned = cleaned
   // Remove invalid angle keys that models incorrectly add to cylinder/revolve calls.
     .replace(/^\s*"startAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     .replace(/^\s*"endAngle"\s*:\s*[^,\n]+,?\s*$/gm, "")
     // operationType may be valid on extrude/revolve-style body creators — do NOT strip it
-    .replace(/^\s*return\s+[^;{][^;]*;\s*$/gm, "")          // remove value-returning returns in bodies
     .replace(/\bskSpline\s*\(/g, "skFitSpline(")
     .replace(/\bskPolygon\s*\(/g, "skRegularPolygon(")
     .replace(/\bdefinition\.(\w+)\s+is\s+Length\s*;/g, 'isLength(definition.$1, { (inch) : [0.01, 1.0, 100.0] } as LengthBoundSpec);')
@@ -3150,6 +3166,17 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   // line) gets that segment added, so qSketchRegion finds the region.
   // A revolve axis along the sketch normal ("Revolved face is perpendicular to axis"):
   // turn it into the sketch's in-plane y axis.
+  // Selection parameters need a filter.
+  try {
+    const before = code;
+    const filters = autoFixQueryFilters(code);
+    if (filters.fixed) {
+      code = filters.code;
+      record("query_filter_added", before, code);
+    }
+  } catch {
+    // keep the code as it was
+  }
   // Parameters used in the body but missing from the dialog get declared.
   try {
     const before = code;
@@ -5843,6 +5870,10 @@ async function editFeatureScript(prompt, history, requestId) {
     thinking: reasoning, warnings, omissions: [],
     orchestration: { status: "completed", passes: { generation: { selectedCandidateId: generationMode } } },
   });
+  // How many pieces the part had before the edit: an edit must not leave new loose pieces.
+  const baseline = await localBuildFeatureScript(previousCode);
+  const baseBodies = Math.max(1, baseline.metrics?.bodies || 1);
+  let builtWithProblem = null;
   let feedback = null;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     reportProgress(attempt === 0 ? "Writing the edit" : `Fixing the edit (attempt ${attempt + 1}): ${String(feedback?.[0] || "").replace(/\s+/g, " ").slice(0, 120)}`);
@@ -5873,6 +5904,17 @@ async function editFeatureScript(prompt, history, requestId) {
       }
       const strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(parsed.code));
       if (strict.ok) {
+        const bodies = strict.localBuild?.metrics?.bodies || 0;
+        const notes = (strict.localBuild?.notes || []).join(" ");
+        const problem = bodies > baseBodies
+          ? `the part now has ${bodies} separate pieces (it had ${baseBodies}). New geometry must attach to the existing body: overlap it and merge (opBoolean UNION or kitMerge), or subtract it if it is a cavity, drawer opening or hole (opBoolean SUBTRACTION or kitCut).`
+          : notes;
+        if (problem) {
+          builtWithProblem = { code: strict.code, reasoning: parsed.reasoning, problem };
+          feedback = [`The edit built, but ${problem} Keep everything else the same.`];
+          console.log(`[AI] Edit attempt ${attempt + 1} builds, but ${problem.slice(0, 140)}`);
+          continue;
+        }
         console.log(`[AI] Edit applied on attempt ${attempt + 1}${describeBuildChecks(strict)}.`);
         return done(strict.code, "edit_applied", parsed.reasoning || `Applied: ${prompt}`);
       }
@@ -5883,6 +5925,10 @@ async function editFeatureScript(prompt, history, requestId) {
     } catch (err) {
       feedback = [`The previous attempt failed: ${String(err.message || err).slice(0, 200)}`];
     }
+  }
+  if (builtWithProblem) {
+    return done(builtWithProblem.code, "edit_applied", builtWithProblem.reasoning || `Applied: ${prompt}`,
+      [`Check this part before using it: ${builtWithProblem.problem.slice(0, 260)}`]);
   }
   return done(previousCode, "edit_not_applied", "The change could not be made in a way that builds, so the part is unchanged.",
     [`Could not apply "${prompt}" in a way that builds, so your previous part is returned unchanged. Try describing the change differently.`]);
@@ -6544,8 +6590,27 @@ function describeBuildChecks(strict) {
   return parts.length ? `, ${parts.join(", ")}` : "";
 }
 
+// The rule list is a guess about what Onshape rejects; the two test builds actually run the
+// code. When only rules object and BOTH builders make a solid, the code is accepted (rules
+// have had false alarms that cost whole AI attempts).
+async function rescueByBuild(strict) {
+  if (!strict.code || !/defineFeature\s*\(/.test(strict.code)) return null;
+  const localBuild = await localBuildFeatureScript(strict.code);
+  if (localBuild.ok !== true) return null;
+  let sim = null;
+  try { sim = await simulateFeatureScript(strict.code); } catch { sim = null; }
+  if (!sim?.available || !sim.builds) return null;
+  const overridden = [...strict.fatalIssues, ...strict.blockingIssues].map(issue => issue.message);
+  console.log(`[AI] Rules flagged ${overridden.length} issue(s) but both test builds succeeded; accepting. First: ${String(overridden[0] || "").slice(0, 120)}`);
+  return {
+    ...strict, ok: true, fatalIssues: [], blockingIssues: [], validationIssues: [],
+    localIssueCount: 0, blockingIssueCount: 0, fatalIssueCount: 0,
+    localBuild, simulatorCheck: sim, staticOverridden: overridden,
+  };
+}
+
 async function applyOnshapeCompileCheck(strict) {
-  if (!strict.ok) return strict;
+  if (!strict.ok) return (await rescueByBuild(strict)) || strict;
 
   // Free local test build first (same verdicts as Onshape on every calibration part); only
   // candidates that build locally spend an Onshape API call (education plans: 2,500/year).

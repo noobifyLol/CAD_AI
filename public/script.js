@@ -41,10 +41,7 @@ function updateEngineHint() {
   if (!hint) return;
   const deepcad = runtimeConfig?.deepcad;
   if (engine === 'auto') {
-    const library = deepcad?.library?.available ? `First it looks for a matching real part among ${deepcad.library.parts ? deepcad.library.parts.toLocaleString() : '42,000'} DeepCAD parts. ` : '';
-    hint.textContent = library + (deepcad?.configured
-      ? 'Flat, extruded parts (plates, rings, brackets) go to the DeepCAD model; cones, gears and curved or everyday objects go to Parametric AI.'
-      : 'Otherwise Auto uses Parametric AI (the DeepCAD model is not connected on this server).');
+    hint.textContent = 'The AI plans the object, writes the part, and every attempt is test-built before you see it. If it cannot make a part that builds, the closest real part from a 42,000-part CAD dataset is used.';
   } else if (engine === 'deepcad' && deepcad && !deepcad.configured) {
     hint.textContent = 'The DeepCAD model is not connected yet: set DEEPCAD_MODEL_URL on the server (see hf_space/README.md). JSON import below still works.';
   } else if (engine === 'deepcad') {
@@ -366,7 +363,15 @@ function renderVerification(result) {
   const skipped = result.simulation?.available === false ? result.simulation.reason : result.onshape?.skippedReason;
   detailEl.textContent = result.verdict === 'static_ok' && skipped ? `${detail}: ${skipped}` : detail;
   box.append(titleEl, detailEl);
-  const sim = result.simulation;
+  // A simulation that stopped part-way has only the pieces built so far: show nothing of it
+  // (a gauntlet was pictured as its first box). Several pieces get an orange heads-up.
+  const sim = result.simulation?.gaps?.length ? { ...result.simulation, parts: [], image: null } : result.simulation;
+  const pieces = sim?.parts?.length || result.local?.metrics?.bodies || 0;
+  if (pieces > 1 && tone === 'works') {
+    box.className = 'verify-box show unchecked';
+    titleEl.textContent = `Builds, but as ${pieces} separate pieces`;
+    detailEl.textContent = 'If this should be one solid part, ask for a change such as "join all the pieces into one part".';
+  }
   if (sim?.available && sim.parts?.length) {
     const parts = document.createElement('div');
     parts.className = 'verify-parts';
@@ -529,8 +534,11 @@ async function generate() {
   const engine = document.getElementById('gen-engine')?.value || 'auto';
   let autoNote = '';
   // Edits of the current part always go to the AI editor (DeepCAD only makes new parts).
-  if (!partSession.length && (engine === 'deepcad' || engine === 'auto')) {
-    const outcome = await runDeepcad({ prompt, auto: engine === 'auto' }, {
+  // Auto goes to the Parametric AI (test-built, with real dataset parts as its backup); the
+  // DeepCAD route is used only when chosen, because it returned plain plates for objects
+  // like "a desk stand".
+  if (!partSession.length && engine === 'deepcad') {
+    const outcome = await runDeepcad({ prompt, auto: false }, {
       button: document.getElementById('gen-btn'),
       busyLabel: 'Generating',
       idleLabel: 'Generate FeatureScript',

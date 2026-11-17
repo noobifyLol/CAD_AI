@@ -730,6 +730,23 @@ export function autoDeclareMissingParams(code) {
   return { code: `${text.slice(0, lineStart)}${lines.join("\n")}\n${text.slice(lineStart)}`, declared: missing };
 }
 
+/**
+ * A selection parameter needs a "Filter" (Onshape: "Missing filter and no ALWAYS_HIDDEN UI
+ * hint"). The plane picker gets the plane filter; any other selection gets a face filter.
+ */
+export function autoFixQueryFilters(code) {
+  let fixed = 0;
+  const text = String(code || "").replace(/annotation\s*\{([^{}]*)\}(\s*definition\.(\w+)\s+is\s+Query\s*;)/g, (whole, inner, rest, name) => {
+    if (/"Filter"\s*:|ALWAYS_HIDDEN/.test(inner)) return whole;
+    fixed += 1;
+    const filter = /location|plane/i.test(name) || /plane/i.test(inner)
+      ? '"Filter" : GeometryType.PLANE, "MaxNumberOfPicks" : 1'
+      : '"Filter" : EntityType.FACE';
+    return `annotation {${inner.replace(/\s*$/, "")}, ${filter} }${rest}`;
+  });
+  return { code: text, fixed };
+}
+
 // Rewrites the arguments of every call to `name(...)`, with balanced brackets and strings
 // (axes like line(vector(0, 0, 0) * inch, vector(0, 0, 1)) contain nested commas).
 // rewrite(args) returns the new argument list, or null to keep the call as it is.

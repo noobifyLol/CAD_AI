@@ -489,6 +489,19 @@ class QueryEngine:
             out.extend(Ref("FACE", sketch.body, f) for f in regions)
         return out
 
+    def q_IMPRINT(self, d):
+        # The std primitives (fCylinder, fCuboid, fCone) extrude the "imprint" faces of their
+        # own sketch: makeQuery(sketchId + "imprint", "IMPRINT", ...). Those are the regions of
+        # the sketch whose id is the operation id without the trailing "imprint".
+        op = fs_id(d["operationId"])
+        fid = op[:-1] if len(op) and op[-1] == "imprint" else op
+        out = []
+        for sketch in self.ctx.sketches:
+            if sketch.body is None or not sketch.body.alive or not id_prefix(sketch.id, fid):
+                continue
+            out.extend(Ref("FACE", sketch.body, f) for f in sketch.regions)
+        return out
+
     def bodies_of(self, refs):
         out, seen = [], set()
         for ref in refs:
