@@ -203,7 +203,20 @@ function fixTerm(term, env, unit, counter) {
       const call = body.match(/^([A-Za-z_]\w*)\s*\(/);
       if (call && !/[{"]/.test(body) && closingIndex(body, call[0].length - 1) === body.length - 1) {
         const argWant = call[1] === "vector" && nextIsUnit && next.op === "*" ? "N" : null;
-        const args = splitArgs(body.slice(call[0].length, -1)).map(arg => fixExpression(arg, env, unit, argWant, counter));
+        let args = splitArgs(body.slice(call[0].length, -1)).map(arg => fixExpression(arg, env, unit, argWant, counter));
+        // vector(0, halfW, 1.5) with no unit after it: a point whose components mix numbers
+        // and lengths ("all vector components must have the same units"). Numbers get the unit.
+        if (call[1] === "vector" && !nextIsUnit) {
+          const kinds = args.map(arg => kindOf(arg, env));
+          if (kinds.every(Boolean) && kinds.includes("L") && kinds.includes("N")) {
+            counter.count += 1;
+            args = args.map((arg, i) => {
+              if (kinds[i] === "L") return arg;
+              const value = arg.trim();
+              return `${arg.match(/^\s*/)[0]}${splitTop(value, "+-").length > 1 ? `(${value})` : value} * ${unit}`;
+            });
+          }
+        }
         fixed = `${call[0]}${args.join(",")})`;
       }
     }
@@ -241,7 +254,7 @@ export function autoFixMixedUnits(source) {
         } else if ((ch === ";" || ch === ",") && depth === 0) break;
       }
       const expr = code.slice(from, to);
-      if (!/[-+]/.test(expr) || /\b(function|if|for|while|return)\b/.test(expr)) continue;
+      if (!/[-+]|\bvector\s*\(/.test(expr) || /\b(function|if|for|while|return)\b/.test(expr)) continue;
       out += code.slice(last, from) + fixExpression(expr, env, unit, null, counter);
       last = to;
       starts.lastIndex = to;

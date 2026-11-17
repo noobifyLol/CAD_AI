@@ -6,7 +6,7 @@ import Groq from "groq-sdk";
 import { isOnshapeConfigured, testCompileFeatureScript } from "./onshapeClient.js";
 import { simulateFeatureScript } from "./simulatorClient.js";
 import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, compilePlanToFeatureScript } from "./planCompiler.js";
-import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoFilterInnerLoops, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
+import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams, autoFilterInnerLoops, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
 import { headNoun } from "./deepcadLibrary.js";
@@ -3148,6 +3148,17 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   // line) gets that segment added, so qSketchRegion finds the region.
   // A revolve axis along the sketch normal ("Revolved face is perpendicular to axis"):
   // turn it into the sketch's in-plane y axis.
+  // Parameters used in the body but missing from the dialog get declared.
+  try {
+    const before = code;
+    const params = autoDeclareMissingParams(code);
+    if (params.declared.length) {
+      code = params.code;
+      record("missing_params_declared", before, code);
+    }
+  } catch {
+    // keep the code as it was
+  }
   // Sums that mix plain numbers with lengths ("units differ"): see unitFixer.js.
   try {
     const before = code;
@@ -6746,7 +6757,7 @@ function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BU
 
 async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
   // A bigger, faster provider (ALT_LLM_*) can afford more fix-and-retry rounds than Groq's free tier.
-  const MAX_ITERATIONS = ALT_PROVIDERS.length ? 5 : Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
+  const MAX_ITERATIONS = ALT_PROVIDERS.length ? 6 : Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
   const slots = keySlotsForStage("generation", MAX_ITERATIONS, `${requestId}:gtf`);
 
   let bestCandidate = null;
@@ -7000,6 +7011,13 @@ export async function generateFeatureScript(prompt, options = {}) {
     let generationModeLabel = bestCandidate?.ok ? "gtf_clean" : "gtf_best_effort";
     let completionLevel = bestCandidate?.ok ? "full" : "repaired";
     let warnings = [];
+    // Never present a part with a known problem as a clean success.
+    if (bestCandidate?.ok && (bestCandidate.looseBodies || bestCandidate.designIssue)) {
+      const pieces = bestCandidate.strict?.localBuild?.metrics?.bodies;
+      warnings.push(bestCandidate.looseBodies
+        ? `Check this part before using it: it still comes out as ${pieces} separate pieces instead of one. Try generating again or describe how the pieces attach.`
+        : `Check this part before using it: ${String(bestCandidate.designIssue).replace(/^The part built, but it is not right yet\.\s*/, "").replace(/\s*Keep everything else the same\.$/, "").slice(0, 260)}`);
+    }
     let omissions = [];
     // Normalise repairSummary shape so the rest of the function can read it unchanged
     let repairSummary = {
@@ -7825,7 +7843,10 @@ function validateFeatureScript(code) {
         }
       }
     }
-    const preconditionExecutable = blocks.preconditionText.match(/\b(var|const|for|while|if|newSketch(?:OnPlane)?|sk[A-Z]\w*|op[A-Z]\w*|fCylinder|evPlane|qSketchRegion)\b/);
+    // Words inside labels and comments ("Radius for hub") are not code, and Onshape allows
+    // `if (definition.flag) { ... }` in a precondition to show parameters conditionally.
+    const preconditionCode = mapCodeOutsideCommentsAndStrings(blocks.preconditionText, part => part, true);
+    const preconditionExecutable = preconditionCode.match(/\b(var|const|for|while|newSketch(?:OnPlane)?|sk[A-Z]\w*|op[A-Z]\w*|fCylinder|evPlane|qSketchRegion)\b/);
     if (preconditionExecutable) {
       const absoluteIndex = blocks.preconditionOpen + 1 + preconditionExecutable.index;
       addIssue(lineNumberAt(text, absoluteIndex), "Precondition block may contain parameter declarations only; move execution logic into the feature body.", preconditionExecutable[0]);
@@ -7880,7 +7901,8 @@ export function hasFatalFeatureScriptPatterns(code) {
     if (!blocks.preconditionText || blocks.bodyOpen === -1 || blocks.bodyClose === -1) {
       issues.push({ code: 'invalid_feature_skeleton', message: 'defineFeature must include separate precondition and feature body blocks.' });
     }
-    if (/\b(var|const|for|while|if|newSketch(?:OnPlane)?|sk[A-Z]\w*|op[A-Z]\w*|fCylinder|evPlane|qSketchRegion)\b/.test(blocks.preconditionText)) {
+    // Labels/comments are not code ("Radius for hub"); `if (definition.flag) { ... }` is valid there.
+    if (/\b(var|const|for|while|newSketch(?:OnPlane)?|sk[A-Z]\w*|op[A-Z]\w*|fCylinder|evPlane|qSketchRegion)\b/.test(mapCodeOutsideCommentsAndStrings(blocks.preconditionText, part => part, true))) {
       issues.push({ code: 'execution_in_precondition', message: 'Execution logic was found inside the precondition block.' });
     }
     let nestedDepth = 0;

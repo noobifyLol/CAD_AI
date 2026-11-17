@@ -696,6 +696,40 @@ export function autoFilterInnerLoops(code) {
   return { code: text, fixed };
 }
 
+/**
+ * A parameter used in the feature body but missing from the dialog (definition.holeDepth
+ * with no isLength line) is a compile error in Onshape. Declare it with a sensible type and
+ * default instead of spending an AI attempt on it.
+ */
+export function autoDeclareMissingParams(code) {
+  const text = String(code || "");
+  const head = text.match(/\bprecondition\s*\{/);
+  if (!head) return { code: text, declared: [] };
+  const open = head.index + head[0].length - 1;
+  const close = matchingClose(text, open);
+  if (close < 0) return { code: text, declared: [] };
+  const precondition = text.slice(open, close);
+  const body = text.slice(close);
+  const declared = new Set([...precondition.matchAll(/definition\.(\w+)/g)].map(m => m[1]));
+  const missing = [...new Set([...body.matchAll(/\bdefinition\.(\w+)/g)].map(m => m[1]))].filter(name => !declared.has(name));
+  if (!missing.length) return { code: text, declared: [] };
+  const indent = (precondition.match(/\n([ \t]+)\S/) || [null, "        "])[1];
+  const label = name => name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
+  const lines = missing.map(name => {
+    const usedAsFlag = new RegExp(`(if\\s*\\(\\s*!?\\s*definition\\.${name}\\s*[)&|]|definition\\.${name}\\s*\\?|!definition\\.${name}\\b)`).test(body);
+    const annotation = `${indent}annotation { "Name" : "${label(name)}" }\n${indent}`;
+    if (usedAsFlag || /^(is|has|add|include|show|enable|use|with)[A-Z]/.test(name)) return `${annotation}definition.${name} is boolean;`;
+    if (/(count|number|num|teeth|sides|spokes|quantity|qty|holes|slots|fins|ribs|blades|segments|instances)$/i.test(name) || /^(num|number|count)/i.test(name)) {
+      return `${annotation}isInteger(definition.${name}, { (unitless) : [1, 4, 200] } as IntegerBoundSpec);`;
+    }
+    if (/angle/i.test(name)) return `${annotation}isAngle(definition.${name}, { (degree) : [0, 30, 360] } as AngleBoundSpec);`;
+    const size = /(thick|wall|fillet|chamfer|gap|clearance|offset|inset|margin)/i.test(name) ? 0.1 : /radius/i.test(name) ? 0.25 : 0.5;
+    return `${annotation}isLength(definition.${name}, { (inch) : [0.001, ${size}, 500] } as LengthBoundSpec);`;
+  });
+  const lineStart = text.lastIndexOf("\n", close - 1) + 1; // the precondition's closing brace line
+  return { code: `${text.slice(0, lineStart)}${lines.join("\n")}\n${text.slice(lineStart)}`, declared: missing };
+}
+
 // Rewrites the arguments of every call to `name(...)`, with balanced brackets and strings
 // (axes like line(vector(0, 0, 0) * inch, vector(0, 0, 1)) contain nested commas).
 // rewrite(args) returns the new argument list, or null to keep the call as it is.

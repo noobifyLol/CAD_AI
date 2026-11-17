@@ -568,6 +568,7 @@ async function generate() {
     const simplified = data.completionLevel === 'simplified' || data.generationMode === 'multi_key_simplified' || data.generationMode === 'gear_template_fallback';
     const repaired = data.completionLevel === 'repaired' || data.generationMode === 'multi_key_repaired';
     const partial = data.completionLevel === 'partial';
+    const caution = (data.warnings || []).find(w => w.startsWith('Check this part'));
     const statusMessage = data.generationMode === 'edit_applied'
       ? `Updated "${data.featureLabel}": ${prompt} - ${databaseStatusText(data.database)}`
       : data.generationMode === 'edit_not_applied'
@@ -579,7 +580,7 @@ async function generate() {
       : partial
       ? `Generated partial "${data.featureLabel}" - ${databaseStatusText(data.database)}`
       : `Generated "${data.featureLabel}" - ${databaseStatusText(data.database)}`;
-    setStatus('gen-status', autoNote + statusMessage, data.code ? 'ok' : 'error');
+    setStatus('gen-status', caution ? `Generated "${data.featureLabel}". ${caution}` : autoNote + statusMessage, !data.code ? 'error' : caution ? 'warn' : 'ok');
     showRunModal({
       title: simplified ? 'Generation simplified' : repaired ? 'Generation repaired' : partial ? 'Generation partial' : 'Generation complete',
       ok: Boolean(data.code),

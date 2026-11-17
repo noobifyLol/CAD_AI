@@ -17,6 +17,8 @@ const cases = [
   ["var x = capR + definition.pinR;", "var x = capR * inch + definition.pinR;"],
   ["var y = halfW - 0.25;", "var y = halfW - 0.25 * inch;"],
   ["var z = halfW + n * definition.pinR - 1.5e-2;", "var z = halfW + n * definition.pinR - 1.5e-2 * inch;"],
+  ["var shaftCenter = vector(0, halfW, 1.5);", "var shaftCenter = vector(0 * inch, halfW, 1.5 * inch);"],
+  ["var up = vector(0, 0, 1);", null],
   // unchanged: consistent, unknown, vectors, strings, angles, loops
   ["var a = halfW + definition.pinR * 2;", null],
   ["var b = capR * 2 + n;", null],
