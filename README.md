@@ -6,16 +6,24 @@ produces editable parametric geometry. It uses Groq-hosted models with
 retrieval grounding, a generate → test → fix loop, and deterministic fallbacks
 so a request always returns usable FeatureScript.
 
-## Quickstart
+## Two ways to use it
 
-1. Install dependencies:
+**Cloud version.** The public site runs on Render; every part is test-built by a small
+checker service on Modal. Nothing to install. See "Deploying to the cloud" below.
+
+**Local version (faster, no cloud credits).** Runs the site and both build checkers on
+your own computer. You need Node 20+, Python 3.10+ and git.
+
+1. Install and set up (the setup downloads about 300 MB once and is safe to run again):
    ```bash
    npm install
    ```
-2. Create `.env` with at least one Groq API key (`GROQ_API_KEY`, optionally
-   `GROQ_API_KEY2`..`9` for rotation). Supabase keys are optional. Without
-   them the app runs on local knowledge files only.
-3. Start the server:
+   ```bash
+   npm run setup
+   ```
+2. Open `.env` and paste one free AI key: Gemini (aistudio.google.com/apikey) into
+   `ALT_LLM_API_KEY`, or Groq (console.groq.com/keys) into `GROQ_API_KEY`.
+3. Start the site and open http://localhost:10000:
    ```bash
    npm start
    ```

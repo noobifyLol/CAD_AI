@@ -41,7 +41,8 @@
     "train:adaptive": "node scripts/train_adaptive_network.js data/adaptive_training.jsonl",
     "sim:modal-secret": "node scripts/sim_modal_secret.mjs",
     "sim:deploy": "node scripts/run_python.mjs .text2cad/venv -m modal deploy fs_sim/modal_app.py",
-    "test:units": "node scripts/unit_fixer_check.mjs"
+    "test:units": "node scripts/unit_fixer_check.mjs",
+    "setup": "node scripts/setup_local.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
