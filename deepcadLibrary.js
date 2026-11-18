@@ -121,11 +121,12 @@ export function headNoun(text) {
 }
 
 /** Top-k parts for a prompt: [{ part, score, coverage }], best first. */
-export function searchLibrary(prompt, k = 12) {
+export function searchLibrary(prompt, k = 12, { requireHead = true } = {}) {
   const { parts, df, avgLength } = load();
   const query = [...new Set(tokenize(prompt))];
   if (!parts.length || !query.length) return [];
-  const head = headNoun(prompt);
+  // requireHead: false (reference designs for the AI) ranks by shared words only.
+  const head = requireHead ? headNoun(prompt) : null;
   const promptCounts = countedNouns(prompt);
   const N = parts.length;
   const idf = token => Math.log(1 + (N - (df.get(token) || 0) + 0.5) / ((df.get(token) || 0) + 0.5));

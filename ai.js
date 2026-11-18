@@ -10,6 +10,7 @@ import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams
 import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
 import { PART_KIT_PROMPT, ensurePartKit, stripPartKit } from "./partKit.js";
+import { datasetReferenceBlock } from "./datasetReferences.js";
 import { headNoun } from "./deepcadLibrary.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -6369,6 +6370,7 @@ function buildChatbotCandidatePrompt({ prompt, dims, retrieval, candidateId, pre
       + "every attached component must overlap its neighbour so one opBoolean UNION merges them; cut every opening through):",
       dims.designBrief,
     ] : []),
+    ...(dims.datasetRefs ? [dims.datasetRefs, "END_DATASET_REFS"] : []),
     `DIMENSIONS: ${summarizeDimsForPrompt(dims)}`,
     buildValidatedTemplateDirective(prompt, dims),
     ...(fsExampleBlock ? [fsExampleBlock] : []),
@@ -6831,6 +6833,14 @@ function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BU
     () => dropUserLine("DB_ROWS:"),
     () => dropUserLine("DOC_ROWS:"),
     () => dropUserLine("STYLE HINT:"),
+    () => {
+      const start = user.indexOf("DATASET_REFS:");
+      const end = user.indexOf("END_DATASET_REFS");
+      if (start >= 0 && end > start) {
+        user = user.slice(0, start) + user.slice(end + "END_DATASET_REFS".length);
+        dropped.push("DATASET_REFS");
+      }
+    },
   ];
   for (const step of steps) {
     if (total() <= budget) break;
@@ -6850,7 +6860,7 @@ function wantsDesignBrief(prompt) {
   return WANTS_DETAIL.test(prompt) || !BASIC_SHAPE_WORDS.test(prompt);
 }
 
-async function buildDesignBrief(prompt, requestId) {
+async function buildDesignBrief(prompt, requestId, references = "") {
   const detailed = WANTS_DETAIL.test(prompt);
   const system = [
     "You are a mechanical product designer preparing a build list for a CAD programmer who will model ONE solid part in Onshape.",
@@ -6863,7 +6873,7 @@ async function buildDesignBrief(prompt, requestId) {
   ].join("\n");
   try {
     const raw = await chat(
-      [{ role: "system", content: system }, { role: "user", content: `Object: ${prompt}` }],
+      [{ role: "system", content: system }, { role: "user", content: `Object: ${prompt}${references ? `\n\nReal parts from a CAD dataset that are similar (use their structure and proportions as a guide, but plan the object asked for):\n${references}` : ""}` }],
       TEXT_MODEL, null,
       { stage: "planning", affinity: `${requestId}:brief`, maxCompletionTokens: detailed ? 700 : 500, timeoutMs: 45000 },
     );
@@ -6885,9 +6895,14 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
 
   // Plan the object before coding it, so the result has the real thing's components instead
   // of one plain block.
+  // Real designs from the 42,000-part dataset, for both the plan and the code.
+  if (dims.datasetRefs === undefined) {
+    try { dims.datasetRefs = datasetReferenceBlock(prompt); } catch { dims.datasetRefs = ""; }
+    if (dims.datasetRefs) reportProgress("Found similar real parts in the 42,000-part dataset");
+  }
   if (!dims.designBrief && wantsDesignBrief(prompt)) {
     reportProgress("Planning the design: components, sizes and how they attach");
-    dims.designBrief = await buildDesignBrief(prompt, requestId);
+    dims.designBrief = await buildDesignBrief(prompt, requestId, dims.datasetRefs);
   }
 
   let bestCandidate = null;
