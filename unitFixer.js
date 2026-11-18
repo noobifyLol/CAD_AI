@@ -114,7 +114,14 @@ function buildEnvironment(code) {
   return env;
 }
 
-/** "L" (length), "N" (number) or null (unknown: angles, vectors, strings, anything unclear). */
+// Vectors: "P" is a point or offset (a vector of lengths), "D" a direction (plain numbers).
+// `origin + normal * 1.5` is P + D: the direction term needs the unit, like N in L + N.
+const VECTOR_KINDS = { L: "P", N: "D" };
+const SCALAR_KINDS = { P: "L", D: "N" };
+const isVector = kind => kind === "P" || kind === "D";
+const DIRECTION_CONSTANTS = new Set(["X_DIRECTION", "Y_DIRECTION", "Z_DIRECTION"]);
+
+/** "L" (length), "N" (number), "P" (point), "D" (direction) or null (unknown: angles, strings, anything unclear). */
 function kindOf(expr, env, depth = 0) {
   if (depth > 8) return null;
   const terms = splitTop(expr, "+-");
@@ -127,12 +134,19 @@ function kindOf(expr, env, depth = 0) {
 
 function kindOfTerm(term, env, depth) {
   let exponent = 0;
+  let vectors = 0;
   for (const factor of splitTop(term, "*/")) {
     const kind = kindOfFactor(factor.text, env, depth);
     if (!kind) return null;
-    if (kind === "L") exponent += factor.op === "/" ? -1 : 1;
+    if (isVector(kind)) {
+      if (factor.op === "/") return null; // dividing by a vector is not a thing
+      vectors += 1;
+    }
+    if (kind === "L" || kind === "P") exponent += factor.op === "/" ? -1 : 1;
   }
-  return exponent === 0 ? "N" : exponent === 1 ? "L" : null;
+  if (vectors > 1) return null;
+  const scalar = exponent === 0 ? "N" : exponent === 1 ? "L" : null;
+  return scalar && vectors ? VECTOR_KINDS[scalar] : scalar;
 }
 
 function kindOfFactor(raw, env, depth) {
@@ -142,6 +156,11 @@ function kindOfFactor(raw, env, depth) {
   if (/^\d+(\.\d*)?([eE][-+]?\d+)?$|^\.\d+$/.test(factor)) return "N";
   if (UNIT_NAMES.has(factor)) return "L";
   if (factor === "PI") return "N";
+  if (DIRECTION_CONSTANTS.has(factor)) return "D";
+  if (factor === "WORLD_ORIGIN") return "P";
+  // plane.normal / evPlane(...).normal / line.direction are directions; plane.origin a point.
+  if (/^[A-Za-z_][\w.]*(\([^;]*\))?\.(normal|direction)$/.test(factor)) return "D";
+  if (/^[A-Za-z_][\w.]*(\([^;]*\))?\.origin$/.test(factor)) return "P";
   const parameter = factor.match(/^definition\.(\w+)$/);
   if (parameter) return env.lengths.has(parameter[1]) ? "L" : env.numbers.has(parameter[1]) ? "N" : null;
   if (/^[A-Za-z_]\w*$/.test(factor)) {
@@ -156,6 +175,15 @@ function kindOfFactor(raw, env, depth) {
   if (call && closingIndex(factor, call[0].length - 1) === factor.length - 1) {
     const args = splitArgs(factor.slice(call[0].length, -1));
     if (NUMBER_FUNCTIONS.has(call[1])) return "N";
+    if (call[1] === "normalize") return "D";
+    if (call[1] === "vector" && args.length >= 2) {
+      const kinds = args.map(arg => kindOf(arg, env, depth + 1));
+      return kinds.every(kind => kind === "N") ? "D" : kinds.every(kind => kind === "L") ? "P" : null;
+    }
+    if (call[1] === "cross") {
+      const kinds = args.map(arg => kindOf(arg, env, depth + 1));
+      return kinds.length === 2 && kinds.every(kind => kind === "D") ? "D" : null;
+    }
     if (call[1] === "sqrt") return kindOf(args[0] || "", env, depth + 1) === "N" ? "N" : null;
     if (SAME_KIND_FUNCTIONS.has(call[1])) {
       const kinds = args.map(arg => kindOf(arg, env, depth + 1));
@@ -170,11 +198,13 @@ function fixExpression(expr, env, unit, want, counter) {
   const terms = splitTop(expr, "+-");
   if (terms.length > 1) {
     const kinds = terms.map(term => kindOfTerm(term.text, env, 0));
-    if (kinds.every(Boolean) && kinds.includes("L") && kinds.includes("N")) {
-      const target = want || "L";
+    const scalarMix = kinds.every(Boolean) && kinds.includes("L") && kinds.includes("N");
+    const vectorMix = kinds.every(Boolean) && kinds.includes("P") && kinds.includes("D") && kinds.every(isVector);
+    if (scalarMix || vectorMix) {
+      const target = want || "L"; // "L" = make every term carry the unit, "N" = strip it
       counter.count += 1;
       return terms.map((term, k) => {
-        if (kinds[k] === target) return term.op + term.text;
+        if ((SCALAR_KINDS[kinds[k]] || kinds[k]) === target) return term.op + term.text;
         const lead = term.text.match(/^\s*/)[0];
         const trail = term.text.match(/\s*$/)[0];
         const body = term.text.trim();

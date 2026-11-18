@@ -9,6 +9,8 @@ isInteger(definition.count, x);
 var halfW = definition.width / 2;
 var capR = definition.width / inch;
 var n = 3;
+var origin = vector(0, 0, 0) * inch;
+var normal = vector(0, 0, 1);
 `;
 const cases = [
   // [input line, expected line]
@@ -19,6 +21,13 @@ const cases = [
   ["var z = halfW + n * definition.pinR - 1.5e-2;", "var z = halfW + n * definition.pinR - 1.5e-2 * inch;"],
   ["var shaftCenter = vector(0, halfW, 1.5);", "var shaftCenter = vector(0 * inch, halfW, 1.5 * inch);"],
   ["var up = vector(0, 0, 1);", null],
+  // points plus directions: the direction term needs the unit
+  ["var bottomCenter = origin + normal * 1.5;", "var bottomCenter = origin + normal * 1.5 * inch;"],
+  ["var top = skPlane.origin + Z_DIRECTION * 2;", "var top = skPlane.origin + Z_DIRECTION * 2 * inch;"],
+  ['"center" : WORLD_ORIGIN - normalize(normal) * n,', '"center" : WORLD_ORIGIN - normalize(normal) * n * inch,'],
+  ["var tip = origin + normal * halfW;", null],
+  ["var dir = normal + X_DIRECTION;", null],
+  ["var odd = origin + normal * halfW + 0.5;", null],
   // unchanged: consistent, unknown, vectors, strings, angles, loops
   ["var a = halfW + definition.pinR * 2;", null],
   ["var b = capR * 2 + n;", null],
