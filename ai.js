@@ -5947,6 +5947,20 @@ async function firstCandidateThatBuilds(codes) {
   return null;
 }
 
+/**
+ * Why a recovery result must not be returned, or "" when it may be. Only a definite failure
+ * counts: when the checkers cannot run (ok:null), the rules check stays the only gate.
+ */
+async function recoveryBuildFailure(code) {
+  if (!code) return "";
+  const build = await localBuildFeatureScript(code);
+  if (build.ok === false) return `it did not build: ${String(build.error || "unknown error").slice(0, 160)}`;
+  let sim = null;
+  try { sim = await simulateFeatureScript(code, { render: false }); } catch { sim = null; }
+  if (sim?.available && sim.errors?.length && !sim.gaps?.length) return `the Onshape-library simulator failed: ${String(sim.errors[0]?.message || sim.errors[0]).slice(0, 160)}`;
+  return "";
+}
+
 async function datasetLibraryFallback(prompt) {
   reportProgress("Looking for the closest real part in the 42,000-part dataset");
   try {
@@ -6832,6 +6846,32 @@ function messagesForProviders(fullSystem, fullUser, groqFitted) {
   return [{ role: "system", content: fitted.system }, { role: "user", content: fitted.user }];
 }
 
+const REPEATED_SYSTEM_SECTIONS = [
+  "═══ OFFICIAL FEATURESCRIPT LIMITATIONS TO RESPECT ═══",
+  "═══ HOW TO USE REFERENCE EXAMPLES IN DATABASE CONTEXT ═══",
+  "═══ MANDATORY FILE STRUCTURE",
+  "═══ STRUCTURE PUNCTUATION RULES",
+  "═══ FUNCTION SCOPE AND EDITING RULES ═══",
+  "═══ GOAL ═══",
+];
+
+/** The system prompt without sections that only repeat the contract (for small budgets). */
+export function compactSystemPrompt(system) {
+  let text = String(system || "");
+  for (const header of REPEATED_SYSTEM_SECTIONS) {
+    const start = text.indexOf(header);
+    if (start < 0) continue;
+    const next = text.indexOf("═══", text.indexOf("═══", start + 3) + 3);
+    const stop = next < 0 ? text.indexOf("\n\nDATABASE CONTEXT\n", start) : next;
+    text = text.slice(0, start) + (stop < 0 ? "" : text.slice(stop));
+  }
+  // The "additional modeling rules" bullets restate the contract's hard rules.
+  const rulesStart = text.indexOf("Follow these additional modeling rules exactly:");
+  const rulesEnd = text.indexOf("Return ONLY a JSON object", rulesStart);
+  if (rulesStart >= 0 && rulesEnd > rulesStart) text = text.slice(0, rulesStart) + text.slice(rulesEnd);
+  return text;
+}
+
 function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BUDGET) {
   const total = () => estimatePromptTokens(system) + estimatePromptTokens(user);
   const before = total();
@@ -6857,6 +6897,27 @@ function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BU
     () => dropUserLine("DB_ROWS:"),
     () => dropUserLine("DOC_ROWS:"),
     () => dropUserLine("STYLE HINT:"),
+    () => {
+      // Sections that repeat the contract or are enforced by the sanitizer/auto-fixes anyway:
+      // worth less than real reference parts, so they go first (Groq only; ALT gets all).
+      const before = system.length;
+      system = compactSystemPrompt(system);
+      if (system.length < before) dropped.push("REPEATED RULES");
+    },
+    () => {
+      // Keep the closest reference part (the first one) and drop the others.
+      const start = user.indexOf("DATASET_REFS:");
+      const end = user.indexOf("END_DATASET_REFS");
+      if (start < 0 || end <= start) return;
+      const block = user.slice(start, end);
+      const items = [...block.matchAll(/\n(?=REAL |REFERENCE \d)/g)].map(m => m.index);
+      if (items.length < 2) return;
+      while (items.length > 1 && total() > budget) {
+        const cutAt = start + items.pop();
+        user = user.slice(0, cutAt) + "\n" + user.slice(user.indexOf("END_DATASET_REFS"));
+      }
+      dropped.push("EXTRA DATASET_REFS");
+    },
     () => {
       const start = user.indexOf("DATASET_REFS:");
       const end = user.indexOf("END_DATASET_REFS");
@@ -7272,8 +7333,12 @@ export async function generateFeatureScript(prompt, options = {}) {
 
     if (!selectedCode) {
       const aiRecovery = await generateWithAiThinking(prompt, dims, learningContext, requestId);
-      if (aiRecovery?.code) {
-        const recovered = await runRepairCycle(aiRecovery.code, learningContext, 1);
+      const recovered = aiRecovery?.code ? await runRepairCycle(aiRecovery.code, learningContext, 1) : null;
+      const recoveryFailure = recovered ? await recoveryBuildFailure(recovered.code || aiRecovery.code) : "";
+      if (recoveryFailure) {
+        console.warn(`[AI] Recovery candidate rejected because ${recoveryFailure}`);
+        omissions.push(`The recovery attempt was not used because ${recoveryFailure}`);
+      } else if (recovered) {
         selectedCode = recovered.code || aiRecovery.code;
         selectedFeatureName = aiRecovery.featureName || selectedFeatureName;
         selectedFeatureLabel = aiRecovery.featureLabel || selectedFeatureLabel;
@@ -7474,7 +7539,12 @@ candidateScores: bestCandidate ? [{
     } catch (recoveryErr) {
       console.error("[AI] AI recovery path also failed.", recoveryErr?.message || String(recoveryErr));
     }
-    const recoveryCode = repaired?.strict?.ok ? repaired.code : "";
+    let recoveryCode = repaired?.strict?.ok ? repaired.code : "";
+    const recoveryFailure = await recoveryBuildFailure(recoveryCode);
+    if (recoveryFailure) {
+      console.warn(`[AI] Recovery candidate rejected because ${recoveryFailure}`);
+      recoveryCode = "";
+    }
 
     // Absolute guarantee: the caller must always get a FeatureScript file back, never
     // an empty/omitted result. If both the main path and AI recovery failed (e.g. every
@@ -8164,15 +8234,18 @@ export async function debugFeatureScript(code, errors, options = {}) {
   console.log(`[AI] Debugging (${sanitizedInput.length} chars)`);
 
   try {
-    const raw = await chat([
-      { role: "system", content: withLearningContext(DEBUG_SYSTEM, learningContext) },
-      { role: "user",   content: `FEATURESCRIPT:\n${sanitizedInput}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}` }
-    ], selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
+    // The part-kit helpers are re-added by the sanitizer, so they need not be sent; the
+    // database context is dropped for Groq when the request would exceed its TPM limit.
+    const fullSystem = withLearningContext(DEBUG_SYSTEM, learningContext);
+    const fullUser = `FEATURESCRIPT:\n${stripPartKit(sanitizedInput)}\n\nONSHAPE ERRORS:\n${errors || "(none provided)"}`;
+    const fitted = fitGenerationMessages(fullSystem, fullUser);
+    const raw = await chat(messagesForProviders(fullSystem, fullUser, fitted), selectCodeGenerationModel(), codeGenerationFallbackModels(selectCodeGenerationModel()), {
       stage: options.stage || "repair",
       affinity: options.affinity || `repair:${stableHash(sanitizedInput)}`,
       fullCode: true,
       maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
       jsonSchema: FEATURESCRIPT_REPAIR_JSON_SCHEMA,
+      groqMessages: [{ role: "system", content: fitted.system }, { role: "user", content: fitted.user }],
     });
     const parsed = tryParseJson(raw, null);
     const rawFeatureScript = /FeatureScript\s+\d+\s*;/.test(raw) ? raw : "";
