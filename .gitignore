@@ -45,3 +45,8 @@ data/cadKnowledge.new.json
 data/research_fs_samples/
 fs_sim/std
 .fs-sim-venv/
+.datasets/
+CadQuery/
+CadQuery.zip
+CQ/
+__MACOSX/
