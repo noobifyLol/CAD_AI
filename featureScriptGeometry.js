@@ -590,6 +590,14 @@ export function autoFixRuntimeTypes(code) {
   });
   if (pushes) changes.push(`${pushes} JavaScript push() call(s) rewritten to append()`);
 
+  // translation(...) does not exist in FeatureScript ("Variable translation not found");
+  // transform(vector) is a translation. translation(x, y, z) -> transform(vector(x, y, z)).
+  if (/\btranslation\s*\(/.test(text) && !/\bfunction\s+translation\s*\(/.test(text)) {
+    text = rewriteCallArgs(text, "translation", args => (args.length >= 2 ? [`vector(${args.map(arg => arg.trim()).join(", ")})`] : null));
+    text = text.replace(/\btranslation\s*\(/g, "transform(");
+    changes.push("translation(...) rewritten to transform(vector)");
+  }
+
   // "text" + number is not defined in FeatureScript (strings join with ~):
   // id + "spoke" + i -> id + ("spoke" ~ i).
   let joined = 0;

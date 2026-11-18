@@ -254,6 +254,30 @@ function fixTerm(term, env, unit, counter) {
   }).join("");
 }
 
+// Part-kit calls take lengths or plain numbers (inches), but each argument must still be one
+// kind: kitBox(..., w - 0.5, ...) -> w - 0.5 * inch. These calls are bare statements, so the
+// var / map-value scan below never sees them.
+function fixKitCallArguments(code, env, unit, counter) {
+  const head = /\bkit(?:Box|Cylinder|Rod)\s*\(/g;
+  let out = "";
+  let last = 0;
+  let match;
+  while ((match = head.exec(code))) {
+    const open = match.index + match[0].length - 1;
+    const close = closingIndex(code, open);
+    if (close < 0) continue;
+    const args = splitArgs(code.slice(open + 1, close));
+    if (args.some(arg => /\bis\s+[A-Z]/.test(arg))) { head.lastIndex = close; continue; } // the definition
+    const fixedArgs = args.map((arg, k) => (k < 3 ? arg : fixExpression(arg, env, unit, "L", counter)));
+    if (fixedArgs.join(",") !== args.join(",")) {
+      out += code.slice(last, open + 1) + fixedArgs.join(",");
+      last = close;
+    }
+    head.lastIndex = close;
+  }
+  return out + code.slice(last);
+}
+
 /** Returns { code, fixed } where fixed is the number of sums repaired. */
 export function autoFixMixedUnits(source) {
   let code = String(source || "");
@@ -290,6 +314,7 @@ export function autoFixMixedUnits(source) {
       starts.lastIndex = to;
     }
     code = out + code.slice(last);
+    code = fixKitCallArguments(code, buildEnvironment(code), unit, counter);
     if (counter.count === before) break;
   }
   return { code, fixed: counter.count };

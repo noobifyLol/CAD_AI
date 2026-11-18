@@ -119,6 +119,157 @@ export function stripPartKit(code) {
   return (normalized.slice(0, at).replace(/\n+$/, "\n") + normalized.slice(at + PART_KIT_SOURCE.length).replace(/^\n+/, "\n"));
 }
 
+/** Splits the arguments of the call whose "(" is at `open`; returns { args, end } or null. */
+function callArguments(text, open) {
+  let depth = 0;
+  let start = open + 1;
+  const args = [];
+  for (let i = open; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"') {
+      i += 1;
+      while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+      continue;
+    }
+    if ("([{".includes(ch)) depth += 1;
+    else if (")]}".includes(ch)) {
+      depth -= 1;
+      if (depth === 0) {
+        args.push(text.slice(start, i));
+        return { args, end: i };
+      }
+    } else if (ch === "," && depth === 1) {
+      args.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return null;
+}
+
+const PLAIN_ID = /^\s*id\s*\+\s*"([^"]+)"\s*$/;
+
+/**
+ * kitCut / kitMerge on a piece that an earlier kitMerge already joined into another one fails
+ * with "targets resolved to no solid bodies" (after kitMerge the solid is known only by the
+ * FIRST id of its list): the most common failure of generated code. Follows the merges in
+ * the order they are written and points such targets at the body that absorbed the piece.
+ * Returns { code, fixed } (number of arguments rewritten).
+ */
+export function autoFixKitTargets(source) {
+  const text = String(source || "");
+  const absorbed = new Map(); // piece name -> the name of the body it was merged into
+  const resolve = name => {
+    let current = name;
+    for (let hops = 0; absorbed.has(current) && hops < 20; hops += 1) current = absorbed.get(current);
+    return current;
+  };
+  let out = "";
+  let last = 0;
+  let fixed = 0;
+  const calls = /\bkit(Merge|Cut)\s*\(\s*context\s*,/g;
+  let match;
+  while ((match = calls.exec(text))) {
+    const open = match.index + match[0].indexOf("(");
+    const parsed = callArguments(text, open);
+    if (!parsed) continue;
+    const { args, end } = parsed;
+    const opName = args[1]?.match(PLAIN_ID)?.[1];
+    if (!opName) continue;
+    let newArgs = null;
+    if (match[1] === "Merge" && args.length === 3) {
+      const listText = args[2].trim();
+      if (!listText.startsWith("[") || !listText.endsWith("]")) continue;
+      const inner = callArguments(`(${listText.slice(1, -1)})`, 0)?.args || [];
+      const names = inner.map(item => item.match(PLAIN_ID)?.[1] || null);
+      if (!names[0]) continue;
+      const survivor = resolve(names[0]);
+      const items = [];
+      const seen = new Set();
+      inner.forEach((item, k) => {
+        if (!names[k]) { items.push(item.trim()); return; }
+        const name = resolve(names[k]);
+        if (seen.has(name)) return;
+        seen.add(name);
+        items.push(`id + "${name}"`);
+        if (name !== survivor) absorbed.set(name, survivor);
+      });
+      absorbed.set(opName, survivor);
+      const changed = items.length >= 2 && items.join("|") !== inner.map(item => item.trim()).join("|");
+      if (changed) newArgs = [args[0], args[1], ` [${items.join(", ")}]`];
+    } else if (match[1] === "Cut" && args.length === 4) {
+      const target = args[2].match(PLAIN_ID)?.[1];
+      if (!target) continue;
+      const resolved = resolve(target);
+      absorbed.set(opName, resolved); // the cut keeps the target's id
+      if (resolved !== target) newArgs = [args[0], args[1], ` id + "${resolved}"`, args[3]];
+    }
+    if (newArgs) {
+      fixed += 1;
+      out += text.slice(last, open) + `(${newArgs.join(",")})`;
+      last = end + 1;
+    }
+    calls.lastIndex = end + 1;
+  }
+  return { code: out + text.slice(last), fixed };
+}
+
+/**
+ * Fillets and chamfers are finishing touches: one that cannot be made (radius too big for
+ * the edge, edge query empty) is skipped instead of failing the whole part. Wraps every
+ * opFillet / opChamfer statement in `try silent { }` (FeatureScript; both test builders run it).
+ */
+export function guardFinishingOps(source) {
+  const text = String(source || "");
+  let out = "";
+  let last = 0;
+  const statements = /^([ \t]*)(opFillet|opChamfer)\s*\(/gm;
+  let match;
+  while ((match = statements.exec(text))) {
+    const start = match.index;
+    if (/\btry(\s+silent)?\s*\{\s*$/.test(text.slice(Math.max(0, start - 60), start))) continue;
+    const open = start + match[0].length - 1;
+    const parsed = callArguments(text, open);
+    if (!parsed) continue;
+    let end = parsed.end + 1;
+    while (end < text.length && (text[end] === " " || text[end] === "\t")) end += 1;
+    if (text[end] !== ";") continue;
+    end += 1;
+    const indent = match[1];
+    const statement = text.slice(start + indent.length, end).replace(/\r?\n/g, "\n    ");
+    out += `${text.slice(last, start)}${indent}try silent\n${indent}{\n${indent}    ${statement}\n${indent}}`;
+    last = end;
+    statements.lastIndex = end;
+  }
+  return out + text.slice(last);
+}
+
+/**
+ * Joins every solid the feature made into one at the very end (pieces that overlap or touch
+ * merge; pieces that float apart stay separate and are still reported). For parts that came
+ * out as a body plus unmerged handles, ribs or feet. Returns the code unchanged when there is
+ * no defineFeature or it already ends with this merge.
+ */
+export function appendAutoMerge(source) {
+  const text = String(source || "");
+  if (/id \+ "autoMerge"/.test(text)) return text;
+  const head = /\bdefineFeature\s*\(/.exec(text);
+  if (!head) return text;
+  const parsed = callArguments(text, head.index + head[0].length - 1);
+  if (!parsed) return text;
+  const bodyEnd = text.lastIndexOf("}", parsed.end);
+  if (bodyEnd < 0) return text;
+  const merge = [
+    "        // Join every solid this feature made into one part (pieces that do not touch stay separate).",
+    "        try silent",
+    "        {",
+    "            opBoolean(context, id + \"autoMerge\", { \"tools\" : qBodyType(qCreatedBy(id, EntityType.BODY), BodyType.SOLID), \"operationType\" : BooleanOperationType.UNION });",
+    "        }",
+    "    ",
+  ].join("\n");
+  const before = text.slice(0, bodyEnd).replace(/[ \t]*$/, "");
+  return `${before}${before.endsWith("\n") ? "" : "\n"}${merge}${text.slice(bodyEnd)}`;
+}
+
 const KIT_CALL =/\bkit(?:Box|Cylinder|Rod|Merge|Cut|Point|Len)\s*\(/;
 
 /** Appends the kit source (after the import line) to code that calls it; idempotent. */

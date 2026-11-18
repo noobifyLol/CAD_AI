@@ -26,6 +26,10 @@ const cases = [
   ["var top = skPlane.origin + Z_DIRECTION * 2;", "var top = skPlane.origin + Z_DIRECTION * 2 * inch;"],
   ['"center" : WORLD_ORIGIN - normalize(normal) * n,', '"center" : WORLD_ORIGIN - normalize(normal) * n * inch,'],
   ["var tip = origin + normal * halfW;", null],
+  // part-kit call arguments (bare statements)
+  ['kitBox(context, id + "foot", skPlane, 0, 0, -0.25, halfW - 0.5, 2, 0.3);', 'kitBox(context, id + "foot", skPlane, 0, 0, -0.25, halfW - 0.5 * inch, 2, 0.3);'],
+  ['kitCylinder(context, id + "boss", skPlane, capR - 0.5, 0, 0, 0.25, halfW);', null],
+  ['kitRod(context, id + "bar", skPlane, -halfW, 0, 1, halfW, 0, 1, 0.1);', null],
   ["var dir = normal + X_DIRECTION;", null],
   ["var odd = origin + normal * halfW + 0.5;", null],
   // unchanged: consistent, unknown, vectors, strings, angles, loops

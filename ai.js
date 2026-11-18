@@ -9,7 +9,7 @@ import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, co
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams, autoFilterInnerLoops, autoFixQueryFilters, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
-import { PART_KIT_PROMPT, ensurePartKit, stripPartKit } from "./partKit.js";
+import { PART_KIT_PROMPT, appendAutoMerge, autoFixKitTargets, ensurePartKit, guardFinishingOps, stripPartKit } from "./partKit.js";
 import { datasetReferenceBlock } from "./datasetReferences.js";
 import { headNoun } from "./deepcadLibrary.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -457,6 +457,8 @@ export function getModelConfig() {
     codeMaxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
     multiKeyEnabled: MULTI_KEY_ENABLED,
     extraProviders: ALT_PROVIDERS.map(provider => provider.name),
+    extraProviderStages: [...ALT_STAGES],
+    extraProviderStatus: altProviderStatus(),
     candidateCount: CAD_CANDIDATE_COUNT,
     retrievalWorkers: CAD_RETRIEVAL_WORKERS,
     sharedKeyCount,
@@ -627,7 +629,7 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
   const credential = pickStageCredential(stage, options.affinity, options.keySlot);
   const defaultCompletionTokens = options.fullCode ? GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS;
   const requestedCompletionTokens = Number(options.maxCompletionTokens || defaultCompletionTokens);
-  const hardCompletionCeiling = Math.max(GROQ_MAX_COMPLETION_TOKENS, defaultCompletionTokens);
+  const hardCompletionCeiling = Math.max(GROQ_MAX_COMPLETION_TOKENS, defaultCompletionTokens, Number(options.groqMaxCompletionTokens || 0));
   // Respect an explicitly smaller request (used when shrinking to fit a TPM limit),
   // but never go below 1024 for full-code calls.
   const completionFloor = options.fullCode
@@ -882,49 +884,111 @@ const ALT_PROVIDERS = [1, 2, 3, 4, 5].map(n => {
   return baseUrl && apiKey && model ? { name: `${new URL(baseUrl).hostname}/${model}`, baseUrl, apiKey, model } : null;
 }).filter(Boolean);
 const altProviderPausedUntil = new Map();
+const altProviderStats = new Map(ALT_PROVIDERS.map(provider => [provider.name, { calls: 0, ok: 0, failed: 0, truncated: 0, lastStatus: null, lastError: null, lastOkAt: null, lastFailAt: null }]));
 
-async function callAltProvider(provider, messages, options) {
+// Thinking models (Gemini 2.5, gpt-oss) spend hidden reasoning tokens out of max_tokens before
+// the answer; with no cap a detailed part was cut off mid-file. "medium" = up to 8192 thinking
+// tokens for writing code (spatial arithmetic benefits), "low" = 1024 for the small stages.
+// ALT_LLM_REASONING_EFFORT / ALT_LLM_CODE_REASONING_EFFORT override ("off" sends nothing).
+const ALT_THINKING_MODEL = /gemini-(2\.5|3)|gpt-oss/i;
+const ALT_CODE_MAX_TOKENS = Number(process.env.ALT_LLM_CODE_MAX_TOKENS || 24000);
+const ALT_MAX_TOKENS = Number(process.env.ALT_LLM_MAX_TOKENS || 4096);
+// The free Gemini tier allows few requests per day: spend them where they matter (writing and
+// repairing code, planning the design) and leave the small stages to Groq.
+const ALT_STAGES = new Set(String(process.env.ALT_LLM_STAGES || "generation,repair,planning").split(",").map(stage => stage.trim()).filter(Boolean));
+
+function altReasoningEffort(provider, options) {
+  const configured = options.fullCode ? process.env.ALT_LLM_CODE_REASONING_EFFORT || process.env.ALT_LLM_REASONING_EFFORT : process.env.ALT_LLM_REASONING_EFFORT;
+  if (configured) return configured === "off" ? null : configured;
+  if (!ALT_THINKING_MODEL.test(provider.model)) return null;
+  return options.fullCode ? "medium" : "low";
+}
+
+/** Gemini/other provider health for /health (no keys; long numbers such as project ids masked). */
+export function altProviderStatus() {
+  return ALT_PROVIDERS.map(provider => ({
+    name: provider.name,
+    pausedForMs: Math.max(0, (altProviderPausedUntil.get(provider.name) || 0) - Date.now()),
+    ...altProviderStats.get(provider.name),
+  }));
+}
+
+async function callAltProvider(provider, messages, options, effortOverride) {
+  const effort = effortOverride === undefined ? altReasoningEffort(provider, options) : effortOverride;
   const body = {
     model: provider.model,
     messages,
     temperature: GROQ_TEMPERATURE,
-    max_tokens: Number(options.maxCompletionTokens || (options.fullCode ? GROQ_CODE_MAX_COMPLETION_TOKENS : GROQ_MAX_COMPLETION_TOKENS)),
+    max_tokens: options.fullCode ? Math.max(ALT_CODE_MAX_TOKENS, Number(options.maxCompletionTokens || 0)) : Math.max(ALT_MAX_TOKENS, Number(options.maxCompletionTokens || 0)),
   };
+  if (effort) body.reasoning_effort = effort;
   if (options.jsonSchema) body.response_format = { type: "json_object" };
   const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${provider.apiKey}` },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(options.timeoutMs || GROQ_TIMEOUT_MS),
+    signal: AbortSignal.timeout(Math.max(options.timeoutMs || 0, options.fullCode ? 180000 : 0) || GROQ_TIMEOUT_MS),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    const error = new Error(`${provider.name} HTTP ${response.status}: ${text.slice(0, 200)}`);
+    const error = new Error(`${provider.name} HTTP ${response.status}: ${text.slice(0, 300)}`);
     error.status = response.status;
     throw error;
   }
   const data = await response.json();
-  const content = normalizeMessageContent(data?.choices?.[0]?.message?.content);
+  const choice = data?.choices?.[0];
+  const content = normalizeMessageContent(choice?.message?.content);
+  const usage = data?.usage || {};
+  const thinking = usage.completion_tokens_details?.reasoning_tokens;
+  console.log(`[AI] ${provider.name} usage prompt=${usage.prompt_tokens ?? "?"} completion=${usage.completion_tokens ?? "?"}${thinking ? ` thinking=${thinking}` : ""} finish=${choice?.finish_reason || "?"} effort=${effort || "default"}`);
+  if (choice?.finish_reason === "length") {
+    const error = new Error(`${provider.name} answer was cut off at max_tokens (${body.max_tokens})`);
+    error.truncated = true;
+    error.partial = content;
+    throw error;
+  }
   if (!content) throw new Error(`${provider.name} returned no content`);
   return content;
 }
 
+const maskIds = text => String(text || "").replace(/\d{7,}/g, "#").slice(0, 240);
+
 async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
-  for (const provider of ALT_PROVIDERS) {
+  const altStage = options.stage || "generation";
+  for (const provider of ALT_STAGES.has(altStage) ? ALT_PROVIDERS : []) {
     if ((altProviderPausedUntil.get(provider.name) || 0) > Date.now()) continue;
     const startedAt = Date.now();
+    const stats = altProviderStats.get(provider.name);
+    stats.calls += 1;
     try {
-      const content = await callAltProvider(provider, messages, options);
-      console.log(`[AI] ${provider.name} answered stage=${options.stage || "generation"} in ${Date.now() - startedAt}ms`);
+      let content;
+      try {
+        content = await callAltProvider(provider, messages, options);
+      } catch (err) {
+        if (!err.truncated) throw err;
+        // Cut off: the thinking used the budget. Once more with thinking off.
+        stats.truncated += 1;
+        console.warn(`[AI] ${err.message}; retrying once with thinking off.`);
+        content = await callAltProvider(provider, messages, options, ALT_THINKING_MODEL.test(provider.model) ? "none" : null);
+      }
+      stats.ok += 1;
+      stats.lastOkAt = new Date().toISOString();
+      console.log(`[AI] ${provider.name} answered stage=${altStage} in ${Date.now() - startedAt}ms`);
       return content;
     } catch (err) {
+      stats.failed += 1;
+      stats.lastStatus = err.status || (err.truncated ? "cut off" : err.name);
+      stats.lastError = maskIds(err.message);
+      stats.lastFailAt = new Date().toISOString();
       const pause = err.status === 429 ? 60000 : err.status >= 500 || err.name === "TimeoutError" ? 30000 : 10000;
       altProviderPausedUntil.set(provider.name, Date.now() + pause);
-      console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 160)}); using the next provider.`);
+      console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 300)}); using the next provider.`);
     }
   }
-  // Groq (the backup) gets the trimmed prompt when the caller made one.
+  // Groq (the backup) gets the trimmed prompt when the caller made one, and the answer room
+  // that prompt leaves (groqCompletionBudget).
   if (Array.isArray(options.groqMessages)) messages = options.groqMessages;
+  if (options.groqMaxCompletionTokens) options = { ...options, maxCompletionTokens: options.groqMaxCompletionTokens };
   const fallbackList = Array.isArray(fallbackModels)
     ? fallbackModels
     : (model === TEXT_MODEL ? [FALLBACK_MODEL] : []);
@@ -3251,6 +3315,29 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     }
   } catch {
     // leave as is; the validator still reports it
+  }
+
+  // kitCut / kitMerge on a piece an earlier kitMerge already absorbed ("targets resolved to no
+  // solid bodies", the most common failure): point it at the body that absorbed the piece.
+  try {
+    const before = code;
+    const result = autoFixKitTargets(code);
+    if (result.fixed) {
+      code = result.code;
+      record("kit_targets_after_merge", before, code);
+    }
+  } catch {
+    // leave as is; the build check reports it
+  }
+
+  // Fillets and chamfers are finishing touches: one that cannot be made is skipped (try silent)
+  // instead of failing the whole part.
+  try {
+    const before = code;
+    code = guardFinishingOps(code);
+    if (code !== before) record("finishing_ops_try_silent", before, code);
+  } catch {
+    // leave as is
   }
 
   // Array length fix: replace arr.length with size(arr)
@@ -6227,8 +6314,14 @@ function buildCompletedLocalResult(prompt, dims, learningContext, orchestration,
 async function generateWithAiThinking(prompt, dims, learningContext, requestId) {
   try {
     console.warn(`[AI] Generating FeatureScript with deep thinking (recovery path) for request=${requestId}`);
+    // The design brief and dataset references from the main attempts, so the recovery part
+    // still has the object's real components (without them it came back as one plain block).
+    const planLines = [
+      ...(dims.designBrief ? ["DESIGN BRIEF (model every component, with the PART KIT where a box, bar or cylinder fits; attached pieces overlap so one UNION merges them):", dims.designBrief] : []),
+      ...(dims.datasetRefs ? [dims.datasetRefs, "END_DATASET_REFS"] : []),
+    ].join("\n");
     const recoveryPrompt = `USER REQUEST: ${prompt}
-
+${planLines ? `\n${planLines}\n` : ""}
 DIMENSIONS:
 ${JSON.stringify({
   featureName: dims.featureName,
@@ -6268,6 +6361,7 @@ INSTRUCTIONS:
         keySlot: "k7",
         fullCode: true,
         maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
+        groqMaxCompletionTokens: groqCompletionBudget(fitted.after),
       }
     );
 
@@ -6540,7 +6634,9 @@ function tooSimpleFeedback(prompt, strict) {
   const faces = parts.reduce((sum, part) => sum + (Number(part.faces) || 0), 0);
   // "Detailed"/"complex" requests are held to a higher bar than a bare shape.
   const detailed = WANTS_DETAIL.test(prompt);
-  if (!faces || faces > (detailed ? 14 : 6) || (!detailed && BASIC_SHAPE_WORDS.test(prompt))) return null;
+  // 9: a box with one recess or a block with a couple of holes is still a plain shape (a
+  // "speaker" that came back as a 7-face block passed the old limit of 6).
+  if (!faces || faces > (detailed ? 14 : 9) || (!detailed && BASIC_SHAPE_WORDS.test(prompt))) return null;
   const object = String(prompt).trim().slice(0, 80);
   return `The part built, but it is a single plain shape with only ${faces} faces, which does not look like "${object}". `
     + "Model what a real one looks like: decide its 3 to 6 recognizable components (body, openings, recesses, holes, "
@@ -6551,6 +6647,8 @@ function tooSimpleFeedback(prompt, strict) {
 // Things the test build can see that make a part wrong although it builds: a cut that
 // removed nothing, a union of pieces that do not touch, a container that is solid.
 const CONTAINER_WORDS = /\b(mugs?|cups?|bottles?|vases?|bowls?|buckets?|jars?|tumblers?|planters?|flower ?pots?|trash cans?|bins?|lamp ?shades?|glass|pitchers?|jugs?)\b/i;
+const OPENING_WORDS = /\b(holes?|bores?|grilles?|grills?|vents?|perforat\w*|cut-?outs?|openings?|through-holes?)\b/i;
+
 function designIssueFeedback(prompt, strict) {
   const build = strict.localBuild;
   if (!build || build.ok !== true) return null;
@@ -6565,7 +6663,27 @@ function designIssueFeedback(prompt, strict) {
         + "\"thickness\" (wall), or subtract a slightly smaller inner body that stops one wall thickness above the bottom.");
     }
   }
+  // Holes, a grille, vents: asked for, but nothing is removed anywhere (cylinders were added as
+  // pegs instead of cut, or left out).
+  if (OPENING_WORDS.test(prompt) && !/SUBTRACTION|\bkitCut\s*\(|qSketchRegion\s*\([^;]*,\s*true\s*\)|\bopHole\s*\(|\bopShell\s*\(/.test(stripPartKit(strict.code))) {
+    issues.push("The request asks for holes or openings, but the code never cuts anything out (no kitCut, opBoolean SUBTRACTION or sketch with inner loops), "
+      + "so they are missing or were added as solid pegs. Make each hole a cutter body (kitCylinder / kitBox) longer than the wall it goes through, "
+      + "then remove the cutters from the main body: kitCut(context, id + \"holes\", id + \"main\", [id + \"hole1\", ...]).");
+  }
   return issues.length ? `The part built, but it is not right yet. ${issues.slice(0, 3).join(" ")} Keep everything else the same.` : null;
+}
+
+/** The candidate with one final UNION of every solid it made, when that leaves fewer pieces. */
+async function tryAutoMerge(strict) {
+  const mergedCode = appendAutoMerge(strict.code);
+  if (mergedCode === strict.code) return null;
+  const merged = await applyOnshapeCompileCheck(validateFeatureScriptStrict(mergedCode));
+  const before = strict.localBuild?.metrics?.bodies || 0;
+  const after = merged.localBuild?.metrics?.bodies || 0;
+  if (!merged.ok || !after || after >= before) return null;
+  console.log(`[AI] Joined the touching pieces automatically: ${before} -> ${after} bodies`);
+  reportProgress(`Joined the touching pieces into one part (${before} pieces -> ${after})`);
+  return merged;
 }
 
 function looseBodiesFeedback(prompt, strict) {
@@ -6835,8 +6953,15 @@ async function generateViaPlanCompiler(prompt, dims, learningContext, requestId)
 // worked example, template directive and rules always stay.
 // Calibrated against Groq's own counts in 413 errors: these prompts run ~4.6 chars per
 // token (4.4 keeps a little margin). 5000 prompt + 2600 completion fits the 8000 limit.
-const GENERATION_PROMPT_TOKEN_BUDGET = Number(process.env.GROQ_PROMPT_TOKEN_BUDGET || 5000);
+const GENERATION_PROMPT_TOKEN_BUDGET = Number(process.env.GROQ_PROMPT_TOKEN_BUDGET || 4400);
 const estimatePromptTokens = text => Math.ceil(String(text || "").length / 4.4);
+
+// The answer gets whatever the prompt leaves of Groq's per-request limit, not a fixed cap: a
+// fixed 2600 cut detailed parts off mid-file, and 8192 was always refused first (413).
+const GROQ_TPM_LIMIT = Number(process.env.GROQ_TPM_LIMIT || 8000);
+function groqCompletionBudget(promptTokens) {
+  return Math.max(1200, Math.min(8192, GROQ_TPM_LIMIT - Math.ceil(Number(promptTokens || 0) * 1.05) - 300));
+}
 
 // With a bigger provider configured (ALT_LLM_*), send it the full instructions and examples
 // (ALT_PROMPT_TOKEN_BUDGET); Groq, the backup, still gets the trimmed version (groqMessages).
@@ -6855,10 +6980,33 @@ const REPEATED_SYSTEM_SECTIONS = [
   "═══ GOAL ═══",
 ];
 
+// Second stage for very small budgets: worked examples the tool reference, the template and
+// the auto-fixes (qSketchRegion id, skSolve, bound specs) already cover.
+const SECONDARY_SYSTEM_SECTIONS = [
+  "═══ PRECONDITION RULES",
+  "═══ FEATURE BODY RULES",
+];
+
+// Lines of the per-request prompt that repeat the system contract.
+const REPEATED_USER_LINES = [
+  "AUTHORING POLICY:",
+  "QUALITY TARGET:",
+  "CANDIDATE MODE:",
+  "- Return JSON only with featureName",
+  "- Do not truncate.",
+  "- Never use placeholders",
+  "- Always expose editable parameters",
+  "- Use FeatureScript docs and retrieved rows",
+  "- Never return an empty code field",
+  "- Never return diagnostics",
+  "- Never store op* calls",
+  "- Top-level helper functions are allowed",
+];
+
 /** The system prompt without sections that only repeat the contract (for small budgets). */
-export function compactSystemPrompt(system) {
+export function compactSystemPrompt(system, level = 1) {
   let text = String(system || "");
-  for (const header of REPEATED_SYSTEM_SECTIONS) {
+  for (const header of level >= 2 ? [...REPEATED_SYSTEM_SECTIONS, ...SECONDARY_SYSTEM_SECTIONS] : REPEATED_SYSTEM_SECTIONS) {
     const start = text.indexOf(header);
     if (start < 0) continue;
     const next = text.indexOf("═══", text.indexOf("═══", start + 3) + 3);
@@ -6900,9 +7048,10 @@ function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BU
     () => {
       // Sections that repeat the contract or are enforced by the sanitizer/auto-fixes anyway:
       // worth less than real reference parts, so they go first (Groq only; ALT gets all).
-      const before = system.length;
+      const before = system.length + user.length;
       system = compactSystemPrompt(system);
-      if (system.length < before) dropped.push("REPEATED RULES");
+      user = user.split("\n").filter(line => !REPEATED_USER_LINES.some(prefix => line.startsWith(prefix))).join("\n");
+      if (system.length + user.length < before) dropped.push("REPEATED RULES");
     },
     () => {
       // Keep the closest reference part (the first one) and drop the others.
@@ -6917,6 +7066,11 @@ function fitGenerationMessages(system, user, budget = GENERATION_PROMPT_TOKEN_BU
         user = user.slice(0, cutAt) + "\n" + user.slice(user.indexOf("END_DATASET_REFS"));
       }
       dropped.push("EXTRA DATASET_REFS");
+    },
+    () => {
+      const before = system.length;
+      system = compactSystemPrompt(system, 2);
+      if (system.length < before) dropped.push("WORKED EXAMPLES");
     },
     () => {
       const start = user.indexOf("DATASET_REFS:");
@@ -6949,12 +7103,12 @@ async function buildDesignBrief(prompt, requestId, references = "") {
   const detailed = WANTS_DETAIL.test(prompt);
   const system = [
     "You are a mechanical product designer preparing a build list for a CAD programmer who will model ONE solid part in Onshape.",
-    `List the ${detailed ? "6 to 9" : "4 to 6"} components a real one of the requested object has, most important first.`,
+    `List the ${detailed ? "6 to 9" : "5 to 7"} components a real one of the requested object has, most important first, including the small details that make it recognizable (grilles, ribs, lips, feet, holes, chamfered edges).`,
     "One line per component, in this form:  name: shape, size in inches (L x W x H or diameter x height), position, how it attaches.",
     "Rules: realistic proportions for the whole object; use shapes that are easy to model (plates, boxes, cylinders, tubes, ribs, bosses, holes, slots, pockets, fillets);",
     "say for each component whether it is ADDED (must overlap what it attaches to) or CUT (must pass through the body);",
     "give positions relative to the main body (centered, on top, 0.5 in from the left edge, ...); hollow containers state wall thickness and which side is open.",
-    `Plain text only, no code, no markdown, at most ${detailed ? 190 : 130} words.`,
+    `Plain text only, no code, no markdown, at most ${detailed ? 190 : 150} words.`,
   ].join("\n");
   try {
     const raw = await chat(
@@ -7012,18 +7166,29 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
         jsonSchema: FEATURESCRIPT_GENERATION_JSON_SCHEMA,
         groqMessages: [{ role: "system", content: fitted.system }, { role: "user", content: fitted.user }],
+        groqMaxCompletionTokens: groqCompletionBudget(fitted.after),
       });
 
       const parsed = parseFeatureScriptJson(raw, dims);
       if (!parsed?.code) {
-        priorIssues = [{ message: "Previous attempt returned invalid JSON or an empty code field. You MUST return only a JSON object with featureName, featureLabel, reasoning, and code." }];
+        const rawText = String(raw || "").trim();
+        const cutOffJson = rawText.length > 3000 && !rawText.endsWith("}");
+        priorIssues = [{ message: cutOffJson
+          ? "Your previous answer was TOO LONG and was cut off before the end. Write a much SHORTER file: reasoning in one sentence, no comments, at most 6 parameters, the PART KIT helpers and for loops for repeated features. Return only the JSON object."
+          : "Previous attempt returned invalid JSON or an empty code field. You MUST return only a JSON object with featureName, featureLabel, reasoning, and code." }];
         console.warn(`[AI] GTF iteration ${iteration + 1}: invalid JSON, retrying with feedback`);
         if (iteration < MAX_ITERATIONS - 1) await new Promise(resolve => setTimeout(resolve, 300));
         continue;
       }
 
       // ── TEST ─────────────────────────────────────────────────────────────
-      const strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(parsed.code));
+      let strict = await applyOnshapeCompileCheck(validateFeatureScriptStrict(parsed.code));
+      // Several pieces where one object was asked for: join everything that touches before
+      // spending another AI attempt on it (handles, ribs and feet that were never merged).
+      if (strict.ok && looseBodiesFeedback(prompt, strict)) {
+        const merged = await tryAutoMerge(strict);
+        if (merged) strict = merged;
+      }
       const scored = scoreFeatureScriptCandidate(strict.code);
       const candidate = {
         candidateId,
@@ -7084,9 +7249,10 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
       const blockingMessages = strict.blockingIssues.slice(0, 8).map(i => ({ message: i.message }));
       const fatalMessages = strict.fatalIssues.slice(0, 4).map(i => ({ message: i.message }));
       priorIssues = [...blockingMessages, ...fatalMessages];
-      if (parsed.recoveredFromTruncation) {
+      const cutOff = strict.blockingIssues.some(issue => /truncated|Unbalanced braces/i.test(String(issue.message || "")));
+      if (parsed.recoveredFromTruncation || cutOff) {
         console.warn(`[AI] GTF iteration ${iteration + 1}: response was truncated; auto-closed the file before validation.`);
-        priorIssues.push({ message: "Previous response was cut off by the completion token limit. Produce a more COMPACT file: reasoning under 2 sentences, fewer sketch entities, no redundant comments — while still building the requested geometry." });
+        priorIssues.unshift({ message: "Your previous answer was TOO LONG and was cut off before the end, so it could not run. Write a much SHORTER file: reasoning in one sentence, no comments, at most 6 parameters, the PART KIT helpers (kitBox/kitCylinder/kitRod/kitCut/kitMerge) instead of hand-written sketches, and for loops for repeated features (holes, slots, ribs) instead of writing each one out. Still build every main component." });
       }
       console.log(`[AI] GTF iteration ${iteration + 1}/${MAX_ITERATIONS}: ${priorIssues.length} issue(s) fed back → next prompt`);
       reportProgress(`Found a problem: ${String(priorIssues[0]?.message || "").replace(/\s+/g, " ").slice(0, 140)}`);
@@ -8246,6 +8412,7 @@ export async function debugFeatureScript(code, errors, options = {}) {
       maxCompletionTokens: GROQ_CODE_MAX_COMPLETION_TOKENS,
       jsonSchema: FEATURESCRIPT_REPAIR_JSON_SCHEMA,
       groqMessages: [{ role: "system", content: fitted.system }, { role: "user", content: fitted.user }],
+      groqMaxCompletionTokens: groqCompletionBudget(fitted.after),
     });
     const parsed = tryParseJson(raw, null);
     const rawFeatureScript = /FeatureScript\s+\d+\s*;/.test(raw) ? raw : "";

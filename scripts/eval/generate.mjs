@@ -22,10 +22,13 @@ async function worker() {
         });
         const d = await r.json();
         const code = d.featureScript || d.code || "";
-        if (code) writeFileSync(`${outDir}/${String(i).padStart(2, "0")}_${prompt.replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30)}.fs`, code);
+        const stem = `${outDir}/${String(i).padStart(2, "0")}_${prompt.replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30)}`;
+        if (code) writeFileSync(`${stem}.fs`, code);
+        writeFileSync(`${stem}.json`, JSON.stringify({ prompt, status: r.status, seconds: Math.round((Date.now() - started) / 1000), generationMode: d.generationMode, completionLevel: d.completionLevel, error: d.error, warnings: d.warnings, omissions: d.omissions }, null, 2));
         console.log(r.status, d.generationMode || d.error || "", `${Math.round((Date.now() - started) / 1000)}s`, prompt);
         break;
-      } catch {
+      } catch (err) {
+        if (tries % 5 === 0) console.log(`retrying (${err?.cause?.code || err?.name || "error"}: ${String(err?.message || err).slice(0, 80)})`, prompt);
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
     }
