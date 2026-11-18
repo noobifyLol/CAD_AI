@@ -6564,6 +6564,29 @@ function looseBodiesFeedback(prompt, strict) {
     + "\"tools\" is qUnion([...every body id...]). Keep everything else the same.";
 }
 
+// An error inside a part-kit helper (the AI did not write it) points at a line it cannot
+// fix. Name the helper, list the AI's own calls to it, and give the usual cause.
+export function partKitErrorHint(code, line, error) {
+  if (!line) return "";
+  const lines = String(code || "").split("\n");
+  let helper = null;
+  for (let i = Math.min(line, lines.length) - 1; i >= 0; i -= 1) {
+    const match = lines[i].match(/^function\s+(kit\w+)\s*\(/);
+    if (match) { helper = match[1]; break; }
+    if (/^(export\s+const|annotation\s*\{)/.test(lines[i])) return "";
+  }
+  if (!helper) return "";
+  const calls = lines.map((text, i) => ({ text: text.trim(), n: i + 1 }))
+    .filter(({ text }) => new RegExp(`^${helper}\\s*\\(`).test(text)).slice(0, 4)
+    .map(({ text, n }) => `line ${n}: ${text.slice(0, 120)}`);
+  const cause = helper === "kitCut" && /no solid bodies|resolved to no/i.test(error)
+    ? " The target id no longer names a body, usually because an earlier kitMerge joined it into another piece: after kitMerge the solid is known only by the FIRST id in its list, so cut from that id (or do the cut before the merge). Every cutter id must also be a body that exists."
+    : helper === "kitMerge" && /no solid bodies|resolved to no|fewer than|at least/i.test(error)
+      ? " One of the ids in the list does not name a body any more (it was merged or cut already) or was never created. List only ids of pieces that still exist."
+      : " Check the arguments of these calls: positions and sizes must be lengths (definition.x or 0.5 * inch) or plain numbers meaning inches, and ids must name pieces that exist.";
+  return ` The error is inside the part-kit helper ${helper}, which you did not write and must not change; it comes from one of your calls: ${calls.join("; ") || "(none found)"}.${cause}`;
+}
+
 // Short fix-it hints for the test-build errors models make most often.
 function localBuildHint(error) {
   if (/units differ|cannot (add|subtract|compare)[^:]*\b(mm|inch|meter)/i.test(error)) {
@@ -6621,8 +6644,9 @@ async function applyOnshapeCompileCheck(strict) {
   if (localBuild.ok === false) {
     const error = String(localBuild.error || "").split("\n")[0].slice(0, 300);
     const sourceLine = localBuild.line ? String(strict.code.split("\n")[localBuild.line - 1] || "").trim().slice(0, 200) : "";
-    const where = sourceLine ? ` in this line: ${sourceLine}` : "";
-    const extraFatal = [{ message: `Test build failed, as it would in Onshape: ${error}${where}${localBuildHint(error)}`, source: "local_build" }];
+    const kitHint = partKitErrorHint(strict.code, localBuild.line, error);
+    const where = kitHint ? "" : sourceLine ? ` in this line: ${sourceLine}` : "";
+    const extraFatal = [{ message: `Test build failed, as it would in Onshape: ${error}${where}${kitHint || localBuildHint(error)}`, source: "local_build" }];
     return {
       ...strict,
       ok: false,
