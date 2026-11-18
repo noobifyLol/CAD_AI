@@ -382,7 +382,7 @@ function selectFsExamplesForPrompt(prompt = "", dims = {}, limit = 1, minScore =
   return scored.slice(0, Math.max(1, limit)).map(entry => entry.example);
 }
 
-function buildFsExamplePromptBlock(prompt, dims, { limit = 1, maxChars = 2400 } = {}) {
+function buildFsExamplePromptBlock(prompt, dims, { limit = 1, maxChars = 3600 } = {}) {
   if (dims?.shape === "GEAR_SPUR") return ""; // gears carry their own validated template
   const examples = selectFsExamplesForPrompt(prompt, dims, limit);
   if (!examples.length) return "";
@@ -1898,9 +1898,15 @@ function summarizeFeatureScript(code, maxLines = 12) {
 // example showed nothing but the part-kit helpers). The kit is already described in the
 // instructions and a long dialog is repetitive, so drop the kit and keep only the first few
 // parameters: the feature body, which carries the lesson, then fits.
-function compactExampleForPrompt(code, maxChars = 2400, keepParams = 4) {
+function compactExampleForPrompt(code, maxChars = 3600, keepParams = 3) {
   let text = stripPartKit(String(code || "")).replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
   if (text.length <= maxChars) return text;
+  // The file's header comment repeats the lesson that is printed above the example.
+  const featureStart = text.search(/^annotation\s*\{\s*"Feature Type Name"/m);
+  if (featureStart > 0) {
+    const head = text.slice(0, featureStart).split("\n").filter(line => !/^\s*\/\//.test(line)).join("\n").replace(/\n{3,}/g, "\n\n");
+    text = head + text.slice(featureStart);
+  }
   const head = text.match(/\bprecondition\s*\{/);
   if (!head) return text;
   const open = head.index + head[0].length - 1;
@@ -1923,7 +1929,8 @@ function compactExampleForPrompt(code, maxChars = 2400, keepParams = 4) {
   const remaining = lines.slice(cut).filter(line => /\bdefinition\.\w+/.test(line)).length;
   const indent = (lines[cut].match(/^\s*/) || ["        "])[0];
   kept.push(`${indent}// ... ${remaining} more parameter${remaining === 1 ? "" : "s"}, declared the same way`);
-  return `${text.slice(0, open + 1)}${kept.join("\n")}\n${text.slice(close)}`;
+  const closeIndent = lines[lines.length - 1].match(/^\s*$/) ? lines[lines.length - 1] : "";
+  return `${text.slice(0, open + 1)}${kept.join("\n")}\n${closeIndent}${text.slice(close)}`;
 }
 
 function compactFeaturePattern(code, maxChars = 1600) {
@@ -6140,6 +6147,21 @@ async function datasetLibraryFallback(prompt) {
   }
 }
 
+// A hand-checked example that clearly matches the prompt: at least two words the user typed
+// (score 4; one word scores under 3) and the same kind of object, with the prompt's sizes put
+// into its dialog when that still validates. null when nothing matches that well.
+export function strongCuratedExample(prompt, dims) {
+  if (dims?.shape === "GEAR_SPUR") return null;
+  const [example] = selectFsExamplesForPrompt(prompt, dims, 1, 4).filter(candidate => sameObjectKind(prompt, candidate.title));
+  if (!example) return null;
+  const customized = applyPromptToExample(example.content, prompt);
+  const useCustomized = customized.applied.length > 0 && validateFeatureScriptStrict(customized.code).ok;
+  const code = useCustomized ? customized.code : example.content;
+  if (!validateFeatureScriptStrict(code).ok) return null;
+  const fromPrompt = useCustomized ? customized.applied.filter(entry => entry.source === "prompt") : [];
+  return { example, code, sizes: fromPrompt.map(entry => `${entry.name} = ${entry.value}`).join(", ") };
+}
+
 export function buildGuaranteedFeatureScript(prompt, dims, learningContext = {}, retrieval = null, decomposition = null) {
   // Best worst-case first: if a compile-verified curated example matches the prompt,
   // return THAT instead of a generic primitive. A quota-starved "create a pen" then
@@ -7382,6 +7404,29 @@ export async function generateFeatureScript(prompt, options = {}) {
     };
     let fallbackUsed = "none";
     let localFallbackReason = "";
+
+    // The AI's best attempt builds but still has a known design problem after every retry.
+    // When a hand-checked example clearly matches the prompt, a verified part beats a flawed
+    // one (a "TV with an ethernet cable" kept coming back as a slab with the screen buried
+    // inside it while the library has a working TV).
+    if (bestCandidate?.ok && (bestCandidate.looseBodies || bestCandidate.designIssue)) {
+      const curated = strongCuratedExample(prompt, dims);
+      if (curated) {
+        console.log(`[AI] Best AI attempt still has a design problem; returning the "${curated.example.title}" example instead.`);
+        selectedCode = curated.code;
+        selectedFeatureName = curated.example.id.replace(/[^a-zA-Z0-9_]/g, "");
+        selectedFeatureLabel = curated.example.title;
+        selectedReasoning = `The AI's attempts kept a design problem, so the hand-checked ${curated.example.title} example was used. ${curated.example.lesson || ""}`.trim();
+        generationModeLabel = "curated_example_over_flawed_ai";
+        completionLevel = "full";
+        fallbackUsed = `curated_example:${curated.example.id}`;
+        const problem = bestCandidate.looseBodies
+          ? `it came out as ${bestCandidate.strict?.localBuild?.metrics?.bodies} separate pieces`
+          : String(bestCandidate.designIssue).replace(/^The part built, but it is not right yet\.\s*/, "").split(/(?<=\.)\s/)[0].slice(0, 160);
+        warnings = [`The AI's attempts kept a design problem (${problem}), so the hand-checked "${curated.example.title}" example was returned${curated.sizes ? ` with your sizes applied (${curated.sizes})` : ""}. Generate again for a new AI design.`];
+        repairSummary = { repaired: false, explanation: [], localIssues: [], fatalIssues: [], strict: validateFeatureScriptStrict(curated.code) };
+      }
+    }
 
     if (selectedCode && (!repairSummary.strict?.ok || repairSummary.fatalIssues.length || countBlockingValidationIssues(repairSummary.localIssues) > 0)) {
       const repairedCandidate = await runRepairCycle(selectedCode, learningContext, CAD_REPAIR_ATTEMPTS);
