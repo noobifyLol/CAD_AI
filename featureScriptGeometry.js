@@ -582,6 +582,14 @@ export function autoFixRuntimeTypes(code) {
     (isUnitVector(arg) ? `${key}${unitless(arg)}${tail}` : whole));
   if (directions) changes.push(`${directions} direction vector(s) with length units normalized`);
 
+  // JavaScript array habit: arr.push(x); -> arr = append(arr, x); (.length is fixed in ai.js)
+  let pushes = 0;
+  text = text.replace(/^(\s*)([A-Za-z_]\w*)\.push\s*\(([^;]*)\)\s*;/gm, (whole, indent, name, value) => {
+    pushes += 1;
+    return `${indent}${name} = append(${name}, ${value.trim()});`;
+  });
+  if (pushes) changes.push(`${pushes} JavaScript push() call(s) rewritten to append()`);
+
   // "text" + number is not defined in FeatureScript (strings join with ~):
   // id + "spoke" + i -> id + ("spoke" ~ i).
   let joined = 0;
