@@ -7,7 +7,10 @@
  * readable recipe, scaled to inches. The AI adapts their structure and proportions instead
  * of inventing a design from nothing, so results get the detail real parts have.
  */
-import { headNoun, readSequence, searchLibrary } from "./deepcadLibrary.js";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
+import { headNoun, readSequence, searchLibrary, tokenize } from "./deepcadLibrary.js";
 
 const round = value => Math.round(value * 100) / 100;
 const fmt = value => String(round(value));
@@ -131,14 +134,62 @@ export function datasetReferences(prompt, { k = 2, maxChars = 1800 } = {}) {
   return out;
 }
 
+// ── BenchCAD: named mechanical parts as CadQuery programs (data/benchcad_refs.json.gz,
+// built by scripts/dataset_refs/build_benchcad.py; CC-BY 4.0). Unlike DeepCAD these use
+// revolves, fillets, chamfers, holes, sweeps and lofts.
+let benchcad = null;
+function loadBenchcad() {
+  if (benchcad) return benchcad;
+  try {
+    const file = fileURLToPath(new URL("./data/benchcad_refs.json.gz", import.meta.url));
+    benchcad = existsSync(file) ? JSON.parse(gunzipSync(readFileSync(file)).toString("utf8")).refs || [] : [];
+  } catch {
+    benchcad = [];
+  }
+  return benchcad;
+}
+
+const words = text => String(text || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1).map(w => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
+
+/** Best BenchCAD programs for the prompt: the family's main word must appear in the prompt. */
+export function benchcadReferences(prompt, k = 1) {
+  const asked = new Set(words(prompt));
+  // The thing asked for decides: "a flange with bolt holes" is a flange, not a bolt.
+  const head = tokenize(String(headNoun(prompt) || "")).pop();
+  const scored = [];
+  for (const ref of loadBenchcad()) {
+    const family = words(ref.family);
+    if (!family.length || !head || tokenize(family[family.length - 1]).pop() !== head) continue;
+    const shared = family.filter(w => asked.has(w)).length + words(ref.variant).filter(w => asked.has(w)).length * 0.5;
+    scored.push({ ref, score: shared / family.length + (ref.difficulty === "easy" ? 0 : 0.1) });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const out = [];
+  const families = new Set();
+  for (const { ref } of scored) {
+    if (families.has(ref.family)) continue;
+    families.add(ref.family);
+    out.push(ref);
+    if (out.length >= k) break;
+  }
+  return out;
+}
+
 /** The prompt block for the AI (empty string when nothing relevant was found). */
 export function datasetReferenceBlock(prompt, options) {
   const refs = datasetReferences(prompt, options);
-  if (!refs.length) return "";
+  const programs = benchcadReferences(prompt, 1);
+  if (!refs.length && !programs.length) return "";
   return [
-    "DATASET_REFS: real parts from the DeepCAD/Text2CAD dataset (made by people in Onshape) closest to this request.",
-    "Use them for realistic structure, proportions and level of detail (how many steps, which profiles, what is added or cut);",
+    "DATASET_REFS: real parts from CAD datasets closest to this request.",
+    "Use them for realistic structure, proportions and level of detail (which features, what is added or cut);",
     "adapt them to the request, do not copy them, and still build everything the user asked for.",
-    ...refs.map((ref, i) => `REFERENCE ${i + 1}: "${ref.name}"\n${ref.recipe}`),
+    ...programs.map(ref => [
+      `REAL ${ref.family.replace(/_/g, " ").toUpperCase()} (BenchCAD${ref.standard ? `, ${ref.standard}` : ""}) in CadQuery; build the same features in FeatureScript `
+      + "(.circle/.rect/.polygon -> sketch + opExtrude or kitBox/kitCylinder, .revolve -> opRevolve, .hole/.cutBlind -> a cutter + opBoolean SUBTRACTION/kitCut, "
+      + ".fillet -> opFillet, .chamfer -> opChamfer, .shell -> opShell, .union/.cut -> opBoolean; CadQuery sizes are mm):",
+      ref.code,
+    ].join("\n")),
+    ...refs.map((ref, i) => `REFERENCE ${i + 1}: "${ref.name}" (DeepCAD)\n${ref.recipe}`),
   ].join("\n");
 }
