@@ -1,7 +1,9 @@
 {
   "name": "cad-ai-generator",
   "version": "1.0.0",
-  "description": "Groq-first FeatureScript generator with FeatureScript docs grounding",
+  "description": "Describe a part in plain English and get Onshape FeatureScript that builds, test-built offline before you see it",
+  "license": "MIT",
+  "repository": "github:noobifyLol/CAD_AI",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -18,7 +20,7 @@
     "test:deepcad-live": "node scripts/deepcad_live_check.mjs",
     "test:sim": "node scripts/sim_check.mjs",
     "sim:fetch-std": "bash fs_sim/fetch_std.sh",
-    "sim:run": "node scripts/run_python.mjs -m fs_sim.run",
+    "sim:run": "node scripts/run_python.mjs .fsgen/venv -m fs_sim.run",
     "test:onshape": "node scripts/onshape_compile_check.mjs",
     "test:e2e": "node scripts/e2e_generate.mjs",
     "seed:knowledge": "node scripts/seedCadKnowledge.js",

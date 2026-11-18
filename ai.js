@@ -9,9 +9,9 @@ import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, co
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams, autoFilterInnerLoops, autoFixQueryFilters, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
-import { PART_KIT_PROMPT, ensurePartKit, stripPartKit } from "./partKit.js";
+import { PART_KIT_PROMPT, ensurePartKit, resolveKitIds, stripPartKit } from "./partKit.js";
 import { datasetReferenceBlock } from "./datasetReferences.js";
-import { headNoun } from "./deepcadLibrary.js";
+import { headNoun, libraryInfo } from "./deepcadLibrary.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 // Live progress for the page: server.js runs a request inside progressContext with a
@@ -388,7 +388,7 @@ function buildFsExamplePromptBlock(prompt, dims, { limit = 1, maxChars = 2400 } 
   if (!examples.length) return "";
   return examples.map(example => [
     `COMPILE_VERIFIED_EXAMPLE (${example.title})${example.lesson ? ` — ${example.lesson}` : ""}:`,
-    compactFeaturePattern(example.content, maxChars),
+    compactFeaturePattern(compactExampleForPrompt(example.content, maxChars), maxChars),
     "Adapt this example's structure, API usage, and operation order to the user request. Do not copy it verbatim — rename the feature, adjust parameters, and build the geometry the user asked for.",
   ].join("\n")).join("\n\n");
 }
@@ -1725,16 +1725,41 @@ function proceduralGearBody() {
             "direction" : skPlane.normal,
             "endBound"  : BoundingType.BLIND,
             "endDepth"  : definition.faceWidth
-        });`;
+        });
+
+        // Optional keyway: a slot from the bore outward, through the whole face width.
+        // Keyway Width 0 means no keyway.
+        if (definition.keyWidth > 0 * inch && definition.boreRadius > 0 * inch)
+        {
+            var keySketch = newSketchOnPlane(context, id + "keySketch", { "sketchPlane" : skPlane });
+            skRectangle(keySketch, "key", {
+                "firstCorner" : vector(0 * inch, -definition.keyWidth / 2),
+                "secondCorner" : vector(definition.boreRadius + definition.keyDepth, definition.keyWidth / 2)
+            });
+            skSolve(keySketch);
+            opExtrude(context, id + "keyCutter", {
+                "entities"  : qSketchRegion(id + "keySketch"),
+                "direction" : skPlane.normal,
+                "endBound"  : BoundingType.BLIND,
+                "endDepth"  : definition.faceWidth
+            });
+            opBoolean(context, id + "keyway", {
+                "tools" : qCreatedBy(id + "keyCutter", EntityType.BODY),
+                "targets" : qCreatedBy(id + "extrude1", EntityType.BODY),
+                "operationType" : BooleanOperationType.SUBTRACTION
+            });
+        }`;
 }
 
-function gearPrecondition(defaultTeeth, defaultPitchRadius, defaultBoreRadius, defaultFaceWidth) {
+function gearPrecondition(defaultTeeth, defaultPitchRadius, defaultBoreRadius, defaultFaceWidth, defaultKeyWidth = 0, defaultKeyDepth = 0.04) {
   return [
     preconditionPlane(),
     preconditionInteger("numTeeth", "Number of Teeth", 6, defaultTeeth, 200),
     preconditionLength("pitchRadius", "Pitch Radius", 0.1, defaultPitchRadius, 24),
     preconditionLength("boreRadius", "Bore Radius", 0, defaultBoreRadius, 12),
     preconditionLength("faceWidth", "Face Width", 0.05, defaultFaceWidth, 24),
+    preconditionLength("keyWidth", "Keyway Width (0 = none)", 0, defaultKeyWidth, 1),
+    preconditionLength("keyDepth", "Keyway Depth", 0.01, defaultKeyDepth, 1),
   ].join("\n");
 }
 
@@ -1743,8 +1768,12 @@ function tGear(d) {
   const defaultPitchRadius = d.pitchRadius || d.radiusInches || ((d.moduleInches || 0.0787402) * defaultTeeth / 2);
   const defaultBoreRadius = d.boreRadius || d.holeRadiusInches || 0.2;
   const defaultFaceWidth = d.faceWidth || d.depthInches || 0.5;
+  // A keyway about a quarter of the bore diameter wide and half as deep (DIN 6885 ballpark),
+  // only when the prompt asked for one.
+  const keyWidth = d.keyway ? Math.max(0.04, Math.round(defaultBoreRadius * 2 / 4 * 1000) / 1000) : 0;
+  const keyDepth = Math.max(0.01, Math.round(Math.max(keyWidth, 0.08) / 2 * 1000) / 1000);
   return {
-    precondition: gearPrecondition(defaultTeeth, defaultPitchRadius, defaultBoreRadius, defaultFaceWidth),
+    precondition: gearPrecondition(defaultTeeth, defaultPitchRadius, defaultBoreRadius, defaultFaceWidth, keyWidth, keyDepth),
     body: proceduralGearBody(),
   };
 }
@@ -1862,6 +1891,39 @@ function summarizeFeatureScript(code, maxLines = 12) {
       .slice(0, maxLines)
       .join(" ")
   );
+}
+
+// What the AI is shown of a library example. Most examples are longer than the prompt budget
+// and used to be cut off mid-file, so the AI saw the dialog but not the construction (the TV
+// example showed nothing but the part-kit helpers). The kit is already described in the
+// instructions and a long dialog is repetitive, so drop the kit and keep only the first few
+// parameters: the feature body, which carries the lesson, then fits.
+function compactExampleForPrompt(code, maxChars = 2400, keepParams = 4) {
+  let text = stripPartKit(String(code || "")).replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  if (text.length <= maxChars) return text;
+  const head = text.match(/\bprecondition\s*\{/);
+  if (!head) return text;
+  const open = head.index + head[0].length - 1;
+  const close = findMatchingBrace(text, open);
+  if (close < 0) return text;
+  const lines = text.slice(open + 1, close).split("\n");
+  const kept = [];
+  let params = 0;
+  let cut = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/\bdefinition\.\w+/.test(lines[i])) {
+      params += 1;
+      if (params > keepParams) { cut = i; break; }
+    }
+    kept.push(lines[i]);
+  }
+  if (cut < 0) return text;
+  // The annotation line belonging to the first dropped parameter goes too.
+  while (kept.length && /^\s*annotation\b/.test(kept[kept.length - 1])) kept.pop();
+  const remaining = lines.slice(cut).filter(line => /\bdefinition\.\w+/.test(line)).length;
+  const indent = (lines[cut].match(/^\s*/) || ["        "])[0];
+  kept.push(`${indent}// ... ${remaining} more parameter${remaining === 1 ? "" : "s"}, declared the same way`);
+  return `${text.slice(0, open + 1)}${kept.join("\n")}\n${text.slice(close)}`;
 }
 
 function compactFeaturePattern(code, maxChars = 1600) {
@@ -2664,6 +2726,25 @@ function findDefineFeatureEndIndex(text) {
   let seenOpen = false;
   for (let index = defineFeatureIndex; index < text.length; index += 1) {
     const ch = text[index];
+    // Parentheses inside comments ("// 1) Stand") and strings do not count.
+    if (ch === "/" && text[index + 1] === "/") {
+      const lineEnd = text.indexOf("\n", index);
+      if (lineEnd === -1) return -1;
+      index = lineEnd;
+      continue;
+    }
+    if (ch === "/" && text[index + 1] === "*") {
+      const blockEnd = text.indexOf("*/", index + 2);
+      if (blockEnd === -1) return -1;
+      index = blockEnd + 1;
+      continue;
+    }
+    if (ch === '"') {
+      let end = index + 1;
+      while (end < text.length && text[end] !== '"') end += text[end] === "\\" ? 2 : 1;
+      index = end;
+      continue;
+    }
     if (ch === "(") {
       parenDepth += 1;
       seenOpen = true;
@@ -2951,6 +3032,68 @@ function mergeUnionTargetsIntoTools(code) {
   });
 }
 
+// Index of the ")" that closes the "(" at `open`, skipping strings; -1 when unbalanced.
+function matchingParen(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"') {
+      i = text.indexOf('"', i + 1);
+      if (i < 0) return -1;
+    } else if (ch === "(") depth += 1;
+    else if (ch === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// Splits at top-level commas (not inside (), [] or {}).
+function splitTopLevelArgs(text) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if ("([{".includes(ch)) depth += 1;
+    else if (")]}".includes(ch)) depth -= 1;
+    else if (ch === "," && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+// vector(definition.width, 2) * inch multiplies a length by inch. Divide each length
+// parameter by inch first: vector((definition.width / inch), 2) * inch.
+function stripLengthUnitsInsideVectors(code, record = () => {}) {
+  const lengthParams = new Set([...code.matchAll(/\bisLength\s*\(\s*definition\.(\w+)/g)].map(m => m[1]));
+  if (!lengthParams.size) return code;
+  const finder = /\bvector\s*\(/g;
+  let out = "";
+  let last = 0;
+  let match;
+  while ((match = finder.exec(code))) {
+    const open = match.index + match[0].length - 1;
+    const close = matchingParen(code, open);
+    if (close < 0) continue;
+    const unit = code.slice(close + 1).match(/^\s*\*\s*inch\b/);
+    if (!unit) continue;
+    const args = code.slice(open + 1, close);
+    // Already a vector of lengths, or a mix the unit fixer handles: not this rule's case.
+    if (splitTopLevelArgs(args).some(part => /\b(inch|millimeter|centimeter|meter|foot)\b/.test(part))) continue;
+    const fixedArgs = args.replace(/\bdefinition\.(\w+)\b(?!\s*\/\s*inch)/g, (ref, name) => (lengthParams.has(name) ? `(definition.${name} / inch)` : ref));
+    if (fixedArgs === args) continue;
+    const before = code.slice(match.index, close + 1);
+    const after = `vector(${fixedArgs})`;
+    record("convert_length_params_inside_vector", before, after);
+    out += code.slice(last, match.index) + after;
+    last = close + 1;
+    finder.lastIndex = close + 1;
+  }
+  return last ? out + code.slice(last) : code;
+}
+
 // FeatureScript has no ++ or -- operators: i++ / ++i / i-- / --i become i += 1 / i -= 1.
 function fixIncrementOperators(code) {
   return mapCodeOutsideCommentsAndStrings(code, part => part
@@ -2970,6 +3113,19 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
   function record(rule, before, after) {
     if (typeof before !== "string" || typeof after !== "string") return;
     changes.push({ rule, beforeSnippet: before.slice(0, 300), afterSnippet: after.slice(0, 300) });
+  }
+
+  // A kitCut/kitMerge result referred to by the operation's own id names no body: use the
+  // id the solid really lives under (see resolveKitIds in partKit.js).
+  try {
+    const before = code;
+    const kit = resolveKitIds(code);
+    if (kit.renamed) {
+      code = kit.code;
+      record("kit_result_ids_resolved", before, code);
+    }
+  } catch {
+    // keep the code as it was
   }
 
   // ========= Fatal catchers: loop/operator/array fixes =========
@@ -3317,15 +3473,11 @@ function sanitizeFeatureScript(rawCode, opts = {}) {
     );
   }
 
-  // Unit stripping inside vector(...): definition.len -> (definition.len / inch) before * inch
-  {
-    code = code.replace(/vector\s*\(([^)]*\bdefinition\.\w+[^)]*)\)\s*\*\s*inch/g, (match, args) => {
-      const fixedArgs = String(args).replace(/\bdefinition\.(\w+)\b(?!\s*\/\s*inch)/g, "(definition.$1 / inch)");
-      const after = `vector(${fixedArgs}) * inch`;
-      if (after !== match) record("convert_length_params_inside_vector", match, after);
-      return after;
-    });
-  }
+  // Unit stripping inside vector(...) * inch: a length parameter becomes (definition.len / inch).
+  // The arguments are matched with balanced parentheses, and a vector whose parts already
+  // carry units is left alone: the old "[^)]*" pattern stopped at the ")" of "(0) * inch" and
+  // turned the unit fixer's correct vector(definition.r, (0) * inch) back into mixed units.
+  code = stripLengthUnitsInsideVectors(code, record);
 
   // ========= Skeleton enforcement: ensure sketches are solved & file ends properly =========
 
@@ -5947,8 +6099,26 @@ async function firstCandidateThatBuilds(codes) {
   return null;
 }
 
+// A short reason when the test builds show the code definitely fails (not a checker gap),
+// otherwise null (builds, or the checkers are not available).
+async function knownBuildFailure(code) {
+  const build = await localBuildFeatureScript(code);
+  if (build.ok === false) return String(build.error || "the test build failed").split("\n")[0].slice(0, 160);
+  let sim = null;
+  try { sim = await simulateFeatureScript(code, { render: false }); } catch { sim = null; }
+  if (sim?.available && sim.errors?.length && !sim.gaps?.length) return String(sim.errors[0]).slice(0, 160);
+  return null;
+}
+
+// "the <N>-part dataset" once the part library is loaded, so the number follows whatever
+// data is installed; plain wording before that (or with no library at all).
+function datasetLabel() {
+  const parts = libraryInfo().parts;
+  return parts ? `the ${parts.toLocaleString("en-US")}-part dataset` : "the CAD part dataset";
+}
+
 async function datasetLibraryFallback(prompt) {
-  reportProgress("Looking for the closest real part in the 42,000-part dataset");
+  reportProgress(`Looking for the closest real part in ${datasetLabel()}`);
   try {
     const { generateFromLibrary } = await import("./deepcadService.js");
     const result = await generateFromLibrary(prompt);
@@ -6551,7 +6721,13 @@ function designIssueFeedback(prompt, strict) {
         + "\"thickness\" (wall), or subtract a slightly smaller inner body that stops one wall thickness above the bottom.");
     }
   }
-  return issues.length ? `The part built, but it is not right yet. ${issues.slice(0, 3).join(" ")} Keep everything else the same.` : null;
+  // The usual cause with the part kit: a center height passed where kitBox/kitCylinder expect
+  // the BOTTOM z (a TV's bezel and screen ended up inside its body, the port hole below it).
+  if (/\bkit(Box|Cylinder)\s*\(/.test(strict.code || "") && issues.some(issue => /lies completely inside|removed no material/.test(issue))) {
+    issues.unshift("In kitBox and kitCylinder the 6th argument is the BOTTOM z, not the center: the piece spans bottomZ to bottomZ + its height. "
+      + "Recompute every bottomZ from the bottom of the piece it attaches to (no \"centerZ\" values), and make each cutter start inside the body and end outside it.");
+  }
+  return issues.length ? `The part built, but it is not right yet. ${issues.slice(0, 4).join(" ")} Keep everything else the same.` : null;
 }
 
 function looseBodiesFeedback(prompt, strict) {
@@ -6919,10 +7095,10 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
 
   // Plan the object before coding it, so the result has the real thing's components instead
   // of one plain block.
-  // Real designs from the 42,000-part dataset, for both the plan and the code.
+  // Real designs from the dataset part library, for both the plan and the code.
   if (dims.datasetRefs === undefined) {
     try { dims.datasetRefs = datasetReferenceBlock(prompt); } catch { dims.datasetRefs = ""; }
-    if (dims.datasetRefs) reportProgress("Found similar real parts in the 42,000-part dataset");
+    if (dims.datasetRefs) reportProgress(`Found similar real parts in ${datasetLabel()}`);
   }
   if (!dims.designBrief && wantsDesignBrief(prompt)) {
     reportProgress("Planning the design: components, sizes and how they attach");
@@ -7094,7 +7270,7 @@ async function generateSimplifiedCandidate(prompt, dims, learningContext, retrie
 }
 
 function buildGearTemplateResult(prompt, dims, learningContext, retrieval, warnings = []) {
-  const code = buildFeatureScript({ ...dims, shape: "GEAR_SPUR" });
+  const code = buildFeatureScript({ ...dims, shape: "GEAR_SPUR", keyway: dims.keyway ?? /\bkey ?ways?\b|\bkeyed\b/i.test(prompt) });
   const orchestration = {
     status: "completed",
     completionLevel: "simplified",
@@ -7188,6 +7364,14 @@ export async function generateFeatureScript(prompt, options = {}) {
         : `Check this part before using it: ${String(bestCandidate.designIssue).replace(/^The part built, but it is not right yet\.\s*/, "").replace(/\s*Keep everything else the same\.$/, "").slice(0, 260)}`);
     }
     let omissions = [];
+    const recoveryCaution = strict => {
+      if (!strict?.ok) return null;
+      const loose = looseBodiesFeedback(prompt, strict);
+      const design = designIssueFeedback(prompt, strict);
+      if (loose) return `Check this part before using it: it comes out as ${strict.localBuild?.metrics?.bodies} separate pieces instead of one. Try generating again or describe how the pieces attach.`;
+      if (design) return `Check this part before using it: ${String(design).replace(/^The part built, but it is not right yet\.\s*/, "").replace(/\s*Keep everything else the same\.$/, "").slice(0, 260)}`;
+      return null;
+    };
     // Normalise repairSummary shape so the rest of the function can read it unchanged
     let repairSummary = {
       repaired: Boolean(bestCandidate && !bestCandidate.ok && selectedCode),
@@ -7283,6 +7467,8 @@ export async function generateFeatureScript(prompt, options = {}) {
         completionLevel = "simplified";
         fallbackUsed = "ai_recovery";
         omissions.push("Returned the recovery candidate after the main candidate set failed.");
+        const caution = recoveryCaution(recovered.strict);
+        if (caution) warnings.push(caution);
       }
     }
 
@@ -7350,6 +7536,18 @@ export async function generateFeatureScript(prompt, options = {}) {
           fatalIssues: [],
           strict: validateFeatureScriptStrict(selectedCode),
         };
+      }
+    }
+
+    // Never hand back a part that is known not to build: in Onshape it is a red feature with
+    // no geometry (a phone stand that called a function FeatureScript does not have was
+    // returned as "partial"). Without it the user is told plainly to try again.
+    if (selectedCode && shouldForceGuaranteedResult && fallbackUsed !== "guaranteed_fallback") {
+      const failure = await knownBuildFailure(selectedCode);
+      if (failure) {
+        console.log(`[AI] Not returning the best attempt, it does not build: ${failure}`);
+        warnings.push(`The best attempt did not build (${failure}), so it was not returned.`);
+        selectedCode = "";
       }
     }
 
@@ -7756,7 +7954,10 @@ function validateFeatureScript(code) {
 
   lines.forEach((line, index) => {
     const lineNo = index + 1;
-    if (/annotation\s*\{[^}]*"Default"\s*:/.test(line)) {
+    // A "Default" key is how Onshape sets a boolean, enum or string default; only numeric
+    // parameters (isLength/isInteger/isReal/isAngle) take theirs from the bounds triple.
+    const nextLine = lines.slice(index + 1).find(next => next.trim()) || "";
+    if (/annotation\s*\{[^}]*"Default"\s*:/.test(line) && /\bis(Length|Integer|Real|Angle)\s*\(/.test(`${line}\n${nextLine}`)) {
       addIssue(lineNo, "Numeric parameter defaults must be expressed in the bounds triple, not an annotation Default key.", line);
     }
     if (/\bisLength\s*\(\s*definition\.\w+\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/.test(line)) {
@@ -8084,7 +8285,8 @@ export function hasFatalFeatureScriptPatterns(code) {
       nestedDepth = Math.max(0, nestedDepth + (codeOnly.match(/\{/g) || []).length - (codeOnly.match(/\}/g) || []).length);
     }
   }
-  if (/annotation\s*\{[^}]*"Default"\s*:/.test(code)) {
+  // Only numeric parameters: a "Default" key is the right way to default a boolean or enum.
+  if (/annotation\s*\{[^}]*"Default"\s*:[^}]*\}\s*\n?\s*is(Length|Integer|Real|Angle)\s*\(/.test(code)) {
     issues.push({ code: 'numeric_default_annotation', message: 'Numeric precondition defaults must be in bounds triples, not annotation Default keys.' });
   }
   if (/\bisLength\s*\(\s*definition\.\w+\s*,\s*(?:LENGTH_BOUNDS|NONNEGATIVE_ZERO_INCLUSIVE_LENGTH_BOUNDS)\s*\)\s*;/.test(code)) {
