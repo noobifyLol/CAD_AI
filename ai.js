@@ -932,6 +932,7 @@ export function altProviderStatus() {
   return ALT_PROVIDERS.map(provider => ({
     name: provider.name,
     model: provider.model,
+    triedModels: [...(provider.triedModels || [])],
     pausedForMs: Math.max(0, (altProviderPausedUntil.get(provider.name) || 0) - Date.now()),
     ...altProviderStats.get(provider.name),
   }));
@@ -1014,6 +1015,29 @@ async function callAltProvider(provider, messages, options, effortOverride) {
 
 const maskIds = text => String(text || "").replace(/\d{7,}/g, "#").slice(0, 240);
 
+/**
+ * The next model of the same provider to try after the current one keeps failing: from the
+ * provider's own model list (GET /models), same family (gemini...), a "flash" text model not
+ * tried yet; full flash models before lite ones, newest first. null when none is left.
+ */
+async function nextAltModel(provider) {
+  provider.triedModels = provider.triedModels || new Set();
+  provider.triedModels.add(provider.model);
+  if (!provider.modelList) {
+    const response = await fetch(`${provider.baseUrl}/models`, { headers: { Authorization: `Bearer ${provider.apiKey}` }, signal: AbortSignal.timeout(15000) });
+    if (!response.ok) return null;
+    const data = await response.json();
+    provider.modelList = (data?.data || []).map(model => String(model?.id || "").replace(/^models\//, "")).filter(Boolean);
+  }
+  const family = /gemini/i.test(provider.model) ? /gemini/i : null;
+  if (!family) return null;
+  const version = id => Number((id.match(/(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  const usable = provider.modelList
+    .filter(id => family.test(id) && /flash/i.test(id) && !/image|tts|audio|live|embed|vision|exp/i.test(id) && !provider.triedModels.has(id))
+    .sort((a, b) => (Number(/lite/i.test(a)) - Number(/lite/i.test(b))) || (version(b) - version(a)));
+  return usable[0] || null;
+}
+
 async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options = {}) {
   const altStage = options.stage || "generation";
   for (const provider of ALT_STAGES.has(altStage) ? ALT_PROVIDERS : []) {
@@ -1059,6 +1083,16 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
       // minutes for it): leave it alone for 15 minutes and let Groq answer quickly.
       stats.failedInARow += 1;
       const brokenRun = stats.failedInARow >= 3;
+      // Before giving up on the provider, try another of its models (a free model that only
+      // times out or is always "high demand" while a sibling answers).
+      const nextModel = brokenRun && !dailyQuota ? await nextAltModel(provider).catch(() => null) : null;
+      if (nextModel) {
+        console.warn(`[AI] ${provider.name}: ${provider.model} failed ${stats.failedInARow} times in a row; switching to ${nextModel}.`);
+        provider.model = nextModel;
+        stats.failedInARow = 0;
+        altProviderPausedUntil.set(provider.name, Date.now() + 5000);
+        continue;
+      }
       const pause = dailyQuota ? 3600000 : brokenRun ? 900000 : err.status === 429 ? 60000 : err.status >= 500 || err.name === "TimeoutError" ? 30000 : 10000;
       altProviderPausedUntil.set(provider.name, Date.now() + pause);
       console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 300)}); ${dailyQuota ? "daily quota used up, pausing it for an hour" : brokenRun ? `${stats.failedInARow} failures in a row, pausing it for 15 minutes` : "using the next provider"}.`);
