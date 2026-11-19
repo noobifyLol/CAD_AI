@@ -557,6 +557,29 @@ export function autoFixRuntimeTypes(code) {
   });
   if (regions) changes.push(`${regions} sketch face query(s) rewritten to qSketchRegion`);
 
+  // 1b3) line(vector(0, 0, 0), dir): a line's origin is a point with units ("line origin must
+  //      be a 3D length vector"). Plain-number origins get * inch.
+  let lineOrigins = 0;
+  text = rewriteCallArgs(text, "line", args => {
+    if (args.length !== 2) return null;
+    const origin = args[0].trim();
+    const plain = origin.match(/^vector\s*\(([^()]*)\)$/);
+    if (!plain || !plain[1].split(",").every(part => /^\s*-?\d*\.?\d+\s*$/.test(part))) return null;
+    lineOrigins += 1;
+    return [`${origin} * inch`, args[1].trim()];
+  });
+  if (lineOrigins) changes.push(`${lineOrigins} unitless line origin(s) given inches`);
+
+  // 1b4) fCylinder(context, id, bottom, top, radius) with positional arguments: the primitive
+  //      takes a map.
+  let cylinders = 0;
+  text = rewriteCallArgs(text, "fCylinder", args => {
+    if (args.length !== 5 || /^\s*\{/.test(args[2])) return null;
+    cylinders += 1;
+    return [args[0].trim(), args[1].trim(), `{ "bottomCenter" : ${args[2].trim()}, "topCenter" : ${args[3].trim()}, "radius" : ${args[4].trim()} }`];
+  });
+  if (cylinders) changes.push(`${cylinders} positional fCylinder call(s) rewritten to a map`);
+
   // 1c) id + "rib" ~ i is (id + "rib") ~ i, an Id joined to a number ("cannot concatenate
   //     Id with '~'"): the name has to be built first, id + ("rib" ~ i).
   let idJoins = 0;

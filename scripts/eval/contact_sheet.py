@@ -34,7 +34,7 @@ for k, path in enumerate(files):
         solids = []
     tris = []
     for body in solids:
-        BRepMesh_IncrementalMesh(body.shape, 0.0005, False, 0.5, True)
+        BRepMesh_IncrementalMesh(body.shape, 0.02, True, 0.5, True)  # relative: big curved parts mesh fast
         for face in G.subshapes(body.shape, G.TopAbs_FACE):
             loc = TopLoc_Location()
             tri = G.BRep_Tool.Triangulation_s(G.TopoDS.Face(face), loc)

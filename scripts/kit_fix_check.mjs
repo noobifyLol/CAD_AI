@@ -125,6 +125,20 @@ check("loft profile qCreatedBy(sketch, FACE) -> qSketchRegion",
     'opLoft(context, id + "loft", { "profileSubqueries" : [qSketchRegion(id + "base"), qCreatedBy(id + "top", EntityType.FACE)] });',
   ));
 
+// 7d) unitless line origin, positional fCylinder
+check("line(vector(0, 0, 0), dir) -> origin in inches",
+  autoFixRuntimeTypes("var axis = line(vector(0, 0, 0), vector(0, 0, 1));").code,
+  "var axis = line(vector(0, 0, 0) * inch, vector(0, 0, 1));");
+check("line with a unit origin untouched",
+  autoFixRuntimeTypes("var axis = line(skPlane.origin, skPlane.normal);").code,
+  "var axis = line(skPlane.origin, skPlane.normal);");
+check("positional fCylinder -> map",
+  autoFixRuntimeTypes('fCylinder(context, id + "post", bottom, top, 0.25 * inch);').code,
+  'fCylinder(context, id + "post", { "bottomCenter" : bottom, "topCenter" : top, "radius" : 0.25 * inch });');
+check("fCylinder with a map untouched",
+  autoFixRuntimeTypes('fCylinder(context, id + "post", { "bottomCenter" : b, "topCenter" : t, "radius" : r });').code,
+  'fCylinder(context, id + "post", { "bottomCenter" : b, "topCenter" : t, "radius" : r });');
+
 // 8) one join of everything at the end of the feature body
 const feature = lines(
   "export const thing = defineFeature(function(context is Context, id is Id, definition is map)",
