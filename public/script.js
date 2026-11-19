@@ -41,7 +41,10 @@ function updateEngineHint() {
   if (!hint) return;
   const deepcad = runtimeConfig?.deepcad;
   if (engine === 'auto') {
-    hint.textContent = 'The AI plans the object, writes the part, and every attempt is test-built before you see it. If it cannot make a part that builds, the closest real part from a 42,000-part CAD dataset is used.';
+    // The library size comes from the server (it depends on the installed dataset).
+    const parts = deepcad?.library?.parts;
+    const dataset = parts ? `a ${Number(parts).toLocaleString('en-US')}-part CAD dataset` : 'the CAD dataset';
+    hint.textContent = `The AI plans the object, writes the part, and every attempt is test-built before you see it. If it cannot make a part that builds, the closest real part from ${dataset} is used.`;
   } else if (engine === 'deepcad' && deepcad && !deepcad.configured) {
     hint.textContent = 'The DeepCAD model is not connected yet: set DEEPCAD_MODEL_URL on the server (see hf_space/README.md). JSON import below still works.';
   } else if (engine === 'deepcad') {

@@ -655,8 +655,10 @@ export function autoFixRuntimeTypes(code) {
     terms.push(expr.slice(start));
     return terms;
   };
+  const hasLengthUnit = expr => /\b(inch|millimeter|meter|centimeter)\b/.test(expr);
   const scaleComponent = (component, unit) => {
-    if (!isLengthExpr(component)) return { text: `(${component.trim()}) * ${unit}`, mixed: false };
+    // "0 * inch" is a length already: multiplying it by the unit again would make an area.
+    if (!isLengthExpr(component)) return { text: hasLengthUnit(component) ? component.trim() : `(${component.trim()}) * ${unit}`, mixed: false };
     let mixed = false;
     const out = splitTerms(component).map(term => {
       const sign = (term.match(/^\s*([+-])/) || [])[1] || "";
@@ -667,7 +669,8 @@ export function autoFixRuntimeTypes(code) {
     }).join("");
     return { text: out.trim(), mixed };
   };
-  text = text.replace(/\bvector\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*\*\s*(inch|millimeter|centimeter|meter)\b/g, (whole, inner, unit) => {
+  // Arguments are found with balanced brackets, so max(a, min(b, c)) inside a vector works too.
+  const rescaleVector = (inner, unit) => {
     const parts = [];
     let depth = 0, start = 0;
     for (let i = 0; i < inner.length; i += 1) {
@@ -676,12 +679,47 @@ export function autoFixRuntimeTypes(code) {
       else if (inner[i] === "," && depth === 0) { parts.push(inner.slice(start, i)); start = i + 1; }
     }
     parts.push(inner.slice(start));
-    if (parts.length < 2 || !parts.some(part => isLengthExpr(part))) return whole; // all plain numbers: correct as written
-    unscaled += 1;
+    if (parts.length < 2 || !parts.some(part => isLengthExpr(part))) return null; // all plain numbers: correct as written
     return `vector(${parts.map(part => scaleComponent(part, unit).text).join(", ")})`;
-  });
+  };
+  {
+    const finder = /\bvector\s*\(/g;
+    let out = "";
+    let last = 0;
+    let match;
+    while ((match = finder.exec(text))) {
+      const open = match.index + match[0].length - 1;
+      const close = matchingClose(text, open);
+      if (close < 0) continue;
+      const unit = text.slice(close + 1).match(/^\s*\*\s*(inch|millimeter|centimeter|meter)\b/);
+      if (!unit) continue;
+      const rewritten = rescaleVector(text.slice(open + 1, close), unit[1]);
+      if (!rewritten) continue;
+      unscaled += 1;
+      out += text.slice(last, match.index) + rewritten;
+      last = close + 1 + unit[0].length;
+      finder.lastIndex = last;
+    }
+    if (last) text = out + text.slice(last);
+  }
   if (unscaled) changes.push(`${unscaled} vector(...) * unit with length components fixed`);
   return { code: text, changes };
+}
+
+// True when the body made by operation `opId` is cut away from something: it is a "tools"
+// entry of a SUBTRACTION or INTERSECTION opBoolean, or one of kitCut's cutters.
+function usedAsCutter(text, opId) {
+  const ref = new RegExp(`id\\s*\\+\\s*"${opId}"`);
+  for (const call of text.matchAll(/\bopBoolean\s*\(\s*context\s*,[^{]*\{([^;]*?)\}\s*\)\s*;/g)) {
+    const body = call[1];
+    if (!/BooleanOperationType\.(SUBTRACTION|INTERSECTION)\b/.test(body)) continue;
+    const tools = body.match(/"tools"\s*:\s*([\s\S]*?)(?:,\s*"\w+"\s*:|$)/);
+    if (tools && ref.test(tools[1])) return true;
+  }
+  for (const call of text.matchAll(/\bkitCut\s*\(\s*context\s*,[^;]*?\[([^\]]*)\]\s*\)\s*;/g)) {
+    if (ref.test(call[1])) return true;
+  }
+  return false;
 }
 
 /**
@@ -702,10 +740,12 @@ export function autoFilterInnerLoops(code) {
     const closed = count("skCircle|skRectangle|skRegularPolygon|skEllipse");
     const open = count("skLineSegment|skArc|skFitSpline");
     if (!(closed >= 2 || (closed >= 1 && open >= 3))) continue;
-    // A sketch of hole cutters (its body is the "tools" of a later boolean) is left alone.
+    // A sketch of hole cutters (its body is the tool of a later cut) is left alone. A body
+    // that is only joined onto another one (a UNION tool) is a real piece and keeps its holes:
+    // a flange whose plate was unioned with its hub came out as a plain disc.
     const ops = [...text.slice(0, uses[0].index).matchAll(/\bop\w+\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"/g)];
     const opId = ops.length ? ops[ops.length - 1][1] : null;
-    if (opId && new RegExp(`"tools"\\s*:[^\\n]*"${opId}"`).test(text)) continue;
+    if (opId && usedAsCutter(text, opId)) continue;
     text = text.replace(uses[0][0], `qSketchRegion(id + "${sketchId}", true)`);
     fixed.push(sketchId);
   }

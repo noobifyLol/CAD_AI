@@ -91,6 +91,9 @@ function kitCut(context is Context, id is Id, targetId is Id, cutterIds is array
 export const PART_KIT_PROMPT = `═══ PART KIT (PREFERRED for anything made of boxes, plates, walls, bars, tubes, posts, cylinders, holes, slots, pockets) ═══
 These helpers are already defined for you (never define them yourself). Arguments are lengths (definition.x, 0.5 * inch) or plain numbers meaning inches.
 Positions are x, y, z in the sketch plane frame: x along skPlane.x, y across it, z up along the normal. z = 0 is the plane.
+bottomZ is the BOTTOM of the piece, never its center: a piece spans bottomZ to bottomZ + its height. To sit a piece on top of a body that
+starts at z = 0 with height h, use bottomZ = h minus a small sink. Objects that stand (a TV, monitor, sign, shelf, lamp) stand up along z:
+their height is sizeZ, their depth is sizeY, the front faces -y and the back faces +y.
 - kitBox(context, id + "name", skPlane, centerX, centerY, bottomZ, sizeX, sizeY, sizeZ);
 - kitCylinder(context, id + "name", skPlane, centerX, centerY, bottomZ, radius, height);      (upright)
 - kitRod(context, id + "name", skPlane, x1, y1, z1, x2, y2, z2, radius);      (round bar between two points, any direction)
@@ -271,6 +274,83 @@ export function appendAutoMerge(source) {
 }
 
 const KIT_CALL =/\bkit(?:Box|Cylinder|Rod|Merge|Cut|Point|Len)\s*\(/;
+
+function closingParen(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '"') {
+      i = text.indexOf('"', i + 1);
+      if (i < 0) return -1;
+    } else if (text[i] === "(") depth += 1;
+    else if (text[i] === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// opPattern copies a seed body; the seed itself stays a separate solid. A kitMerge that lists
+// the pattern (id + "spokePattern") but not its seed (id + "spoke0") leaves the seed loose,
+// so the seed is added to the list.
+function addPatternSeeds(text, mergeArgs) {
+  const listed = new Set([...mergeArgs.matchAll(/\bid\s*\+\s*"(\w+)"/g)].map(m => m[1]));
+  const seeds = [];
+  for (const name of listed) {
+    const pattern = text.match(new RegExp(`\\bopPattern\\s*\\(\\s*context\\s*,\\s*id\\s*\\+\\s*"${name}"\\s*,\\s*\\{[^;]*?"entities"\\s*:\\s*qCreatedBy\\s*\\(\\s*id\\s*\\+\\s*"(\\w+)"\\s*,\\s*EntityType\\.BODY\\s*\\)`));
+    if (pattern && !listed.has(pattern[1]) && !seeds.includes(pattern[1])) seeds.push(pattern[1]);
+  }
+  if (!seeds.length) return mergeArgs;
+  return mergeArgs.replace(/\]\s*$/, match => `, ${seeds.map(seed => `id + "${seed}"`).join(", ")}${match}`);
+}
+
+/**
+ * kitCut leaves the cut body under the TARGET's id and kitMerge leaves the solid under the
+ * FIRST id, but models often refer to the operation's own id afterwards:
+ *     kitCut(context, id + "rim", id + "rimOuter", [id + "rimInner"]);
+ *     kitMerge(context, id + "wheel", [id + "rim", ...]);     // id + "rim" names no body
+ * The piece then silently drops out of the merge (a spoked wheel came out as 9 loose pieces).
+ * This points every later kit argument and qCreatedBy(..., EntityType.BODY) at the real id.
+ */
+export function resolveKitIds(code) {
+  const text = String(code || "");
+  const header = /\bkit(Cut|Merge)\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"\s*,/g;
+  const alias = {};
+  const resolve = name => {
+    const seen = new Set();
+    while (alias[name] && !seen.has(name)) {
+      seen.add(name);
+      name = alias[name];
+    }
+    return name;
+  };
+  const renameIds = segment => segment.replace(/\bid\s*\+\s*"(\w+)"/g, (ref, name) => (resolve(name) !== name ? `id + "${resolve(name)}"` : ref));
+  const renameBodyQueries = segment => segment.replace(
+    /\bqCreatedBy\s*\(\s*id\s*\+\s*"(\w+)"\s*,\s*EntityType\.BODY\s*\)/g,
+    (ref, name) => (resolve(name) !== name ? `qCreatedBy(id + "${resolve(name)}", EntityType.BODY)` : ref),
+  );
+  let out = "";
+  let last = 0;
+  let renamed = 0;
+  let match;
+  while ((match = header.exec(text))) {
+    const close = closingParen(text, text.indexOf("(", match.index));
+    if (close < 0) break;
+    const argsStart = match.index + match[0].length;
+    const args = text.slice(argsStart, close);
+    let fixedArgs = renameIds(args);
+    if (match[1] === "Merge") fixedArgs = addPatternSeeds(text, fixedArgs);
+    if (fixedArgs !== args) renamed += 1;
+    out += renameBodyQueries(text.slice(last, argsStart)) + fixedArgs;
+    last = close;
+    header.lastIndex = close;
+    // What the operation's own id should mean from here on.
+    const ids = [...fixedArgs.matchAll(/\bid\s*\+\s*"(\w+)"/g)].map(m => m[1]);
+    if (ids.length && ids[0] !== match[2]) alias[match[2]] = ids[0];
+  }
+  if (!last) return { code: text, renamed: 0 };
+  const tail = text.slice(last);
+  const fixedTail = renameBodyQueries(tail);
+  if (fixedTail !== tail) renamed += 1;
+  return { code: out + fixedTail, renamed };
+}
 
 /** Appends the kit source (after the import line) to code that calls it; idempotent. */
 export function ensurePartKit(code) {

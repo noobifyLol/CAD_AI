@@ -79,6 +79,46 @@ from OCP.GeomAbs import GeomAbs_Intersection  # noqa: E402
 
 DIAGNOSTICS = []  # design notes from the current build (see op_boolean below)
 
+
+def _label(oid, fallback):
+    try:
+        return str(list(oid)[-1])
+    except Exception:
+        return fallback
+
+
+def _piece_name(body):
+    """The operation that made a body, as the model wrote it: hubBody, spoke0, rimOuter."""
+    try:
+        parts = [str(p) for p in list(body.creator)][1:]
+    except Exception:
+        return "a piece"
+    parts = [p for p in parts if p not in ("body", "extrude", "sk", "tidy")] or parts[-1:]
+    return ".".join(parts) or "a piece"
+
+
+def _buried_pieces(tools):
+    """(inner, outer) names for union tools that sit completely inside a bigger tool."""
+    boxes = [_G.bbox([t.shape]) for t in tools]
+    volumes = [_G.props(t.shape, "volume").Mass() for t in tools]
+    found = []
+    for i, piece in enumerate(tools):
+        for j, other in enumerate(tools):
+            # Equal volumes are pattern copies lying on their seed: not a design mistake.
+            if i == j or volumes[i] <= 0 or volumes[j] <= volumes[i] * (1 + 1e-6):
+                continue
+            (lo_i, hi_i), (lo_j, hi_j) = boxes[i], boxes[j]
+            slack = 1e-7 + 1e-6 * float(max(hi_j - lo_j))
+            if (lo_i < lo_j - slack).any() or (hi_i > hi_j + slack).any():
+                continue
+            cut = BRepAlgoAPI_Cut(piece.shape, other.shape)
+            cut.Build()
+            if cut.IsDone() and _G.props(cut.Shape(), "volume").Mass() < 1e-6 * volumes[i]:
+                found.append((_piece_name(piece), _piece_name(other)))
+                break
+    return found[:3]
+
+
 _original_register = _std.StdLib._register
 
 
@@ -117,6 +157,9 @@ def _register_with_extras(self):
         if not bodies:
             raise FSError('opShell: "entities" must resolve to faces to remove or solid bodies to hollow')
         t = _std.as_length(_std.req(m, "thickness", "opShell"), "opShell thickness")
+        DIAGNOSTICS.append(f'opShell "{_label(oid, "shell")}" hollowed the whole body into a closed shell with no opening, so the '
+                           "inside is sealed and cannot be seen. For a cup, mug, bowl, box or any other container, give the face to "
+                           'remove instead: "entities" : qCapEntity(id + "<body extrude id>", CapType.END, EntityType.FACE) (the top face).')
         hists, new = [], []
         for body in bodies:
             offset = BRepOffsetAPI_MakeOffsetShape()
@@ -148,11 +191,18 @@ def _register_with_extras(self):
         except Exception:
             tools = []
         before_count, before_volume, tools_volume = len(solids()), volume(solids()), volume(tools)
+        buried = []
+        if kind == "UNION" and 2 <= len(tools) <= 12:
+            try:
+                buried = _buried_pieces(tools)
+            except Exception:
+                buried = []
         result = original_boolean.fn(ctx, oid, m)
-        try:
-            label = str(list(oid)[-1])
-        except Exception:
-            label = "boolean"
+        label = _label(oid, "boolean")
+        for inner, outer in buried:
+            DIAGNOSTICS.append(f'opBoolean "{label}" (UNION): the piece made by "{inner}" lies completely inside "{outer}", so it '
+                               "adds nothing and cannot be seen. A raised hub, boss, rib, post or lip must stand on the face it "
+                               "attaches to (start it at that face, for example at z = the body's thickness) and stick out of it.")
         after_count, after_volume = len(solids()), volume(solids())
         if kind == "SUBTRACTION" and tools:
             kept_tools = bool(m.get("keepTools", False))

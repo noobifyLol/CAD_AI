@@ -20,7 +20,9 @@ const python = process.platform === 'win32'
 if (!existsSync(python)) {
   const hint = venv.startsWith('.text2cad')
     ? 'Follow "Run it locally" in hf_space/README.md first.'
-    : 'Follow the setup in model_service/README.md first.';
+    : venv.startsWith('.fsgen')
+      ? 'Run "npm run setup" first.'
+      : 'Follow the setup in model_service/README.md first.';
   console.error(`No Python found at ${python}. ${hint}`);
   process.exit(1);
 }

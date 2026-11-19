@@ -1,0 +1,36 @@
+MIT License
+
+Copyright (c) 2026 noobifyLol
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---------------------------------------------------------------------------
+Third-party material in this repository keeps its own license and is NOT
+covered by the MIT license above:
+
+- Files derived from the DeepCAD / Text2CAD datasets (data/deepcad_library_*,
+  data/deepcad_fixtures/, and anything built from .text2cad/):
+  CC BY-NC-SA 4.0, non-commercial use only.
+  https://huggingface.co/datasets/SadilKhan/Text2CAD
+- Files derived from BenchCAD (data/benchcad_refs.json.gz): CC BY 4.0.
+  https://huggingface.co/datasets/BenchCAD/BenchCAD
+- Onshape's FeatureScript standard library, downloaded into fs_sim/std/ by
+  `npm run setup`: MIT, Copyright (c) PTC Inc.
+- onshape-fsgen (FS-Lite), downloaded into .fsgen/ by `npm run setup`: MIT.
+  https://github.com/Lucasfrit/onshape-fsgen

@@ -181,6 +181,13 @@
       "keywords": ["cube", "block", "cuboid", "die", "cube with hole", "block with hole"],
       "operations": ["opExtrude"],
       "lesson": "Outer square and hole circle in one sketch; filterInnerLoops keeps the hole open."
+    },
+    {
+      "file": "tv_with_stand.fs",
+      "title": "TV With Stand And Ethernet Port",
+      "keywords": ["tv", "television", "monitor", "screen", "display", "stand", "bezel", "ethernet", "port", "cable", "electronics", "upright"],
+      "operations": ["kitBox", "kitCylinder", "kitRod", "kitCut", "kitMerge"],
+      "lesson": "Upright objects stand along z (height is sizeZ, front faces -y); each kitBox/kitCylinder bottomZ is the bottom of the piece, attached pieces sink 0.05 in into each other, and pockets are cut before the final kitMerge."
     }
   ]
 }

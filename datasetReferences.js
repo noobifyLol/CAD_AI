@@ -1,6 +1,7 @@
 /**
- * datasetReferences.js: real designs from the DeepCAD / Text2CAD dataset (42,000 parts made
- * by people in Onshape) as reference recipes for the AI, for every request.
+ * datasetReferences.js: real designs from the DeepCAD / Text2CAD part library (parts made by
+ * people in Onshape; however many the installed data/deepcad_library_index.json.gz holds) as
+ * reference recipes for the AI, for every request.
  *
  * For a prompt it finds the closest dataset parts, reads their actual construction steps
  * (sketch profiles, sizes, extrude depths, join/cut operations) and writes each as a short

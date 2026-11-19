@@ -12,6 +12,9 @@ docs/*
 !docs/CAD_AI_LEARNING_LOOP.md
 !docs/research_summaries/
 !docs/research_summaries/**
+!docs/images/
+!docs/images/**
+!docs/GUIDE.md
 
 data/Omni-CAD.zip
 data/Omni-CAD/

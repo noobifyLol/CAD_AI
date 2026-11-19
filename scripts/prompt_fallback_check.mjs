@@ -71,5 +71,21 @@ const label = promptFeatureNames('create a 4 x 2 inch spur gear with 24 teeth');
 if (label.featureLabel === 'Spur Gear' && label.featureName === 'spurGear') console.log('PASS feature name from prompt');
 else { failures += 1; console.log(`FAIL feature name from prompt — ${JSON.stringify(label)}`); }
 
+// When the AI's best attempt still has a design problem, a hand-checked example is used instead,
+// but only for a clear match (two typed words, same kind of object). Typos must not stop it.
+const { strongCuratedExample } = await import('../ai.js');
+for (const [prompt, title] of [
+  ['CReate me a TV with a enternet cable', 'TV With Stand And Ethernet Port'],
+  ['A wheel with 6 spokes, 200 mm diameter, with a hub and an axle hole', 'Wheel With Spokes'],
+  ['Create a coffee mug with a handle, 80 mm diameter', 'Cup With Handle'],
+  ['a bracket', null],
+  ['Phone stand with an angled back rest and a front lip', null],
+]) {
+  const found = strongCuratedExample(prompt, promptDimsFallback(prompt) || {});
+  const got = found ? found.example.title : null;
+  if (got === title && (!found || validateFeatureScriptStrict(found.code).ok)) console.log(`PASS strong example for "${prompt}" → ${title || 'none'}`);
+  else { failures += 1; console.log(`FAIL strong example for "${prompt}" — got ${got || 'none'}, want ${title || 'none'}`); }
+}
+
 if (failures) { console.log(`\n${failures} FALLBACK CHECK(S) FAILED`); process.exit(1); }
 console.log('\nALL FALLBACK CHECKS PASSED');

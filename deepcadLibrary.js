@@ -1,8 +1,10 @@
 /**
  * deepcadLibrary.js: prompt -> closest real DeepCAD part -> FeatureScript.
  *
- * data/deepcad_library.json.gz holds ~30k real parts from the DeepCAD dataset with their
- * Text2CAD descriptions (built by scripts/deepcad_library/build.mjs). Every part already
+ * data/deepcad_library_index.json.gz (names, keywords, offsets) and deepcad_library_shapes.bin
+ * (the sequences) hold real parts from the DeepCAD dataset with their Text2CAD descriptions,
+ * built by scripts/deepcad_library/build.mjs. How many depends on that build; libraryInfo()
+ * reports the count once the index is loaded. Every part already
  * compiled with deepcadCompiler.js. Matching is BM25 over the part's name + keywords; a
  * candidate is only used when it covers the prompt's important words AND passes the same
  * "did it leave something out?" check as the DeepCAD model (hole counts, slots, L/T/U
