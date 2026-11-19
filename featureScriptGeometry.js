@@ -601,6 +601,46 @@ export function autoFixRuntimeTypes(code) {
     changes.push("concatenate(...) rewritten to concatenateArrays([...])");
   }
 
+  // 1b6) "Variable topFace is already declared in this scope": a second var for the same name
+  //      in the same block becomes a plain assignment (for-loop counters are their own scope).
+  const dup = removeDuplicateVarDeclarations(text);
+  if (dup.fixed) {
+    text = dup.code;
+    changes.push(`${dup.fixed} repeated var declaration(s) turned into assignments`);
+  }
+
+  // 1b7) vector(-2 * inch, 0, t + 0.3 * inch): a bare number next to components written with a
+  //      unit ("all vector components must have the same units") gets that unit. Only plain
+  //      number literals change, and only when no * unit follows the vector.
+  let bareComponents = 0;
+  {
+    const finder = /\bvector\s*\(/g;
+    let out = "";
+    let last = 0;
+    let match;
+    while ((match = finder.exec(text))) {
+      const open = match.index + match[0].length - 1;
+      const close = matchingClose(text, open);
+      if (close < 0) continue;
+      finder.lastIndex = open + 1;
+      // vector(...) * inch: its parts are meant to be plain numbers; another rule handles it.
+      if (/^\s*[*/]\s*(inch|millimeter|centimeter|meter)\b/.test(text.slice(close + 1))) continue;
+      const args = splitTopLevel(text.slice(open + 1, close));
+      if (args.length < 2) continue;
+      // A component is a length when a unit multiplies it (x * inch), not when it divides (x / inch).
+      const unit = args.map(arg => arg.match(/\*\s*(inch|millimeter|centimeter|meter)\b/)?.[1]).find(Boolean);
+      if (!unit || args.some(arg => /\/\s*(inch|millimeter|centimeter|meter)\b/.test(arg))) continue;
+      const bare = args.map(arg => /^\s*-?\d*\.?\d+\s*$/.test(arg));
+      if (!bare.some(Boolean) || bare.every(Boolean)) continue;
+      bareComponents += 1;
+      out += text.slice(last, open + 1) + args.map((arg, k) => (bare[k] ? `${arg.trim()} * ${unit}` : arg.trim())).join(", ");
+      last = close;
+      finder.lastIndex = close;
+    }
+    if (last) text = out + text.slice(last);
+  }
+  if (bareComponents) changes.push(`${bareComponents} vector(s) with bare numbers next to lengths given units`);
+
   // 1c) id + "rib" ~ i is (id + "rib") ~ i, an Id joined to a number ("cannot concatenate
   //     Id with '~'"): the name has to be built first, id + ("rib" ~ i).
   let idJoins = 0;
@@ -928,6 +968,48 @@ function rewriteCallArgs(text, name, rewrite) {
     head.lastIndex = open + 1;
   }
   return out + text.slice(last);
+}
+
+/**
+ * A name declared with var twice in the same block fails in Onshape; the second declaration
+ * becomes an assignment. Tracks blocks by braces (skipping strings and comments); a var inside
+ * for (...) belongs to the loop, so two loops may both declare i.
+ */
+function removeDuplicateVarDeclarations(source) {
+  const text = String(source || "");
+  const scopes = [new Set()];
+  const removals = [];
+  let parenDepth = 0;
+  let forParenDepth = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"') {
+      i += 1;
+      while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") { i = text.indexOf("\n", i); if (i < 0) break; continue; }
+    if (ch === "/" && text[i + 1] === "*") { i = text.indexOf("*/", i + 2); if (i < 0) break; i += 1; continue; }
+    if (ch === "{") scopes.push(new Set());
+    else if (ch === "}") { if (scopes.length > 1) scopes.pop(); }
+    else if (ch === "(") {
+      if (/\bfor\s*$/.test(text.slice(Math.max(0, i - 6), i))) forParenDepth = parenDepth;
+      parenDepth += 1;
+    } else if (ch === ")") {
+      parenDepth -= 1;
+      if (parenDepth === forParenDepth) forParenDepth = -1;
+    } else if (ch === "v" && text.startsWith("var", i) && !/\w/.test(text[i - 1] || "") && /\s/.test(text[i + 3] || "")) {
+      const name = text.slice(i + 3).match(/^\s+([A-Za-z_]\w*)/)?.[1];
+      if (!name || forParenDepth >= 0) continue;
+      const scope = scopes[scopes.length - 1];
+      if (scope.has(name)) removals.push(i);
+      else scope.add(name);
+    }
+  }
+  if (!removals.length) return { code: text, fixed: 0 };
+  let out = text;
+  for (const at of removals.reverse()) out = out.slice(0, at) + out.slice(at).replace(/^var\s+/, "");
+  return { code: out, fixed: removals.length };
 }
 
 // Top-level helper functions go right after the import line (the end of the file is touched

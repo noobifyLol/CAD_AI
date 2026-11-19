@@ -150,6 +150,23 @@ check("concatenate(a, b) -> concatenateArrays([a, b])",
   autoFixRuntimeTypes("var all = concatenate(left, right);").code,
   "var all = concatenateArrays([left, right]);");
 
+// 7f) repeated var, bare numbers in a vector with lengths
+check("second var in the same block -> assignment",
+  autoFixRuntimeTypes("    var topFace = a;\n    var topFace = b;").code,
+  "    var topFace = a;\n    topFace = b;");
+check("var in separate blocks and loop counters untouched",
+  autoFixRuntimeTypes("for (var i = 0; i < 2; i += 1)\n{\n    var w = 1;\n}\nfor (var i = 0; i < 3; i += 1)\n{\n    var w = 2;\n}").code,
+  "for (var i = 0; i < 2; i += 1)\n{\n    var w = 1;\n}\nfor (var i = 0; i < 3; i += 1)\n{\n    var w = 2;\n}");
+check("vector(-2*inch, 0, t + 0.3*inch) -> 0 * inch",
+  autoFixRuntimeTypes('var p = vector(-2*inch, 0, t + 0.3*inch);').code,
+  "var p = vector(-2*inch, 0 * inch, t + 0.3*inch);");
+check("vector(... / inch, 0) * inch untouched",
+  autoFixRuntimeTypes('var p = vector(definition.width / inch, 0) * inch;\nvar q = vector(w / inch * 2, 0);').code,
+  'var p = vector(definition.width / inch, 0) * inch;\nvar q = vector(w / inch * 2, 0);');
+check("unitless direction vector untouched",
+  autoFixRuntimeTypes("var d = vector(0, 0, 1);").code,
+  "var d = vector(0, 0, 1);");
+
 // 8) one join of everything at the end of the feature body
 const feature = lines(
   "export const thing = defineFeature(function(context is Context, id is Id, definition is map)",
