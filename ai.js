@@ -1024,7 +1024,18 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
     try {
       let content;
       try {
-        content = await callAltProvider(provider, messages, options);
+        // "This model is currently experiencing high demand" (503) usually passes in seconds:
+        // two short waits before the call goes to Groq.
+        for (let retry = 0; ; retry += 1) {
+          try {
+            content = await callAltProvider(provider, messages, options);
+            break;
+          } catch (err) {
+            if (![500, 502, 503, 504].includes(err.status) || retry >= 2) throw err;
+            console.warn(`[AI] ${provider.name} busy (HTTP ${err.status}); trying again in ${retry ? 8 : 3} s.`);
+            await new Promise(resolve => setTimeout(resolve, retry ? 8000 : 3000));
+          }
+        }
       } catch (err) {
         if (!err.truncated) throw err;
         // Cut off: the thinking used the budget. Once more with thinking off.
