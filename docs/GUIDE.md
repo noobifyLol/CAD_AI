@@ -94,15 +94,19 @@ Step by step, in plain words:
    - `+` instead of `~` for joining text
    - mixed-up units (inches times inches)
    - holes that would get filled back in
-   - merges that point at the wrong piece
+   - merges that point at the wrong piece, or cuts from a piece that was already merged into another one
+   - functions from other languages: `translation(...)` becomes `transform(vector(...))`, `point.x` on a vector becomes `point[0]`
+   - rounded edges and chamfers that can't be made are skipped instead of breaking the whole part
 6. **Test-build twice.** FS-Lite, then the simulator. If either finds an error, the error message goes back to the AI.
 7. **Design check.** Even if it builds, is it *right*? The checker looks for:
    - pieces that never touched, so the part is several loose solids,
    - a cut that removed nothing, so the hole is missing,
    - a piece completely buried inside another one, so it's invisible,
    - a container sealed shut,
+   - holes that were asked for but never cut (or added as solid pegs),
+   - a part far from the real product's size (a pen holder half an inch tall),
    - a "phone stand" that's just one plain box.
-8. **Fix loop.** Anything found goes back to the AI as a specific note. It gets up to 6 tries.
+8. **Fix loop.** Pieces that touch but were never merged get joined automatically first. Anything else goes back to the AI as a specific note. It gets up to 6 tries.
 9. **Fallback.** If nothing works, you get the closest real part from the dataset (clearly labeled), or a plain "try again". **A part that's known to be broken is never handed to you as if it were fine.**
 
 The code for all of this lives in [ai.js](../ai.js). The function that runs the loop is `runGenerateTestFixLoop`, and the one that drives a whole request is `generateFeatureScript`.
@@ -242,11 +246,12 @@ Run this after every change:
 npm test
 ```
 
-It runs six quick test suites, and none of them need an AI key:
+It runs seven quick test suites, and none of them need an AI key:
 
 | Suite | What it proves |
 | --- | --- |
 | units | The automatic unit fixes still work |
+| kit | The part-kit repairs still work (cuts and merges on the right piece, guarded fillets, the final join) |
 | validator | The hand-checked examples pass the cleanup pass **untouched**, and known-bad code still gets caught or fixed |
 | plan | The plan compiler still makes valid code |
 | fallback | With no AI, prompts still get a sensible example with their sizes |

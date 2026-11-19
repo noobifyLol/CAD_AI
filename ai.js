@@ -7662,7 +7662,7 @@ export async function generateFeatureScript(prompt, options = {}) {
     const recoveryCaution = strict => {
       if (!strict?.ok) return null;
       const loose = looseBodiesFeedback(prompt, strict);
-      const design = designIssueFeedback(prompt, strict);
+      const design = designIssueFeedback(prompt, strict, dims.designBrief);
       if (loose) return `Check this part before using it: it comes out as ${strict.localBuild?.metrics?.bodies} separate pieces instead of one. Try generating again or describe how the pieces attach.`;
       if (design) return `Check this part before using it: ${String(design).replace(/^The part built, but it is not right yet\.\s*/, "").replace(/\s*Keep everything else the same\.$/, "").slice(0, 260)}`;
       return null;
