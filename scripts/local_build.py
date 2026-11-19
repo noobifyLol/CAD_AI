@@ -224,6 +224,19 @@ def _register_with_extras(self):
 _std.StdLib._register = _register_with_extras
 
 
+def count_cylinder_faces(result):
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_Cylinder
+    from fsgen.fslite import geom as G
+
+    count = 0
+    for body in result.solids:
+        for face in G.subshapes(body.shape, G.TopAbs_FACE):
+            if BRepAdaptor_Surface(G.TopoDS.Face(face)).GetType() == GeomAbs_Cylinder:
+                count += 1
+    return count
+
+
 def build(source, name, png_dir=None):
     DIAGNOSTICS.clear()
     try:
@@ -237,6 +250,11 @@ def build(source, name, png_dir=None):
             out["metrics"] = result.metrics()
         except Exception as err:
             out["metrics"] = {"error": str(err)}
+        try:
+            # Round faces (hole bores, posts, fillets): lets the site check "6 holes" really has 6.
+            out["metrics"]["cylinder_faces"] = count_cylinder_faces(result)
+        except Exception:
+            pass
         if not out["metrics"].get("bodies"):
             out["ok"] = False
             out["error"] = "the feature ran but produced no solid body"

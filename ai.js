@@ -6877,6 +6877,15 @@ function tooSimpleFeedback(prompt, strict) {
 const CONTAINER_WORDS = /\b(mugs?|cups?|bottles?|vases?|bowls?|buckets?|jars?|tumblers?|planters?|flower ?pots?|trash cans?|bins?|lamp ?shades?|glass|pitchers?|jugs?)\b/i;
 const OPENING_WORDS = /\b(holes?|bores?|grilles?|grills?|vents?|perforat\w*|cut-?outs?|openings?|through-holes?)\b/i;
 
+const COUNT_WORDS = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12 };
+/** "a flange with 6 bolt holes" -> 6; null when the prompt gives no count of round holes. */
+function requestedHoleCount(prompt) {
+  const m = String(prompt || "").match(/\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|twelve)\s+(?:round\s+|bolt\s+|mounting\s+|screw\s+|drain(?:age)?\s+|pen\s+|through\s+)?(?:holes|bores)\b/i);
+  if (!m) return null;
+  const value = COUNT_WORDS[m[1].toLowerCase()] || Number(m[1]);
+  return value >= 2 && value <= 64 ? value : null;
+}
+
 /** The built size against the design brief's "overall: W x D x H in" (sorted, so orientation does not matter). */
 function sizeMismatchFeedback(brief, build) {
   const m = String(brief || "").match(/overall\s*:?\s*([\d.]+)\s*(?:in(?:ch(?:es)?)?)?\s*[x×]\s*([\d.]+)\s*(?:in(?:ch(?:es)?)?)?\s*[x×]\s*([\d.]+)/i);
@@ -6913,6 +6922,14 @@ function designIssueFeedback(prompt, strict, brief = "") {
     issues.push("The request asks for holes or openings, but the code never cuts anything out (no kitCut, opBoolean SUBTRACTION or sketch with inner loops), "
       + "so they are missing or were added as solid pegs. Make each hole a cutter body (kitCylinder / kitBox) longer than the wall it goes through, "
       + "then remove the cutters from the main body: kitCut(context, id + \"holes\", id + \"main\", [id + \"hole1\", ...]).");
+  }
+  // "6 holes" asked for, fewer round faces built (each round hole has at least one; posts and
+  // fillets only add more, so a shortfall is certain).
+  const holeCount = requestedHoleCount(prompt);
+  const roundFaces = build.metrics?.cylinder_faces;
+  if (holeCount && Number.isFinite(roundFaces) && roundFaces < holeCount) {
+    issues.push(`The request asks for ${holeCount} holes, but the part has only ${roundFaces} round faces, so some holes are missing. `
+      + `Make all ${holeCount} cutters (a for loop of kitCylinder cutters, each longer than the wall) and remove them in one kitCut.`);
   }
   // The usual cause with the part kit: a center height passed where kitBox/kitCylinder expect
   // the BOTTOM z (a TV's bezel and screen ended up inside its body, the port hole below it).
