@@ -980,9 +980,11 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
       stats.lastStatus = err.status || (err.truncated ? "cut off" : err.name);
       stats.lastError = maskIds(err.message);
       stats.lastFailAt = new Date().toISOString();
-      const pause = err.status === 429 ? 60000 : err.status >= 500 || err.name === "TimeoutError" ? 30000 : 10000;
+      // A used-up daily quota ("PerDay") will not come back in a minute: stop asking for an hour.
+      const dailyQuota = err.status === 429 && /per ?day|PerDay|daily/i.test(String(err.message));
+      const pause = dailyQuota ? 3600000 : err.status === 429 ? 60000 : err.status >= 500 || err.name === "TimeoutError" ? 30000 : 10000;
       altProviderPausedUntil.set(provider.name, Date.now() + pause);
-      console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 300)}); using the next provider.`);
+      console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 300)}); ${dailyQuota ? "daily quota used up, pausing it for an hour" : "using the next provider"}.`);
     }
   }
   // Groq (the backup) gets the trimmed prompt when the caller made one, and the answer room
@@ -6837,10 +6839,26 @@ function tooSimpleFeedback(prompt, strict) {
 const CONTAINER_WORDS = /\b(mugs?|cups?|bottles?|vases?|bowls?|buckets?|jars?|tumblers?|planters?|flower ?pots?|trash cans?|bins?|lamp ?shades?|glass|pitchers?|jugs?)\b/i;
 const OPENING_WORDS = /\b(holes?|bores?|grilles?|grills?|vents?|perforat\w*|cut-?outs?|openings?|through-holes?)\b/i;
 
-function designIssueFeedback(prompt, strict) {
+/** The built size against the design brief's "overall: W x D x H in" (sorted, so orientation does not matter). */
+function sizeMismatchFeedback(brief, build) {
+  const m = String(brief || "").match(/overall\s*:?\s*([\d.]+)\s*(?:in(?:ch(?:es)?)?)?\s*[x×]\s*([\d.]+)\s*(?:in(?:ch(?:es)?)?)?\s*[x×]\s*([\d.]+)/i);
+  const box = build?.metrics?.bbox_mm;
+  if (!m || !Array.isArray(box) || box.length !== 6) return null;
+  const want = [m[1], m[2], m[3]].map(Number).sort((a, b) => a - b);
+  if (want.some(value => !(value > 0))) return null;
+  const got = [box[3] - box[0], box[4] - box[1], box[5] - box[2]].map(value => value / 25.4).sort((a, b) => a - b);
+  if (!want.some((value, k) => got[k] < value * 0.45 || got[k] > value * 2.2)) return null;
+  const fmt = value => String(Math.round(value * 10) / 10);
+  return `The part is ${got.map(fmt).join(" x ")} in overall, but a real one is about ${want.map(fmt).join(" x ")} in (the design brief): `
+    + "scale the parameter defaults and positions so the part has the real size and proportions.";
+}
+
+function designIssueFeedback(prompt, strict, brief = "") {
   const build = strict.localBuild;
   if (!build || build.ok !== true) return null;
   const issues = [...(build.notes || [])];
+  const sizeIssue = sizeMismatchFeedback(brief, build);
+  if (sizeIssue) issues.push(sizeIssue);
   const box = build.metrics?.bbox_mm;
   if (CONTAINER_WORDS.test(prompt) && Array.isArray(box) && box.length === 6 && build.metrics.volume_mm3 > 0) {
     const boxVolume = Math.max(1e-9, (box[3] - box[0]) * (box[4] - box[1]) * (box[5] - box[2]));
@@ -7297,21 +7315,25 @@ async function buildDesignBrief(prompt, requestId, references = "") {
   const detailed = WANTS_DETAIL.test(prompt);
   const system = [
     "You are a mechanical product designer preparing a build list for a CAD programmer who will model ONE solid part in Onshape.",
-    `List the ${detailed ? "6 to 9" : "5 to 7"} components a real one of the requested object has, most important first, including the small details that make it recognizable (grilles, ribs, lips, feet, holes, chamfered edges).`,
+    "First line:  overall: W x D x H in  = the real-world size of this product as sold (for example a pen holder is about 3 x 3 x 4 in with 0.5 in holes 3 in deep, a phone stand about 3 x 4 x 5 in, a coffee mug about 3.3 in across and 3.8 in tall, a wall shelf bracket an L of two 5 in arms with a diagonal gusset).",
+    `Then list the ${detailed ? "6 to 9" : "5 to 7"} components a real one has, most important first, including the small details that make it recognizable (grilles, ribs, lips, feet, holes, gussets, chamfered edges).`,
     "One line per component, in this form:  name: shape, size in inches (L x W x H or diameter x height), position, how it attaches.",
-    "Rules: realistic proportions for the whole object; use shapes that are easy to model (plates, boxes, cylinders, tubes, ribs, bosses, holes, slots, pockets, fillets);",
-    "say for each component whether it is ADDED (must overlap what it attaches to) or CUT (must pass through the body);",
-    "give positions relative to the main body (centered, on top, 0.5 in from the left edge, ...); hollow containers state wall thickness and which side is open.",
-    `Plain text only, no code, no markdown, at most ${detailed ? 190 : 150} words.`,
+    "Rules: keep the overall size; use shapes that are easy to model (plates, boxes, cylinders, tubes, ribs, bosses, holes, slots, pockets, fillets);",
+    "say for each component whether it is ADDED (must overlap what it attaches to) or CUT (must pass through or sink into the body);",
+    "give positions as x, y, z from the center of the bottom of the main body; every hole, slot and pocket must lie fully inside the body it is cut from;",
+    "walls 0.1 to 0.25 in thick; hollow containers state wall thickness and which side is open; holes are deep enough to be useful.",
+    `Plain text only, no code, no markdown, at most ${detailed ? 200 : 170} words.`,
   ].join("\n");
   try {
     const raw = await chat(
       [{ role: "system", content: system }, { role: "user", content: `Object: ${prompt}${references ? `\n\nReal parts from a CAD dataset that are similar (use their structure and proportions as a guide, but plan the object asked for):\n${references}` : ""}` }],
-      TEXT_MODEL, null,
-      { stage: "planning", affinity: `${requestId}:brief`, maxCompletionTokens: detailed ? 700 : 500, timeoutMs: 45000 },
+      // The bigger model plans: the small one placed holes outside the body and made a pen
+      // holder half an inch tall.
+      COMPLEX_MODEL, [TEXT_MODEL, FALLBACK_MODEL],
+      { stage: "planning", affinity: `${requestId}:brief`, maxCompletionTokens: detailed ? 1000 : 800, timeoutMs: 45000 },
     );
     const brief = String(raw || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```[\s\S]*?```/g, "").trim()
-      .split("\n").map(line => line.trim()).filter(Boolean).slice(0, 10).join("\n").slice(0, 1400);
+      .split("\n").map(line => line.trim()).filter(Boolean).slice(0, 12).join("\n").slice(0, 1600);
     if (brief.length < 40) return "";
     console.log(`[AI] Design brief:\n${brief}`);
     return brief;
@@ -7398,7 +7420,7 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
         iteration,
         looseBodies: strict.ok ? looseBodiesFeedback(prompt, strict) : null,
         tooSimple: strict.ok ? tooSimpleFeedback(prompt, strict) : null,
-        designIssue: strict.ok ? designIssueFeedback(prompt, strict) : null,
+        designIssue: strict.ok ? designIssueFeedback(prompt, strict, dims.designBrief) : null,
       };
 
       // Track the best candidate seen across all iterations: clean first, then one
