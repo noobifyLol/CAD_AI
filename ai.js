@@ -912,7 +912,8 @@ const altProviderStats = new Map(ALT_PROVIDERS.map(provider => [provider.name, {
 // the answer; with no cap a detailed part was cut off mid-file. "medium" = up to 8192 thinking
 // tokens for writing code (spatial arithmetic benefits), "low" = 1024 for the small stages.
 // ALT_LLM_REASONING_EFFORT / ALT_LLM_CODE_REASONING_EFFORT override ("off" sends nothing).
-const ALT_THINKING_MODEL = /gemini-(2\.5|3)|gpt-oss/i;
+const ALT_THINKING_MODEL = /gemini-(2\.5|[3-9])|gpt-oss/i;
+const GEMINI_DEFAULT_TEMPERATURE = /gemini-[3-9]/i;
 const ALT_CODE_MAX_TOKENS = Number(process.env.ALT_LLM_CODE_MAX_TOKENS || 24000);
 const ALT_MAX_TOKENS = Number(process.env.ALT_LLM_MAX_TOKENS || 4096);
 // The free Gemini tier allows few requests per day: spend them where they matter (writing and
@@ -946,11 +947,14 @@ async function callAltProvider(provider, messages, options, effortOverride) {
   };
   if (effort) body.reasoning_effort = effort;
   if (options.jsonSchema) body.response_format = { type: "json_object" };
+  // Gemini 3 is tuned for its default temperature (1.0); Google warns that lower values can make
+  // it loop, which showed up as every call running into the timeout.
+  if (GEMINI_DEFAULT_TEMPERATURE.test(body.model)) delete body.temperature;
   const send = () => fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${provider.apiKey}` },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(Math.max(options.timeoutMs || 0, options.fullCode ? 180000 : 0) || GROQ_TIMEOUT_MS),
+    signal: AbortSignal.timeout(Math.max(options.timeoutMs || 0, options.fullCode ? 180000 : 90000)),
   });
   let response = await send();
   if (!response.ok && response.status === 404) {
@@ -967,6 +971,7 @@ async function callAltProvider(provider, messages, options, effortOverride) {
     console.warn(`[AI] ${provider.model} is retired; switching to ${replacement} as the provider suggests.`);
     provider.model = replacement;
     body.model = replacement;
+    if (GEMINI_DEFAULT_TEMPERATURE.test(replacement)) delete body.temperature;
     if (body.reasoning_effort && !ALT_THINKING_MODEL.test(replacement)) delete body.reasoning_effort;
     response = await send();
   }
