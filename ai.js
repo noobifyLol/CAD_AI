@@ -906,7 +906,7 @@ const ALT_PROVIDERS = [1, 2, 3, 4, 5].map(n => {
   return baseUrl && apiKey && model ? { name: `${new URL(baseUrl).hostname}/${model}`, baseUrl, apiKey, model } : null;
 }).filter(Boolean);
 const altProviderPausedUntil = new Map();
-const altProviderStats = new Map(ALT_PROVIDERS.map(provider => [provider.name, { calls: 0, ok: 0, failed: 0, truncated: 0, lastStatus: null, lastError: null, lastOkAt: null, lastFailAt: null }]));
+const altProviderStats = new Map(ALT_PROVIDERS.map(provider => [provider.name, { calls: 0, ok: 0, failed: 0, truncated: 0, failedInARow: 0, lastStatus: null, lastError: null, lastOkAt: null, lastFailAt: null }]));
 
 // Thinking models (Gemini 2.5, gpt-oss) spend hidden reasoning tokens out of max_tokens before
 // the answer; with no cap a detailed part was cut off mid-file. "medium" = up to 8192 thinking
@@ -954,7 +954,7 @@ async function callAltProvider(provider, messages, options, effortOverride) {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${provider.apiKey}` },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(Math.max(options.timeoutMs || 0, options.fullCode ? 180000 : 90000)),
+    signal: AbortSignal.timeout(Math.max(options.timeoutMs || 0, options.fullCode ? 120000 : 90000)),
   });
   let response = await send();
   if (!response.ok && response.status === 404) {
@@ -1044,6 +1044,7 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
         content = await callAltProvider(provider, messages, options, ALT_THINKING_MODEL.test(provider.model) ? "none" : null);
       }
       stats.ok += 1;
+      stats.failedInARow = 0;
       stats.lastOkAt = new Date().toISOString();
       console.log(`[AI] ${provider.name} answered stage=${altStage} in ${Date.now() - startedAt}ms`);
       return content;
@@ -1054,9 +1055,13 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
       stats.lastFailAt = new Date().toISOString();
       // A used-up daily quota ("PerDay") will not come back in a minute: stop asking for an hour.
       const dailyQuota = err.status === 429 && /per ?day|PerDay|daily/i.test(String(err.message));
-      const pause = dailyQuota ? 3600000 : err.status === 429 ? 60000 : err.status >= 500 || err.name === "TimeoutError" ? 30000 : 10000;
+      // Several failures in a row (a provider that only times out made every request wait
+      // minutes for it): leave it alone for 15 minutes and let Groq answer quickly.
+      stats.failedInARow += 1;
+      const brokenRun = stats.failedInARow >= 3;
+      const pause = dailyQuota ? 3600000 : brokenRun ? 900000 : err.status === 429 ? 60000 : err.status >= 500 || err.name === "TimeoutError" ? 30000 : 10000;
       altProviderPausedUntil.set(provider.name, Date.now() + pause);
-      console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 300)}); ${dailyQuota ? "daily quota used up, pausing it for an hour" : "using the next provider"}.`);
+      console.warn(`[AI] ${provider.name} failed (${String(err.message).slice(0, 300)}); ${dailyQuota ? "daily quota used up, pausing it for an hour" : brokenRun ? `${stats.failedInARow} failures in a row, pausing it for 15 minutes` : "using the next provider"}.`);
     }
   }
   // Groq (the backup) gets the trimmed prompt when the caller made one, and the answer room
