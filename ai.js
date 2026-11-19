@@ -895,7 +895,7 @@ function pickUntriedOrgSlot(poolSize, triedSlots, triedOrgs) {
 //   ALT_LLM_BASE_URL  e.g. https://generativelanguage.googleapis.com/v1beta/openai
 //                          https://api.cerebras.ai/v1
 //   ALT_LLM_API_KEY   the provider's key
-//   ALT_LLM_MODEL     e.g. gemini-2.5-flash  or  gpt-oss-120b
+//   ALT_LLM_MODEL     e.g. gemini-3.8-flash  or  gpt-oss-120b (a retired model is replaced automatically)
 // Several providers: ALT_LLM_BASE_URL_2 / ALT_LLM_API_KEY_2 / ALT_LLM_MODEL_2, ... (up to 5).
 // When a provider is rate-limited or down it is skipped for a minute and Groq is used.
 const ALT_PROVIDERS = [1, 2, 3, 4, 5].map(n => {
@@ -930,6 +930,7 @@ function altReasoningEffort(provider, options) {
 export function altProviderStatus() {
   return ALT_PROVIDERS.map(provider => ({
     name: provider.name,
+    model: provider.model,
     pausedForMs: Math.max(0, (altProviderPausedUntil.get(provider.name) || 0) - Date.now()),
     ...altProviderStats.get(provider.name),
   }));
@@ -952,6 +953,23 @@ async function callAltProvider(provider, messages, options, effortOverride) {
     signal: AbortSignal.timeout(Math.max(options.timeoutMs || 0, options.fullCode ? 180000 : 0) || GROQ_TIMEOUT_MS),
   });
   let response = await send();
+  if (!response.ok && response.status === 404) {
+    // A retired model ("models/gemini-2.5-flash is no longer available to new users. Please
+    // update your code to use models/gemini-3.8-flash"): switch to the model the provider names
+    // and keep using it, so a stale ALT_LLM_MODEL setting does not silently turn Gemini off.
+    const text = await response.text().catch(() => "");
+    const replacement = text.match(/\buse\s+(?:models\/)?([A-Za-z0-9][\w.-]*\d[\w.-]*)/i)?.[1];
+    if (!replacement || replacement === provider.model) {
+      const error = new Error(`${provider.name} HTTP 404: ${text.slice(0, 300)}`);
+      error.status = 404;
+      throw error;
+    }
+    console.warn(`[AI] ${provider.model} is retired; switching to ${replacement} as the provider suggests.`);
+    provider.model = replacement;
+    body.model = replacement;
+    if (body.reasoning_effort && !ALT_THINKING_MODEL.test(replacement)) delete body.reasoning_effort;
+    response = await send();
+  }
   if (!response.ok && response.status === 400) {
     // A provider that does not know an optional setting (thinking level, JSON mode) answers
     // 400: ask once more without it instead of giving the call to Groq.

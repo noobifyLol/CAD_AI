@@ -233,7 +233,7 @@ Everything lives in `.env`, which `npm run setup` creates and git never commits.
 
 | Free provider | Key | `ALT_LLM_BASE_URL` | `ALT_LLM_MODEL` |
 | --- | --- | --- | --- |
-| Google Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` |
+| Google Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.8-flash` |
 | Cerebras | [cloud.cerebras.ai](https://cloud.cerebras.ai) | `https://api.cerebras.ai/v1` | `gpt-oss-120b` |
 
 A provider that's rate-limited or down is skipped for a minute, then tried again.
