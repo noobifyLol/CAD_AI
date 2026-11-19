@@ -114,6 +114,17 @@ check("id + (\"rib\" ~ i) untouched",
   autoFixRuntimeTypes('kitBox(context, id + ("rib" ~ i), skPlane, 0, 0, 0, 1, 1, 1);').code,
   'kitBox(context, id + ("rib" ~ i), skPlane, 0, 0, 0, 1, 1, 1);');
 
+// 7c) sketch faces as profiles -> qSketchRegion
+check("loft profile qCreatedBy(sketch, FACE) -> qSketchRegion",
+  autoFixRuntimeTypes(lines(
+    'var s1 = newSketchOnPlane(context, id + "base", { "sketchPlane" : skPlane });',
+    'opLoft(context, id + "loft", { "profileSubqueries" : [qCreatedBy(id + "base", EntityType.FACE), qCreatedBy(id + "top", EntityType.FACE)] });',
+  )).code,
+  lines(
+    'var s1 = newSketchOnPlane(context, id + "base", { "sketchPlane" : skPlane });',
+    'opLoft(context, id + "loft", { "profileSubqueries" : [qSketchRegion(id + "base"), qCreatedBy(id + "top", EntityType.FACE)] });',
+  ));
+
 // 8) one join of everything at the end of the feature body
 const feature = lines(
   "export const thing = defineFeature(function(context is Context, id is Id, definition is map)",

@@ -546,6 +546,17 @@ export function autoFixRuntimeTypes(code) {
   });
   if (indexed) changes.push(`${indexed} vector .x/.y/.z field read(s) rewritten to [0]/[1]/[2]`);
 
+  // 1b2) A sketch's regions are qSketchRegion(sketchId); qCreatedBy(sketchId, EntityType.FACE)
+  //      as a loft/extrude profile selected no faces ("opLoft: a profile query selects no faces").
+  const sketchIds = new Set([...text.matchAll(/\bnewSketch(?:OnPlane)?\s*\(\s*context\s*,\s*id\s*\+\s*"(\w+)"/g)].map(m => m[1]));
+  let regions = 0;
+  text = text.replace(/\bqCreatedBy\s*\(\s*id\s*\+\s*"(\w+)"\s*,\s*EntityType\.FACE\s*\)/g, (whole, name) => {
+    if (!sketchIds.has(name)) return whole;
+    regions += 1;
+    return `qSketchRegion(id + "${name}")`;
+  });
+  if (regions) changes.push(`${regions} sketch face query(s) rewritten to qSketchRegion`);
+
   // 1c) id + "rib" ~ i is (id + "rib") ~ i, an Id joined to a number ("cannot concatenate
   //     Id with '~'"): the name has to be built first, id + ("rib" ~ i).
   let idJoins = 0;
