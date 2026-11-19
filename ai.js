@@ -624,6 +624,20 @@ const FEATURESCRIPT_REPAIR_JSON_SCHEMA = {
   },
 };
 
+/** The model's text carried by a Groq "json_validate_failed" error, or "". */
+function failedGenerationText(err) {
+  const direct = err?.error?.failed_generation || err?.error?.error?.failed_generation;
+  if (typeof direct === "string") return direct;
+  const message = String(err?.message || "");
+  if (!/json_validate_failed/.test(message)) return "";
+  try {
+    const body = JSON.parse(message.slice(message.indexOf("{")));
+    return String(body?.error?.failed_generation || body?.failed_generation || "");
+  } catch {
+    return "";
+  }
+}
+
 async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {}) {
   const stage = options.stage || "generation";
   const credential = pickStageCredential(stage, options.affinity, options.keySlot);
@@ -687,6 +701,14 @@ async function callGroqTextLLM(messagesOrPrompt, model = TEXT_MODEL, options = {
     console.log(`[Groq Text] success stage=${stage} model=${model} durationMs=${Date.now() - startedAt} slot=${credential.slotLabel}`);
     return content;
   } catch (err) {
+    // Strict JSON mode refuses an answer that is not perfect JSON ("json_validate_failed") but
+    // sends the model's text along: the code inside is usually fine (a stray character or a
+    // cut-off end), and the JSON reader recovers it. Use it instead of losing the attempt.
+    const failedGeneration = failedGenerationText(err);
+    if (failedGeneration && failedGeneration.length > 200) {
+      console.warn(`[Groq Text] strict JSON check failed on stage=${stage}; recovering the ${failedGeneration.length}-character answer it carried.`);
+      return failedGeneration;
+    }
     logFetchError("Groq Text", err, {
       model,
       stage,
@@ -6978,7 +7000,7 @@ const MISSING_NAME_HINTS = {
 };
 
 function localBuildHint(error) {
-  const missingName = String(error || "").match(/Variable (\w+) not found/i)?.[1];
+  const missingName = String(error || "").match(/Variable (\w+) not found|Cannot resolve identifier (\w+)/i)?.slice(1).find(Boolean);
   if (missingName && MISSING_NAME_HINTS[missingName]) return `. ${MISSING_NAME_HINTS[missingName]}`;
   if (/units differ|cannot (add|subtract|compare)[^:]*\b(mm|inch|meter)/i.test(error)) {
     return ". Every length must carry units: write plain numbers as lengths (2 * inch, 5 * millimeter) or use definition.* parameters; never add a bare number to a length.";
@@ -7094,7 +7116,7 @@ async function applySimulatorCheck(strict) {
   if (!sim.available || !sim.errors?.length || sim.gaps?.length) {
     return sim.available ? { ...strict, simulatorCheck: sim } : strict;
   }
-  const extraFatal = sim.errors.map(message => ({ message: `Onshape std simulator: ${message}`, source: "simulator" }));
+  const extraFatal = sim.errors.map(message => ({ message: `Onshape std simulator: ${message}${localBuildHint(String(message))}`, source: "simulator" }));
   return {
     ...strict,
     ok: false,

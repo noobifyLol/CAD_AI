@@ -139,6 +139,11 @@ check("fCylinder with a map untouched",
   autoFixRuntimeTypes('fCylinder(context, id + "post", { "bottomCenter" : b, "topCenter" : t, "radius" : r });').code,
   'fCylinder(context, id + "post", { "bottomCenter" : b, "topCenter" : t, "radius" : r });');
 
+// 7e) concatenate -> concatenateArrays
+check("concatenate(a, b) -> concatenateArrays([a, b])",
+  autoFixRuntimeTypes("var all = concatenate(left, right);").code,
+  "var all = concatenateArrays([left, right]);");
+
 // 8) one join of everything at the end of the feature body
 const feature = lines(
   "export const thing = defineFeature(function(context is Context, id is Id, definition is map)",

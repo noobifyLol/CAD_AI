@@ -26,6 +26,8 @@ const cases = [
   ["var top = skPlane.origin + Z_DIRECTION * 2;", "var top = skPlane.origin + Z_DIRECTION * 2 * inch;"],
   ['"center" : WORLD_ORIGIN - normalize(normal) * n,', '"center" : WORLD_ORIGIN - normalize(normal) * n * inch,'],
   ["var tip = origin + normal * halfW;", null],
+  // a comment that looks like an assignment does not make a variable unknown
+  ["var frontY = -halfW / 2 + 3; // about -12 for halfW=30", "var frontY = -halfW / 2 + 3 * inch; // about -12 for halfW=30"],
   // part-kit call arguments (bare statements)
   ['kitBox(context, id + "foot", skPlane, 0, 0, -0.25, halfW - 0.5, 2, 0.3);', 'kitBox(context, id + "foot", skPlane, 0, 0, -0.25, halfW - 0.5 * inch, 2, 0.3);'],
   ['kitCylinder(context, id + "boss", skPlane, capR - 0.5, 0, 0, 0.25, halfW);', null],

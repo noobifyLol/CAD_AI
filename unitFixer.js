@@ -86,7 +86,9 @@ function splitArgs(inner) {
   return args;
 }
 
-function buildEnvironment(code) {
+function buildEnvironment(source) {
+  // Comments are not code: "// about 12 for W=30" is not an assignment that makes W unknown.
+  const code = String(source || "").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, "");
   const lengths = new Set([...code.matchAll(/\bisLength\s*\(\s*definition\.(\w+)/g)].map(m => m[1]));
   const numbers = new Set([...code.matchAll(/\bis(?:Integer|Real)\s*\(\s*definition\.(\w+)/g)].map(m => m[1]));
   const defs = {};

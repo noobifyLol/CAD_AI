@@ -580,6 +580,14 @@ export function autoFixRuntimeTypes(code) {
   });
   if (cylinders) changes.push(`${cylinders} positional fCylinder call(s) rewritten to a map`);
 
+  // 1b5) concatenate(a, b) does not exist ("Cannot resolve identifier concatenate"); arrays
+  //      join with concatenateArrays([a, b]).
+  if (/\bconcatenate\s*\(/.test(text) && !/\bfunction\s+concatenate\s*\(/.test(text)) {
+    text = rewriteCallArgs(text, "concatenate", args => [`[${args.map(arg => arg.trim()).join(", ")}]`]);
+    text = text.replace(/\bconcatenate\s*\(/g, "concatenateArrays(");
+    changes.push("concatenate(...) rewritten to concatenateArrays([...])");
+  }
+
   // 1c) id + "rib" ~ i is (id + "rib") ~ i, an Id joined to a number ("cannot concatenate
   //     Id with '~'"): the name has to be built first, id + ("rib" ~ i).
   let idJoins = 0;
