@@ -6932,7 +6932,35 @@ export function partKitErrorHint(code, line, error) {
 }
 
 // Short fix-it hints for the test-build errors models make most often.
+// Functions models expect from other CAD/JS libraries that FeatureScript does not have, and
+// what to use instead (the build only says "Variable rotation not found").
+const ROTATE_HINT = "FeatureScript has no rotation()/rotate(): turn a body with opTransform(context, id + \"turn\", { \"bodies\" : body, \"transform\" : rotationAround(line(pivotPoint, axisDirection), 30 * degree) }), or build the piece on a tilted plane: plane(origin, normalDirection, xDirection). Turn a direction with cos/sin: vector(cos(a), sin(a), 0).";
+const MISSING_NAME_HINTS = {
+  rotation: ROTATE_HINT, rotate: ROTATE_HINT, rotateVector: ROTATE_HINT, rotationMatrix: ROTATE_HINT, rotateAround: ROTATE_HINT, rotateAboutAxis: ROTATE_HINT,
+  translation: "Move a body with opTransform(context, id + \"move\", { \"bodies\" : body, \"transform\" : transform(vector(x, y, z) * inch) }).",
+  translate: "Move a body with opTransform(context, id + \"move\", { \"bodies\" : body, \"transform\" : transform(vector(x, y, z) * inch) }).",
+  opMirror: "There is no opMirror: copy a body across a plane with opPattern(context, id + \"mirror\", { \"entities\" : body, \"transforms\" : [mirrorAcross(plane)], \"instanceNames\" : [\"m\"] }), then UNION.",
+  mirror: "Mirror with opPattern and mirrorAcross(plane), then UNION.",
+  opPatternCircular: "Circular copies: opPattern with \"transforms\" : [rotationAround(axisLine, i * angle), ...] (loop i = 1..count-1), then UNION.",
+  opPatternLinear: "Linear copies: opPattern with \"transforms\" : [transform(direction * spacing * i), ...] (loop i = 1..count-1), then UNION.",
+  opCylinder: "Use kitCylinder(...) or fCylinder(context, id + \"c\", { \"bottomCenter\", \"topCenter\", \"radius\" }).",
+  opBox: "Use kitBox(...) or fCuboid(context, id + \"b\", { \"corner1\", \"corner2\" }).",
+  opCube: "Use kitBox(...) or fCuboid(context, id + \"b\", { \"corner1\", \"corner2\" }).",
+  opSphere: "Use fSphere(context, id + \"s\", { \"center\", \"radius\" }).",
+  skPolygon: "Draw an outline with one skLineSegment per edge (or skRegularPolygon for a regular one).",
+  skPolyline: "Draw an outline with one skLineSegment per edge.",
+  skFillet: "Sketch fillets do not exist: round the solid's edges with opFillet after extruding.",
+  Math: "There is no Math object: call sin, cos, tan, sqrt, abs, min, max, floor, ceil, round directly and use PI.",
+  length: "Arrays have no length: use size(array).",
+  len: "Use size(array) for the number of items.",
+  radians: "Angles carry units: write 30 * degree or (PI / 6) * radian.",
+  toRadians: "Angles carry units: write 30 * degree or (PI / 6) * radian.",
+  deg2rad: "Angles carry units: write 30 * degree or (PI / 6) * radian.",
+};
+
 function localBuildHint(error) {
+  const missingName = String(error || "").match(/Variable (\w+) not found/i)?.[1];
+  if (missingName && MISSING_NAME_HINTS[missingName]) return `. ${MISSING_NAME_HINTS[missingName]}`;
   if (/units differ|cannot (add|subtract|compare)[^:]*\b(mm|inch|meter)/i.test(error)) {
     return ". Every length must carry units: write plain numbers as lengths (2 * inch, 5 * millimeter) or use definition.* parameters; never add a bare number to a length.";
   }

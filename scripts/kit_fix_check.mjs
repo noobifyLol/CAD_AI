@@ -87,6 +87,33 @@ check("translation(v) -> transform(v)",
   autoFixRuntimeTypes('var t = translation(offset);').code,
   "var t = transform(offset);");
 
+// 7b) vector fields and name joins
+check("loop vector .x/.y -> [0]/[1]",
+  autoFixRuntimeTypes(lines(
+    "for (var off in [vector(1, 0), vector(-1, 0)])",
+    "{",
+    '    kitCylinder(context, id + ("rib" ~ off.x), skPlane, off.x, off.y, 0, 0.1, 1);',
+    "}",
+  )).code,
+  lines(
+    "for (var off in [vector(1, 0), vector(-1, 0)])",
+    "{",
+    '    kitCylinder(context, id + ("rib" ~ off[0]), skPlane, off[0], off[1], 0, 0.1, 1);',
+    "}",
+  ));
+check("plane .x and map .x untouched",
+  autoFixRuntimeTypes('var dims = { "x" : 1 };\nvar a = dims.x + 1;\nvar p = plane(WORLD_ORIGIN, Z_DIRECTION);\nvar d = p.x;').code,
+  'var dims = { "x" : 1 };\nvar a = dims.x + 1;\nvar p = plane(WORLD_ORIGIN, Z_DIRECTION);\nvar d = p.x;');
+check("skPlane.origin.z -> skPlane.origin[2]",
+  autoFixRuntimeTypes("var h = skPlane.origin.z;").code,
+  "var h = skPlane.origin[2];");
+check('id + "rib" ~ i -> id + ("rib" ~ i)',
+  autoFixRuntimeTypes('kitBox(context, id + "rib" ~ i, skPlane, 0, 0, 0, 1, 1, 1);').code,
+  'kitBox(context, id + ("rib" ~ i), skPlane, 0, 0, 0, 1, 1, 1);');
+check("id + (\"rib\" ~ i) untouched",
+  autoFixRuntimeTypes('kitBox(context, id + ("rib" ~ i), skPlane, 0, 0, 0, 1, 1, 1);').code,
+  'kitBox(context, id + ("rib" ~ i), skPlane, 0, 0, 0, 1, 1, 1);');
+
 // 8) one join of everything at the end of the feature body
 const feature = lines(
   "export const thing = defineFeature(function(context is Context, id is Id, definition is map)",

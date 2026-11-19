@@ -516,6 +516,45 @@ export function autoFixRuntimeTypes(code) {
     }
   }
 
+  // 1b) vector.x / .y / .z -> v[0] / v[1] / v[2] ("Vector has no field 'x'"): FeatureScript
+  //     vectors are indexed; only a Plane has a field x. Only names that are certainly vectors
+  //     are touched (a map with an "x" key is read the same way and must stay as written).
+  const vectorVars = new Set();
+  const vectorLists = new Set();
+  const VECTOR_EXPR = /^\(?\s*(?:vector|normalize|cross|evVertexPoint|planeToWorld|toWorld)\s*\(|^[A-Za-z_]\w*\.(?:origin|normal|direction)\b/;
+  for (const m of text.matchAll(/\b(?:var|const)\s+(\w+)\s*=\s*([^;]+);/g)) {
+    const expr = m[2].trim();
+    if (/^\[\s*vector\s*\(/.test(expr)) vectorLists.add(m[1]);
+    else if (VECTOR_EXPR.test(expr)) vectorVars.add(m[1]);
+  }
+  for (const m of text.matchAll(/\bfor\s*\(\s*var\s+(\w+)\s+in\s+(?:(\[\s*vector\s*\()|([A-Za-z_]\w*)\s*\))/g)) {
+    if (m[2] || vectorLists.has(m[3])) vectorVars.add(m[1]);
+  }
+  const AXIS = { x: 0, y: 1, z: 2 };
+  let indexed = 0;
+  for (const name of vectorVars) {
+    if (planeVars.has(name) || /plane/i.test(name) || /^(definition|context|id)$/.test(name)) continue;
+    text = text.replace(new RegExp(`\\b${name}\\.([xyz])\\b(?!\\s*\\()`, "g"), (whole, axis) => {
+      indexed += 1;
+      return `${name}[${AXIS[axis]}]`;
+    });
+  }
+  // plane.origin.x and friends: origin, normal and direction are vectors.
+  text = text.replace(/\.(origin|normal|direction)\.([xyz])\b(?!\s*\()/g, (whole, field, axis) => {
+    indexed += 1;
+    return `.${field}[${AXIS[axis]}]`;
+  });
+  if (indexed) changes.push(`${indexed} vector .x/.y/.z field read(s) rewritten to [0]/[1]/[2]`);
+
+  // 1c) id + "rib" ~ i is (id + "rib") ~ i, an Id joined to a number ("cannot concatenate
+  //     Id with '~'"): the name has to be built first, id + ("rib" ~ i).
+  let idJoins = 0;
+  text = text.replace(/\bid\s*\+\s*("(?:[^"\\\n]|\\.)*"(?:\s*~\s*(?:"(?:[^"\\\n]|\\.)*"|[A-Za-z_][\w.]*(?:\[[^\]]*\])?|\d+|\([^()]*\)))+)/g, (whole, joined) => {
+    idJoins += 1;
+    return `id + (${joined})`;
+  });
+  if (idJoins) changes.push(`${idJoins} id + "name" ~ n rewritten to id + ("name" ~ n)`);
+
   // 2) Unitless angles. Find each variable's defining expression to judge its units.
   const varExpr = {};
   for (const m of text.matchAll(/\b(?:var|const)\s+(\w+)\s*=\s*([^;]+);/g)) varExpr[m[1]] = m[2];
