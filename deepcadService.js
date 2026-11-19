@@ -117,7 +117,8 @@ export function assessDeepcadFit(prompt) {
 // The part library holds real extruded parts, so it can give curved SKETCHES (rounded
 // plates, hooks, brackets with arcs) but not true 3D-revolved/lofted/swept shapes; their
 // "cone"/"bottle" descriptions are flat silhouettes. Those go to the parametric generator.
-const LIBRARY_3D_ONLY = /\b(cones?|conical|taper(ed)?|spheres?|spherical|balls?|domes?|hemispheres?|bottles?|vases?|cups?|mugs?|bowls?|funnels?|torus|donuts?|doughnuts?|springs?|coils?|helix|helical|threads?|threaded|revolved?|lofted?|swept|sweep|propellers?|airfoils?|wings?)\b/i;
+// Gears too: the dataset's "gears" have no teeth, while the site generates real involute gears.
+const LIBRARY_3D_ONLY = /\b(cones?|conical|taper(ed)?|spheres?|spherical|balls?|domes?|hemispheres?|bottles?|vases?|cups?|mugs?|bowls?|funnels?|torus|donuts?|doughnuts?|springs?|coils?|helix|helical|threads?|threaded|revolved?|lofted?|swept|sweep|propellers?|airfoils?|wings?|gears?|sprockets?|cogs?|pinions?)\b/i;
 
 /**
  * Closest real DeepCAD part for the prompt, compiled to FeatureScript (free, no model).

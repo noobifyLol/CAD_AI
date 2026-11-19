@@ -98,13 +98,12 @@ function countedNouns(text) {
   words.forEach((word, i) => {
     const value = COUNT_WORDS[word] ?? (/^\d+$/.test(word) ? Number(word) : null);
     if (value === null) return;
+    // Every noun of the short phrase after the number: "6 bolt holes" counts bolts AND holes,
+    // so it is compared with "three peripheral holes".
     for (const next of words.slice(i + 1, i + 4)) {
       if (/^(mm|cm|in|inch|inches|ft)$/.test(next)) return; // a size, not a count
-      const noun = stem(next);
-      if (!STOPWORDS.has(next) && /^[a-z]{3,}$/.test(next) && !COUNT_ADJECTIVES.has(next)) {
-        counts.set(noun, value);
-        return;
-      }
+      if (STOPWORDS.has(next) || COUNT_WORDS[next] !== undefined || /^\d+$/.test(next)) return;
+      if (/^[a-z]{3,}$/.test(next) && !COUNT_ADJECTIVES.has(next)) counts.set(stem(next), value);
     }
   });
   return counts;
@@ -115,6 +114,25 @@ function countedNouns(text) {
  * sentence ("A wall shelf bracket with ..." -> bracket; "The object is a curved, L-shaped
  * bracket with two holes" -> bracket). Shape adjectives at the end are skipped.
  */
+// Words in front of a noun that describe its shape or size, not what kind of thing it is.
+const SHAPE_WORDS = new Set(("rectangular cylindrical circular square round flat curved shaped mounted wall small large big tiny simple "
+  + "hollow solid triangular hexagonal hex octagonal metal wooden plastic thin thick long short tall low angled rounded cubic oval "
+  + "standard basic plain double single compact open closed u l t v z cross straight bent tapered stepped slotted perforated "
+  + "decorative modern rectangle circle cylinder cube box shape object part component piece one two three four five six eight").split(" "));
+
+function headPhraseTokens(text) {
+  const firstSentence = String(text || "").toLowerCase().split(/[.;]/)[0];
+  const first = firstSentence.split(/\b(?:with|for|that|which|having|where|made|in|on|at|of|and|featuring|consisting)\b/)[0];
+  return tokenize(first).filter(token => !/^(shaped|like|style|type)$/.test(token));
+}
+
+/** The word naming what kind of `head` it is ("phone" in "phone stand"), or null (none, or only shape words). */
+function kindWord(tokens, head) {
+  const at = tokens.lastIndexOf(head);
+  const before = at > 0 ? tokens[at - 1] : null;
+  return before && !SHAPE_WORDS.has(before) && !/^\d/.test(before) ? before : null;
+}
+
 export function headNoun(text) {
   const firstSentence = String(text || "").toLowerCase().split(/[.;]/)[0];
   const first = firstSentence.split(/\b(?:with|for|that|which|having|where|made|in|on|at|of|and|featuring|consisting)\b/)[0];
@@ -129,6 +147,7 @@ export function searchLibrary(prompt, k = 12, { requireHead = true } = {}) {
   if (!parts.length || !query.length) return [];
   // requireHead: false (reference designs for the AI) ranks by shared words only.
   const head = requireHead ? headNoun(prompt) : null;
+  const kind = head ? kindWord(headPhraseTokens(prompt), head) : null;
   const promptCounts = countedNouns(prompt);
   const N = parts.length;
   const idf = token => Math.log(1 + (N - (df.get(token) || 0) + 0.5) / ((df.get(token) || 0) + 0.5));
@@ -138,6 +157,11 @@ export function searchLibrary(prompt, k = 12, { requireHead = true } = {}) {
     // The thing asked for must be the part's own main noun, not something it merely has:
     // "a handle" must not match "a bag with a handle"; "shelf bracket" is a bracket.
     if (head && part.head !== head) continue;
+    // A different kind of the same thing: "phone stand" must not become "a TV stand".
+    if (kind) {
+      const partKind = kindWord(tokenize(String(part.name).toLowerCase().split(/[.;]/)[0]), head);
+      if (partKind && partKind !== kind) continue;
+    }
     let score = 0;
     let covered = 0;
     for (const token of query) {
@@ -150,6 +174,9 @@ export function searchLibrary(prompt, k = 12, { requireHead = true } = {}) {
     // Counts must agree: "four bolt holes" must not match "three bolt holes".
     const partCounts = countedNouns(part.name);
     if ([...promptCounts].some(([noun, value]) => partCounts.has(noun) && partCounts.get(noun) !== value)) continue;
+    // A stated count needs evidence: "6 bolt holes" needs a part described with six holes or
+    // six bolts, not one that never says how many.
+    if (head && [...new Set(promptCounts.values())].some(value => ![...promptCounts].some(([noun, v]) => v === value && partCounts.get(noun) === value))) continue;
     // Precision: share of the part's name the prompt accounts for ("a washer" should prefer
     // "a flat washer" over "a series of washers arranged in a sequence").
     let named = 0;
