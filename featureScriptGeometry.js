@@ -532,11 +532,24 @@ export function autoFixRuntimeTypes(code) {
   }
   const AXIS = { x: 0, y: 1, z: 2 };
   let indexed = 0;
+  // Beyond the certain vectors: in FeatureScript only a Plane has a field "x" and nothing has
+  // "y" or "z", so any other name read that way is a vector (pos = positions[i]; pos.x), unless
+  // it is a map: built from a { } literal, looped over a list of maps, or read with other fields.
+  const mapVars = new Set([
+    ...[...text.matchAll(/\b(?:var|const)\s+(\w+)\s*=\s*\{/g)].map(m => m[1]),
+    ...[...text.matchAll(/\bfor\s*\(\s*var\s+(\w+)\s+in\s+\[\s*\{/g)].map(m => m[1]),
+    ...[...text.matchAll(/\b(\w+)\s+is\s+map\b/g)].map(m => m[1]),
+  ]);
+  const otherFields = new Set([...text.matchAll(/\b([A-Za-z_]\w*)\.(?![xyz]\b)[A-Za-z_]\w*/g)].map(m => m[1]));
+  for (const m of text.matchAll(/\b([A-Za-z_]\w*)(?:\[[^\]\n]*\])?\.[xyz]\b(?!\s*\()/g)) {
+    const name = m[1];
+    if (!mapVars.has(name) && !otherFields.has(name)) vectorVars.add(name);
+  }
   for (const name of vectorVars) {
-    if (planeVars.has(name) || /plane/i.test(name) || /^(definition|context|id)$/.test(name)) continue;
-    text = text.replace(new RegExp(`\\b${name}\\.([xyz])\\b(?!\\s*\\()`, "g"), (whole, axis) => {
+    if (planeVars.has(name) || /plane/i.test(name) || /^(definition|context|id)$/.test(name) || mapVars.has(name)) continue;
+    text = text.replace(new RegExp(`\\b${name}(\\[[^\\]\\n]*\\])?\\.([xyz])\\b(?!\\s*\\()`, "g"), (whole, index, axis) => {
       indexed += 1;
-      return `${name}[${AXIS[axis]}]`;
+      return `${name}${index || ""}[${AXIS[axis]}]`;
     });
   }
   // plane.origin.x and friends: origin, normal and direction are vectors.

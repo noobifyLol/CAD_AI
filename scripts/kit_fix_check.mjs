@@ -104,6 +104,12 @@ check("loop vector .x/.y -> [0]/[1]",
 check("plane .x and map .x untouched",
   autoFixRuntimeTypes('var dims = { "x" : 1 };\nvar a = dims.x + 1;\nvar p = plane(WORLD_ORIGIN, Z_DIRECTION);\nvar d = p.x;').code,
   'var dims = { "x" : 1 };\nvar a = dims.x + 1;\nvar p = plane(WORLD_ORIGIN, Z_DIRECTION);\nvar d = p.x;');
+check("vector from a built list: pos.x / positions[i].y",
+  autoFixRuntimeTypes('var pos = positions[i];\nkitCylinder(context, id + "h", skPlane, pos.x, positions[i].y, 0, 0.1, 1);').code,
+  'var pos = positions[i];\nkitCylinder(context, id + "h", skPlane, pos[0], positions[i][1], 0, 0.1, 1);');
+check("map read with other fields untouched",
+  autoFixRuntimeTypes("var spot = slots[i];\nvar a = spot.x + spot.width;").code,
+  "var spot = slots[i];\nvar a = spot.x + spot.width;");
 check("skPlane.origin.z -> skPlane.origin[2]",
   autoFixRuntimeTypes("var h = skPlane.origin.z;").code,
   "var h = skPlane.origin[2];");
