@@ -923,12 +923,28 @@ async function callAltProvider(provider, messages, options, effortOverride) {
   };
   if (effort) body.reasoning_effort = effort;
   if (options.jsonSchema) body.response_format = { type: "json_object" };
-  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+  const send = () => fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${provider.apiKey}` },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(Math.max(options.timeoutMs || 0, options.fullCode ? 180000 : 0) || GROQ_TIMEOUT_MS),
   });
+  let response = await send();
+  if (!response.ok && response.status === 400) {
+    // A provider that does not know an optional setting (thinking level, JSON mode) answers
+    // 400: ask once more without it instead of giving the call to Groq.
+    const text = await response.text().catch(() => "");
+    const dropped = [];
+    if (body.reasoning_effort && /reasoning|thinking/i.test(text)) { delete body.reasoning_effort; dropped.push("reasoning_effort"); }
+    if (body.response_format && /response_format|json|mime/i.test(text)) { delete body.response_format; dropped.push("response_format"); }
+    if (!dropped.length) {
+      const error = new Error(`${provider.name} HTTP 400: ${text.slice(0, 300)}`);
+      error.status = 400;
+      throw error;
+    }
+    console.warn(`[AI] ${provider.name} refused ${dropped.join(" and ")}; asking again without.`);
+    response = await send();
+  }
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     const error = new Error(`${provider.name} HTTP ${response.status}: ${text.slice(0, 300)}`);
