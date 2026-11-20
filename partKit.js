@@ -273,6 +273,33 @@ export function appendAutoMerge(source) {
   return `${before}${before.endsWith("\n") ? "" : "\n"}${merge}${text.slice(bodyEnd)}`;
 }
 
+/**
+ * Deletes every solid except the largest at the end of the feature: for parts whose only
+ * problem is a few tiny fragments floating loose (pieces of a union that never touched). The
+ * caller decides when that is safe (the fragments are a small share of the volume).
+ */
+export function appendKeepLargest(source) {
+  const text = String(source || "");
+  if (/id \+ "dropLoose"/.test(text)) return text;
+  const head = /\bdefineFeature\s*\(/.exec(text);
+  if (!head) return text;
+  const parsed = callArguments(text, head.index + head[0].length - 1);
+  if (!parsed) return text;
+  const bodyEnd = text.lastIndexOf("}", parsed.end);
+  if (bodyEnd < 0) return text;
+  const solids = "qBodyType(qCreatedBy(id, EntityType.BODY), BodyType.SOLID)";
+  const drop = [
+    "        // Remove small loose fragments that never touched the main body.",
+    "        try silent",
+    "        {",
+    `            opDeleteBodies(context, id + "dropLoose", { "entities" : qSubtraction(${solids}, qLargest(${solids})) });`,
+    "        }",
+    "    ",
+  ].join("\n");
+  const before = text.slice(0, bodyEnd).replace(/[ \t]*$/, "");
+  return `${before}${before.endsWith("\n") ? "" : "\n"}${drop}${text.slice(bodyEnd)}`;
+}
+
 const KIT_CALL =/\bkit(?:Box|Cylinder|Rod|Merge|Cut|Point|Len)\s*\(/;
 
 function closingParen(text, open) {

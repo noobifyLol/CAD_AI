@@ -9,7 +9,7 @@ import { FEATURESCRIPT_PLAN_JSON_SCHEMA, buildPlanSystemPrompt, validatePlan, co
 import { autoAlignSweepProfiles, autoCloseOpenProfiles, autoDeclareMissingParams, autoFilterInnerLoops, autoFixQueryFilters, autoFixRevolveAxisAlongNormal, autoFixRuntimeTypes, checkFeatureScriptGeometry } from "./featureScriptGeometry.js";
 import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
-import { PART_KIT_PROMPT, appendAutoMerge, autoFixKitTargets, ensurePartKit, guardFinishingOps, resolveKitIds, stripPartKit } from "./partKit.js";
+import { PART_KIT_PROMPT, appendAutoMerge, appendKeepLargest, autoFixKitTargets, ensurePartKit, guardFinishingOps, resolveKitIds, stripPartKit } from "./partKit.js";
 import { datasetReferenceBlock } from "./datasetReferences.js";
 import { benchcadPart } from "./benchcadParts.js";
 import { headNoun, libraryInfo } from "./deepcadLibrary.js";
@@ -7028,6 +7028,22 @@ async function tryAutoMerge(strict) {
   return merged;
 }
 
+/** The candidate without its tiny loose fragments, when the largest body holds 95 % of the volume. */
+async function tryDropFragments(strict) {
+  const parts = strict.simulatorCheck?.parts;
+  if (!Array.isArray(parts) || parts.length < 2) return null;
+  const volumes = parts.map(part => Number(part.volume_in3) || 0);
+  const total = volumes.reduce((sum, v) => sum + v, 0);
+  if (!(total > 0) || Math.max(...volumes) / total < 0.95) return null;
+  const cleanedCode = appendKeepLargest(strict.code);
+  if (cleanedCode === strict.code) return null;
+  const cleaned = await applyOnshapeCompileCheck(validateFeatureScriptStrict(cleanedCode));
+  if (!cleaned.ok || cleaned.localBuild?.metrics?.bodies !== 1) return null;
+  console.log(`[AI] Removed ${parts.length - 1} loose fragment(s) (${((1 - Math.max(...volumes) / total) * 100).toFixed(1)} % of the volume)`);
+  reportProgress(`Removed ${parts.length - 1} small loose fragment${parts.length === 2 ? "" : "s"}`);
+  return cleaned;
+}
+
 function looseBodiesFeedback(prompt, strict) {
   const bodies = strict.localBuild?.metrics?.bodies;
   if (!bodies || bodies <= 1) return null;
@@ -7576,6 +7592,12 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
       if (strict.ok && looseBodiesFeedback(prompt, strict)) {
         const merged = await tryAutoMerge(strict);
         if (merged) strict = merged;
+      }
+      // Still loose, but the extra pieces are tiny fragments (under 5 % of the volume, e.g.
+      // ribs of a union that never touched the bowl): remove them instead of returning them.
+      if (strict.ok && looseBodiesFeedback(prompt, strict)) {
+        const cleaned = await tryDropFragments(strict);
+        if (cleaned) strict = cleaned;
       }
       const scored = scoreFeatureScriptCandidate(strict.code);
       const candidate = {
