@@ -1078,7 +1078,7 @@ async function chat(messages, model = TEXT_MODEL, fallbackModels = null, options
       stats.lastError = maskIds(err.message);
       stats.lastFailAt = new Date().toISOString();
       // A used-up daily quota ("PerDay") will not come back in a minute: stop asking for an hour.
-      const dailyQuota = err.status === 429 && /per ?day|PerDay|daily/i.test(String(err.message));
+      const dailyQuota = err.status === 429 && /per ?day|PerDay|daily|exceeded your current quota|plan and billing/i.test(String(err.message));
       // Several failures in a row (a provider that only times out made every request wait
       // minutes for it): leave it alone for 15 minutes and let Groq answer quickly.
       stats.failedInARow += 1;

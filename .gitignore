@@ -53,3 +53,6 @@ CadQuery/
 CadQuery.zip
 CQ/
 __MACOSX/
+
+# CadQuery runtime used only to check BenchCAD conversions (scripts/benchcad_fs/check.py)
+.cq-venv/
