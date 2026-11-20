@@ -7791,6 +7791,21 @@ export async function generateFeatureScript(prompt, options = {}) {
   const dims = applyPromptHeuristics(prompt, await extractDims(prompt, learningContext, history, { requestId }));
   console.log(`[AI] shape=${dims.shape} confidence=${dims.confidence}`);
 
+  // A plain spur gear: the involute gear generator is exact (teeth count, pitch radius, bore,
+  // face width, keyway all editable) and verified in the simulator sweep; the AI only ever
+  // produced worse gears, slowly (a 24-tooth gear request ran past five minutes).
+  if (dims.shape === "GEAR_SPUR" && !/\b(racks?|worms?|bevel|helical|herringbone|planetary|internal|ring gear|pairs?|two gears|gear ?(box|train|set)|ratchet|sprocket)\b/i.test(prompt)) {
+    console.log("[AI] Spur gear: using the involute gear generator");
+    reportProgress("Building an involute spur gear");
+    const gear = buildGearTemplateResult(prompt, dims, learningContext, buildChatbotRetrievalBundle(prompt, dims, learningContext), []);
+    return {
+      ...gear,
+      generationMode: "gear_generator",
+      completionLevel: "full",
+      warnings: ["Involute spur gear from the built-in gear generator: change Number of Teeth, Pitch Radius, Bore Radius, Face Width and Keyway in the feature dialog."],
+    };
+  }
+
   const mathAnalysis = performGeometricReasoning(dims);
   learningContext.notes.push(`Geometric Reasoning: ${mathAnalysis}`);
 
