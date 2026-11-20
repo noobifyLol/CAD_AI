@@ -86,6 +86,7 @@ flowchart TD
 
 Step by step, in plain words:
 
+0. **Standard part?** If the prompt just names one of 86 standard parts (hex nut, washer, L bracket, pipe flange, pillow block, phone stand, chair, enclosure, ...), you get that exact part straight away, with no AI. These come from the BenchCAD set, converted from CadQuery and checked against the originals ([benchcadParts.js](../benchcadParts.js), [scripts/benchcad_fs/](../scripts/benchcad_fs/)). Ask for sizes or features ("with 6 bolt holes") and the AI builds a custom one instead.
 1. **Read the prompt.** Pull out the shape, the sizes and the counts ("6 holes", "80 mm"). If no AI is available, a rule-based reader does it ([promptDimensions.js](../promptDimensions.js)).
 2. **Find references.** Search the dataset for similar real parts, and pick the closest hand-checked example from [data/fs_examples/](../data/fs_examples/). Both go into the AI's instructions, so it copies good habits instead of inventing from scratch.
 3. **Plan.** For named things (a mug, a TV), the AI first lists the components: body, handle, stand. It writes down their sizes and how they attach.

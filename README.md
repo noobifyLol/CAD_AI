@@ -32,6 +32,7 @@ The web app also has a **Debug** tab (paste code plus Onshape's error and get a 
 ## Data
 
 - **DeepCAD part library**: real parts that people modeled in Onshape, with Text2CAD's text descriptions. The closest designs go to the AI as reference recipes, and they're also the backup library. Built by [scripts/deepcad_library/](scripts/deepcad_library/) into `data/deepcad_library_index.json.gz` and `data/deepcad_library_shapes.bin`. License: CC BY-NC-SA 4.0 (non-commercial).
+- **BenchCAD standard parts**: 253 parts in 86 families converted from their CadQuery programs to FeatureScript and checked against CadQuery's own volumes (`data/benchcad_fs.json.gz`, built by [scripts/benchcad_fs/](scripts/benchcad_fs/)). A prompt that just names one ("a hex nut", "a pipe flange") gets it exactly, with no AI.
 - **BenchCAD references**: named mechanical parts written as CadQuery code, for real proportions and features like fillets and revolves. Built by [scripts/dataset_refs/build_benchcad.py](scripts/dataset_refs/build_benchcad.py) into `data/benchcad_refs.json.gz`. License: CC-BY 4.0.
 - **Omni-CAD** caption summaries and caption-geometry pairs ([data/](data/)).
 - **Hand-checked FeatureScript features** in [data/fs_examples/](data/fs_examples/), from washers to spoked wheels. The closest match is shown to the AI as a working example.
