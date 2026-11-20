@@ -11,6 +11,7 @@ import { localBuildFeatureScript } from "./localBuild.js";
 import { autoFixMixedUnits } from "./unitFixer.js";
 import { PART_KIT_PROMPT, appendAutoMerge, autoFixKitTargets, ensurePartKit, guardFinishingOps, resolveKitIds, stripPartKit } from "./partKit.js";
 import { datasetReferenceBlock } from "./datasetReferences.js";
+import { benchcadPart } from "./benchcadParts.js";
 import { headNoun, libraryInfo } from "./deepcadLibrary.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -7750,6 +7751,28 @@ export async function generateFeatureScript(prompt, options = {}) {
     console.log(`[AI] Editing the previous part: "${prompt}"`);
     reportProgress("Editing your current part");
     return editFeatureScript(prompt, history, requestId);
+  }
+
+  // A prompt that simply names a standard part (hex nut, pipe flange, pillow block, chair, ...)
+  // gets the verified BenchCAD part: converted from its CadQuery program and checked against
+  // CadQuery's own volume. Exact geometry, no AI call.
+  const standardPart = benchcadPart(prompt);
+  if (standardPart) {
+    console.log(`[AI] Standard part: ${standardPart.family} (${standardPart.variant})`);
+    reportProgress(`Found the exact standard part: ${standardPart.label}`);
+    const featureName = standardPart.code.match(/export const (\w+)/)?.[1] || "standardPart";
+    return {
+      code: standardPart.code,
+      featureName,
+      featureLabel: standardPart.label,
+      thinking: `"${prompt}" names a standard ${standardPart.label.toLowerCase()}, so the verified ${standardPart.label} from the BenchCAD part set was returned: converted from its CadQuery program and checked against the original's volume and size. Describe sizes or features (for example "with 6 bolt holes" or "80 mm wide") to have the AI build a custom one instead.`,
+      dims: { shape: "STANDARD_PART", featureName, featureLabel: standardPart.label, confidence: "HIGH" },
+      generationMode: "benchcad_part",
+      completionLevel: "full",
+      warnings: [`Exact standard part: ${standardPart.label}${standardPart.standard ? ` (${standardPart.standard})` : ""} from the BenchCAD set, checked against its original. Sizes are millimeters; change "Scale (%)" in the feature dialog, or describe the sizes you need and ask again for a custom one.`],
+      omissions: [],
+      orchestration: { status: "completed", completionLevel: "full", failedPass: null, passes: { fallback: { used: `benchcad:${standardPart.family}` } }, warnings: [], omissions: [] },
+    };
   }
 
   reportProgress("Working out the part's shape and sizes");

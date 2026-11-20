@@ -14,7 +14,8 @@ from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse, BRepAlgoAPI_Splitter
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace,
-                                BRepBuilderAPI_MakeWire, BRepBuilderAPI_Transform)
+                                BRepBuilderAPI_MakeVertex, BRepBuilderAPI_MakeWire, BRepBuilderAPI_Transform)
+from OCP.BRepExtrema import BRepExtrema_DistShapeShape
 from OCP.BRepCheck import BRepCheck_Analyzer
 from OCP.BRepClass import BRepClass_FaceClassifier
 from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
@@ -523,6 +524,21 @@ class QueryEngine:
     def q_BODY_TYPE(self, d):
         types = set(t.name for t in untag(d.get("bodyType") or d.get("bodyTypes") or ()))
         return [r for r in self.eval(d["subquery"]) if r.body.kind in types]
+
+    def q_CLOSEST_TO(self, d):
+        # qClosestTo(query, point): the entities nearest the point (std passes it unit-stripped, in meters).
+        refs = self.eval(d["subquery"])
+        if not refs:
+            return []
+        p = self.conv.vec(d["point"], 3, "point", lengths=True)
+        vertex = BRepBuilderAPI_MakeVertex(gp_Pnt(float(p[0]), float(p[1]), float(p[2]))).Vertex()
+        scored = []
+        for ref in refs:
+            shape = ref.body.shape if ref.kind == "BODY" else ref.shape
+            dist = BRepExtrema_DistShapeShape(vertex, shape)
+            scored.append((dist.Value() if dist.IsDone() else float("inf"), ref))
+        best = min(s for s, _ in scored)
+        return [ref for s, ref in scored if s <= best + 1e-9]
 
     def q_ENTITY_FILTER(self, d):
         return [r for r in self.eval(d["subquery"]) if r.kind == d["entityType"].name]
