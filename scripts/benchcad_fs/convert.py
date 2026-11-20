@@ -110,7 +110,7 @@ def traced(name, kind=None):
     setattr(cq.Workplane, name, wrapper)
 
 
-UNSUPPORTED = ["loft", "sweep", "twistExtrude", "placeSketch", "sketch", "intersect", "cskHole", "cboreHole", "text", "split", "interpPlot", "spline", "parametricCurve", "mirror"]
+UNSUPPORTED = ["twistExtrude", "placeSketch", "sketch", "intersect", "cskHole", "cboreHole", "text", "split", "interpPlot", "spline", "parametricCurve", "mirror"]
 
 
 def refuse(name):
@@ -142,7 +142,7 @@ _orig_combine = cq.Workplane._combineWithBase
 
 def _combine(self, obj, mode=True, clean=False):
     op = TRACE.op
-    if op is not None and op["kind"] in ("box", "cylinder", "sphere", "extrude", "revolve", "cutBlind"):
+    if op is not None and op["kind"] in ("box", "cylinder", "sphere", "extrude", "revolve", "cutBlind", "loft", "sweep"):
         shapes = list(obj) if not isinstance(obj, cq.Shape) else [obj]
         solids = [s for shape in shapes for s in (shape.Solids() if hasattr(shape, "Solids") else [shape])]
         TRACE.events.append((op["chain"], op["kind"], {**op, "solids": solids, "mode": mode}))
@@ -213,6 +213,57 @@ def _cut_blind(self, until, clean=True, both=False, taper=None):
 
 
 cq.Workplane.cutBlind = _cut_blind
+
+_orig_loft = cq.Workplane.loft
+
+
+def _loft(self, ruled=False, combine=True, clean=True):
+    if self.ctx.pendingWires:
+        wires = list(self.ctx.pendingWires)
+    else:
+        wires = [el.outerWire() for el in self._getFacesVertices() if isinstance(el, cq.Face)]
+    if len(wires) < 2:
+        raise Unsupported("loft of points")
+    TRACE.op = {"kind": "loft", "chain": chain_root(self), "plane": self.plane, "wires": wires, "ruled": ruled, "args": (), "kwargs": {}, "self": self}
+    TRACE.depth += 1
+    try:
+        return _orig_loft(self, ruled=ruled, combine=combine, clean=clean)
+    finally:
+        TRACE.depth -= 1
+        TRACE.op = None
+
+
+cq.Workplane.loft = _loft
+
+_orig_sweep = cq.Workplane.sweep
+
+
+def _sweep(self, path, multisection=False, sweepAlongWires=None, makeSolid=True, isFrenet=False, combine=True, clean=True, transition="right", normal=None, auxSpine=None):
+    if multisection or normal is not None or auxSpine is not None or transition != "right" or not makeSolid:
+        raise Unsupported("sweep option")
+    wire = path.val() if isinstance(path, cq.Workplane) else path
+    TRACE.op = {"kind": "sweep", "chain": chain_root(self), "plane": self.plane, "path": wire, "frenet": isFrenet, "args": (), "kwargs": {}, "self": self}
+    TRACE.depth += 1
+    try:
+        return _orig_sweep(self, path, multisection=multisection, sweepAlongWires=sweepAlongWires, makeSolid=makeSolid, isFrenet=isFrenet, combine=combine, clean=clean, transition=transition, normal=normal, auxSpine=auxSpine)
+    finally:
+        TRACE.depth -= 1
+        TRACE.op = None
+
+
+cq.Workplane.sweep = _sweep
+
+# sweep() joins a path chain into one wire (path.wire()) before _sweep: take the path here.
+_orig_sweep_inner = cq.Workplane._sweep
+
+
+def _sweep_inner(self, path, *args, **kwargs):
+    if TRACE.op is not None and TRACE.op.get("kind") == "sweep":
+        TRACE.op["path"] = path.val() if isinstance(path, cq.Workplane) else path
+    return _orig_sweep_inner(self, path, *args, **kwargs)
+
+
+cq.Workplane._sweep = _sweep_inner
 
 
 def _cut_each(self, fcn, useLocalCoords=False, clean=True):
@@ -304,32 +355,78 @@ class Emitter:
         name = f"s{self.count}"
         self.emit(f'        var {name} = newSketchOnPlane(context, {sid}, {{ "sketchPlane" : plane({fs_point(origin)}, {fs_dir(normal)}, {fs_dir(x_dir)}) }});')
         local = lambda p: (dot(sub(vec(p), origin), x_dir), dot(sub(vec(p), origin), y_dir))
-        k = 0
+        edges = []
         for face in faces:
             if abs(dot(norm(vec(face.normalAt())), normal)) < 0.999:
                 raise Unsupported("profile faces not parallel")
             for wire in [face.outerWire(), *face.innerWires()]:
-                for edge in wire.Edges():
-                    k += 1
-                    kind = edge.geomType()
-                    if kind == "LINE":
-                        a, b = local(edge.startPoint()), local(edge.endPoint())
-                        self.emit(f'        skLineSegment({name}, "e{k}", {{ "start" : vector({num(a[0])}, {num(a[1])}) * u, "end" : vector({num(b[0])}, {num(b[1])}) * u }});')
-                    elif kind == "CIRCLE":
-                        if edge.IsClosed():
-                            c = local(edge.arcCenter())
-                            self.emit(f'        skCircle({name}, "e{k}", {{ "center" : vector({num(c[0])}, {num(c[1])}) * u, "radius" : {num(edge.radius())} * u }});')
-                        else:
-                            a, m, b = local(edge.startPoint()), local(edge.positionAt(0.5)), local(edge.endPoint())
-                            self.emit(f'        skArc({name}, "e{k}", {{ "start" : vector({num(a[0])}, {num(a[1])}) * u, "mid" : vector({num(m[0])}, {num(m[1])}) * u, "end" : vector({num(b[0])}, {num(b[1])}) * u }});')
-                    else:
-                        pts = [local(edge.positionAt(t / 12)) for t in range(13)]
-                        if edge.IsClosed():
-                            pts = pts[:-1] + [pts[0]]
-                        joined = ", ".join(f"vector({num(p[0])}, {num(p[1])}) * u" for p in pts)
-                        self.emit(f'        skFitSpline({name}, "e{k}", {{ "points" : [{joined}] }});')
+                edges.extend(wire.Edges())
+        self.write_edges(name, edges, local)
         self.emit(f"        skSolve({name});")
         return sid, origin, normal, x_dir
+
+    def write_edges(self, name, edges, local):
+        for k, edge in enumerate(edges, start=1):
+            kind = edge.geomType()
+            if kind == "LINE":
+                a, b = local(edge.startPoint()), local(edge.endPoint())
+                self.emit(f'        skLineSegment({name}, "e{k}", {{ "start" : vector({num(a[0])}, {num(a[1])}) * u, "end" : vector({num(b[0])}, {num(b[1])}) * u }});')
+            elif kind == "CIRCLE":
+                if edge.IsClosed():
+                    c = local(edge.arcCenter())
+                    self.emit(f'        skCircle({name}, "e{k}", {{ "center" : vector({num(c[0])}, {num(c[1])}) * u, "radius" : {num(edge.radius())} * u }});')
+                else:
+                    a, m, b = local(edge.startPoint()), local(edge.positionAt(0.5)), local(edge.endPoint())
+                    self.emit(f'        skArc({name}, "e{k}", {{ "start" : vector({num(a[0])}, {num(a[1])}) * u, "mid" : vector({num(m[0])}, {num(m[1])}) * u, "end" : vector({num(b[0])}, {num(b[1])}) * u }});')
+            else:
+                pts = [local(edge.positionAt(t / 12)) for t in range(13)]
+                if edge.IsClosed():
+                    pts = pts[:-1] + [pts[0]]
+                joined = ", ".join(f"vector({num(p[0])}, {num(p[1])}) * u" for p in pts)
+                self.emit(f'        skFitSpline({name}, "e{k}", {{ "points" : [{joined}] }});')
+
+    def sketch_path(self, wire):
+        """A planar wire (open or closed) as sketch curves, for a sweep path; returns the sketch id."""
+        edges = wire.Edges() if hasattr(wire, "Edges") else [wire]
+        pts = [vec(e.positionAt(t / 8)) for e in edges for t in range(9)]
+        origin = pts[0]
+        normal = None
+        for a in pts:
+            for b in pts:
+                n = cross(sub(a, origin), sub(b, origin))
+                if dot(n, n) > 1e-6:
+                    normal = norm(n)
+                    break
+            if normal:
+                break
+        if normal is None:  # a straight path: any plane that holds it
+            normal = perpendicular(norm(sub(pts[-1], origin)))
+        if any(abs(dot(sub(q, origin), normal)) > 1e-4 for q in pts):
+            raise Unsupported("3D sweep path")
+        x_dir = perpendicular(normal)
+        y_dir = cross(normal, x_dir)
+        sid = self.new_id(self.current)
+        name = f"s{self.count}"
+        self.emit(f'        var {name} = newSketchOnPlane(context, {sid}, {{ "sketchPlane" : plane({fs_point(origin)}, {fs_dir(normal)}, {fs_dir(x_dir)}) }});')
+        self.write_edges(name, edges, lambda q: (dot(sub(vec(q), origin), x_dir), dot(sub(vec(q), origin), y_dir)))
+        self.emit(f"        skSolve({name});")
+        return sid
+
+    def cone(self, solid):
+        faces = solid.Faces()
+        planes = [f for f in faces if f.geomType() == "PLANE"]
+        if len(faces) != 3 or len(planes) != 2 or not any(f.geomType() == "CONE" for f in faces):
+            raise Unsupported("tapered profile that is not a circle")
+        ends = []
+        for f in planes:
+            circle = [e for e in f.Edges() if e.geomType() == "CIRCLE"]
+            if len(circle) != 1:
+                raise Unsupported("tapered profile that is not a circle")
+            ends.append((vec(f.Center()), circle[0].radius()))
+        (c0, r0), (c1, r1) = ends
+        cid = self.new_id(self.current)
+        self.emit(f'        fCone(context, {cid}, {{ "bottomCenter" : {fs_point(c0)}, "topCenter" : {fs_point(c1)}, "bottomRadius" : {num(r0)} * u, "topRadius" : {num(r1)} * u }});')
+        return cid
 
     def union_into(self, chain, made_id):
         if self.has_solid.get(chain):
@@ -448,11 +545,24 @@ def convert(code):
 
     for chain, kind, data in events:
         em.current = chain
-        if kind in ("box", "cylinder", "sphere", "extrude", "revolve", "cutBlind"):
-            if data.get("kwargs", {}).get("taper") or (kind == "extrude" and len(data.get("args", ())) > 4):
-                raise Unsupported("taper")
+        if kind in ("box", "cylinder", "sphere", "extrude", "revolve", "cutBlind", "loft", "sweep"):
+            tapered = data.get("kwargs", {}).get("taper") or (kind == "extrude" and len(data.get("args", ())) > 4)
             made = []
-            if kind in ("box", "cylinder", "sphere"):
+            if tapered:
+                made = [em.cone(solid) for solid in data["solids"]]
+            elif kind == "loft":
+                sids = [em.sketch_faces([cq.Face.makeFromWires(wire)], None)[0] for wire in data["wires"]]
+                lid = em.new_id(chain)
+                profiles = ", ".join(f"qSketchRegion({s})" for s in sids)
+                em.emit(f'        opLoft(context, {lid}, {{ "profileSubqueries" : [{profiles}], "bodyType" : ToolBodyType.SOLID }});')
+                made.append(lid)
+            elif kind == "sweep":
+                path_sid = em.sketch_path(data["path"])
+                prof_sid = em.sketch_faces(data["faces"], data["plane"])[0]
+                swid = em.new_id(chain)
+                em.emit(f'        opSweep(context, {swid}, {{ "profiles" : qSketchRegion({prof_sid}, true), "path" : qCreatedBy({path_sid}, EntityType.EDGE) }});')
+                made.append(swid)
+            elif kind in ("box", "cylinder", "sphere"):
                 for solid in data["solids"]:
                     made.append(getattr(em, kind)(solid))
             elif kind == "revolve":

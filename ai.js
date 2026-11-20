@@ -925,7 +925,8 @@ function altReasoningEffort(provider, options) {
   const configured = options.fullCode ? process.env.ALT_LLM_CODE_REASONING_EFFORT || process.env.ALT_LLM_REASONING_EFFORT : process.env.ALT_LLM_REASONING_EFFORT;
   if (configured) return configured === "off" ? null : configured;
   if (!ALT_THINKING_MODEL.test(provider.model)) return null;
-  return options.fullCode ? "medium" : "low";
+  // "low" (1024 thinking tokens) for code too: "medium" made each attempt take a minute or more.
+  return "low";
 }
 
 /** Gemini/other provider health for /health (no keys; long numbers such as project ids masked). */
@@ -7503,6 +7504,9 @@ async function buildDesignBrief(prompt, requestId, references = "") {
   }
 }
 
+const GTF_SOFT_BUDGET_MS = Number(process.env.GTF_SOFT_BUDGET_MS || 150000); // no new attempt once a building part exists
+const GTF_HARD_BUDGET_MS = Number(process.env.GTF_HARD_BUDGET_MS || 210000); // no new attempt at all
+
 async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, requestId) {
   // A bigger, faster provider (ALT_LLM_*) can afford more fix-and-retry rounds than Groq's free tier.
   const MAX_ITERATIONS = ALT_PROVIDERS.length ? 6 : Math.max(2, Math.min(4, CAD_CANDIDATE_COUNT));
@@ -7523,7 +7527,15 @@ async function runGenerateTestFixLoop(prompt, dims, learningContext, retrieval, 
   let bestCandidate = null;
   let priorIssues = null; // errors from the previous iteration, injected into next prompt
 
+  // People wait for this: once something builds, stop starting new attempts after the time
+  // budget (a request with slow AI answers ran past five minutes).
+  const loopStarted = Date.now();
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
+    const elapsed = Date.now() - loopStarted;
+    if (iteration > 0 && (elapsed > GTF_HARD_BUDGET_MS || (bestCandidate?.ok && elapsed > GTF_SOFT_BUDGET_MS))) {
+      console.log(`[AI] GTF loop: stopping after ${Math.round(elapsed / 1000)} s (time budget), ${iteration} attempt(s) made`);
+      break;
+    }
     const candidateId = `i${iteration + 1}`;
     const keySlot = slots[iteration % slots.length];
     const preferSimple = iteration >= MAX_ITERATIONS - 1; // last pass: simplify to ensure cleanliness
