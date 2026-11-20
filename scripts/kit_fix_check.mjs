@@ -1,6 +1,6 @@
 // Regression test for the part-kit repairs in partKit.js and the translation() rewrite:
 //   node scripts/kit_fix_check.mjs
-import { appendAutoMerge, autoFixKitTargets, guardFinishingOps } from "../partKit.js";
+import { appendAutoMerge, appendKeepLargest, autoFixKitTargets, guardFinishingOps } from "../partKit.js";
 import { autoFixRuntimeTypes } from "../featureScriptGeometry.js";
 
 let failures = 0;
@@ -187,6 +187,12 @@ const merged = appendAutoMerge(feature);
 check("merge inserted inside the feature body", merged.indexOf("autoMerge") > merged.indexOf("kitBox") && merged.indexOf("autoMerge") < merged.indexOf("    });"), true);
 check("helper after the feature untouched", merged.endsWith(lines("function helper(x)", "{", "    return x;", "}")), true);
 check("merge added once", appendAutoMerge(merged), merged);
+
+// 9) dropping loose fragments keeps the largest solid, inserted once inside the feature body
+const dropped = appendKeepLargest(feature);
+check("fragment removal inside the feature body", dropped.indexOf("dropLoose") > dropped.indexOf("kitBox") && dropped.indexOf("dropLoose") < dropped.indexOf("    });"), true);
+check("fragment removal keeps the largest", dropped.includes("qLargest(qBodyType(qCreatedBy(id, EntityType.BODY), BodyType.SOLID))"), true);
+check("fragment removal added once", appendKeepLargest(dropped), dropped);
 
 console.log(failures === 0 ? "\nALL KIT FIX CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
