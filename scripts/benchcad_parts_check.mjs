@@ -34,6 +34,17 @@ for (const [prompt, want] of cases) {
   if (got === want) console.log(`PASS ${prompt} -> ${got || "AI"}`);
   else { failures += 1; console.log(`FAIL ${prompt}: got ${got || "AI"}, want ${want || "AI"}`); }
 }
+// Hand-checked examples named plainly
+const { plainCuratedExample } = await import("../ai.js");
+for (const [prompt, want] of [
+  ["a vase", "Revolved Vase"], ["a flower vase", "Revolved Vase"], ["a coffee mug", "Cup With Handle"], ["a water bottle", "Bottle With Neck"],
+  ["a pen", "Pen With Tip And Clip"], ["a torus", "Torus"], ["a wheel with spokes", "Wheel With Spokes"], ["a d-shaft", "D-Shaft"],
+  ["a robot", null], ["a cube", null], ["a box", null], ["a vase with a handle", null], ["a tall vase 20 cm high", null],
+]) {
+  const got = plainCuratedExample(prompt)?.title || null;
+  if (got === want) console.log(`PASS ${prompt} -> ${got || "AI"}`);
+  else { failures += 1; console.log(`FAIL ${prompt}: got ${got || "AI"}, want ${want || "AI"}`); }
+}
 const nut = benchcadPart("a hex nut");
 if (!nut || !/defineFeature/.test(nut.code) || !/definition\.scale/.test(nut.code)) { failures += 1; console.log("FAIL standard part code is not a scalable feature"); }
 console.log(failures === 0 ? `\nALL STANDARD PART CHECKS PASSED (${info.parts} parts, ${info.families} families)` : `\n${failures} CHECK(S) FAILED`);

@@ -332,6 +332,38 @@ function loadFsExampleLibrary() {
   return cachedFsExampleLibrary;
 }
 
+// A prompt that simply names a hand-checked example ("a vase", "a coffee mug", "a pen", "a
+// picture frame") gets that example, like the standard parts: verified, parametric, instant.
+// Use words that do not change the shape are allowed; sizes, counts or features go to the AI.
+// Bare primitives are left out ("a cube" must not become the block with a through hole).
+const EXAMPLE_FILLER = new Set(("a an the one some me my please make create design model draw generate build give need want i can you "
+  + "could would like part cad onshape featurescript simple basic standard small large big little typical normal plain regular metal steel "
+  + "aluminum plastic wooden wood glass ceramic 3d printed printable flower coffee tea water beer wine kitchen desk office with and").split(" "));
+const EXAMPLE_PRIMITIVES = new Set("box cube block cuboid cylinder plate disc disk tube pipe rod bar ring".split(" "));
+
+export function plainCuratedExample(prompt) {
+  const text = String(prompt || "").toLowerCase();
+  if (/\d/.test(text)) return null;
+  const asked = text.replace(/[^a-z\s-]/g, " ").split(/\s+/).filter(Boolean).filter(w => !EXAMPLE_FILLER.has(w));
+  if (!asked.length || asked.length > 3) return null;
+  const singular = w => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+  const last = asked[asked.length - 1];
+  if (EXAMPLE_PRIMITIVES.has(last) || EXAMPLE_PRIMITIVES.has(singular(last))) return null;
+  let best = null;
+  for (const example of loadFsExampleLibrary()) {
+    const titleWords = example.title.toLowerCase().split(/[\s-]+/);
+    const keywords = example.keywords.map(k => k.toLowerCase());
+    const vocab = new Set([...titleWords, ...keywords, ...keywords.flatMap(k => k.split(/[\s-]+/))]);
+    // The object asked for must be what the example IS: in its title or its first keywords.
+    const head = [last, singular(last)].find(w => titleWords.includes(w) || keywords.slice(0, 3).includes(w));
+    if (!head) continue;
+    if (!asked.every(w => vocab.has(singular(w)) || vocab.has(w))) continue;
+    const score = (titleWords.includes(head) ? 10 : 0) - Math.max(0, keywords.indexOf(head));
+    if (!best || score > best.score) best = { example, score };
+  }
+  return best ? best.example : null;
+}
+
 // Pick the compile-verified example(s) whose keywords best match the prompt.
 // These are injected as few-shot grounding so the model sees real, validated
 // FeatureScript for the requested kind of geometry, not just prose rules.
@@ -7806,6 +7838,26 @@ export async function generateFeatureScript(prompt, options = {}) {
       warnings: [`Exact standard part: ${standardPart.label}${standardPart.standard ? ` (${standardPart.standard})` : ""} from the BenchCAD set, checked against its original. Sizes are millimeters; change "Scale (%)" in the feature dialog, or describe the sizes you need and ask again for a custom one.`],
       omissions: [],
       orchestration: { status: "completed", completionLevel: "full", failedPass: null, passes: { fallback: { used: `benchcad:${standardPart.family}` } }, warnings: [], omissions: [] },
+    };
+  }
+
+  // Same for the hand-checked examples ("a vase", "a coffee mug", "a pen", "a picture frame").
+  const plainExample = plainCuratedExample(prompt);
+  if (plainExample) {
+    console.log(`[AI] Hand-checked example: ${plainExample.title}`);
+    reportProgress(`Found the hand-checked ${plainExample.title}`);
+    const featureName = plainExample.content.match(/export const (\w+)/)?.[1] || plainExample.id.replace(/[^a-zA-Z0-9_]/g, "");
+    return {
+      code: plainExample.content,
+      featureName,
+      featureLabel: plainExample.title,
+      thinking: `"${prompt}" names a ${plainExample.title.toLowerCase()}, so the hand-checked ${plainExample.title} feature was returned. ${plainExample.lesson || ""} Describe sizes or features to have the AI build a custom one instead.`.trim(),
+      dims: { shape: "CURATED_EXAMPLE", featureName, featureLabel: plainExample.title, confidence: "HIGH" },
+      generationMode: "curated_example",
+      completionLevel: "full",
+      warnings: [`Hand-checked ${plainExample.title}: every size is editable in the feature dialog. Describe the sizes or features you need and ask again for a custom design.`],
+      omissions: [],
+      orchestration: { status: "completed", completionLevel: "full", failedPass: null, passes: { fallback: { used: `curated_example:${plainExample.id}` } }, warnings: [], omissions: [] },
     };
   }
 
